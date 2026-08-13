@@ -38,36 +38,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          submodules: recursive
 
-      - name: Repair submodules & paperweight cache (prevent corrupted upstreams)
+      - name: Clean paperweight cache
         run: |
           set -eux
-
-          git submodule deinit -f --all || true
-
-          rm -rf .git/modules || true
-
-          git submodule init
-          git submodule sync --recursive
-
-          git submodule update --init --recursive --force
-
-          git submodule foreach --recursive '
-            echo "=== Submodule: $name ==="
-            if git rev-parse --is-shallow-repository >/dev/null 2>&1 && [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
-              git fetch --unshallow --tags || git fetch --all --tags || true
-            else
-              git fetch --all --tags || true
-            fi
-            git reset --hard || true
-            git clean -fdx || true
-          '
-
-          rm -rf .gradle/caches/paperweight || true
-          rm -rf .gradle/caches/paperweight/upstreams || true
-
-          git status --porcelain --untracked-files=all || true
+          rm -rf .gradle/caches/paperweight/upstreams/folia || true
           ls -la .gradle/caches || true
 
       - name: Set up JDK
@@ -102,7 +77,7 @@ jobs:
         run: |
           rm -rf mili-server/build mili-api/build
           rm -rf mili-server/src/minecraft
-          rm -rf .gradle/caches/paperweight
+          rm -rf folia-server paper-server
           rm -rf .gradle/configuration-cache
 
       - name: Setup Gradle
