@@ -16,7 +16,7 @@ index 13b03dab8..6776af992 100644
      PaperServerListPingEventImpl(MinecraftServer server, StatusClient client, int protocolVersion, @Nullable CachedServerIcon icon) {
          super(client, server.motd(), server.getPlayerCount(), server.getMaxPlayers(),
 -                server.getServerModName() + ' ' + server.getServerVersion(), protocolVersion, icon);
-+                me.earthme.luminol.config.modules.misc.ServerModNameConfig.fakeVanilla ? server.getServerVersion() : server.getServerModName() + ' ' + server.getServerVersion(), protocolVersion, icon);//Luminol - Fake vanilla mode
++                fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.fakeVanilla ? server.getServerVersion() : server.getServerModName() + ' ' + server.getServerVersion(), protocolVersion, icon);//Luminol - Fake vanilla mode
          this.server = server;
      }
  

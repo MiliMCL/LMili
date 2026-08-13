@@ -12,7 +12,7 @@ index 978c53a41766362d3de07963c8d98409d1c78bb8..93bc8fe11f920b48479510a639f21b9b
          try {
              tick.accept(entity);
          } catch (Throwable t) {
-+            if (me.earthme.luminol.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Luminol
++            if (fun.bm.mili.lmili.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Luminol
              // Paper start - Prevent block entity and entity crashes
              final String msg = String.format("Entity threw exception at %s:%s,%s,%s", io.papermc.paper.util.MCUtil.getLevelName(entity.level()), entity.getX(), entity.getY(), entity.getZ());
              MinecraftServer.LOGGER.error(msg, t);

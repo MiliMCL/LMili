@@ -42,9 +42,9 @@ index 8d2518600ad518999b75124f0a87db9efe541f2e..09e1d701038042052fcbde4b4686da5d
 +    // Leaves start - Configurable collision behavior
 +    private static boolean shouldSkip(AABB aabb, VoxelShape blockCollision, AABB singleAABB) {
 +        boolean isBlockShape = blockCollision == Shapes.block();
-+        return switch (me.earthme.luminol.config.modules.fixes.CollisionBehaviorConfig.behaviorMode) {
-+            case me.earthme.luminol.enums.EnumCollisionBehaviorMode.VANILLA -> !voxelShapeIntersectVanilla(aabb, singleAABB);
-+            case me.earthme.luminol.enums.EnumCollisionBehaviorMode.PAPER -> !voxelShapeIntersect(aabb, singleAABB);
++        return switch (fun.bm.mili.lmili.config.modules.fixes.CollisionBehaviorConfig.behaviorMode) {
++            case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.VANILLA -> !voxelShapeIntersectVanilla(aabb, singleAABB);
++            case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.PAPER -> !voxelShapeIntersect(aabb, singleAABB);
 +            default -> isBlockShape && !voxelShapeIntersectVanilla(aabb, singleAABB) || !isBlockShape && !voxelShapeIntersect(aabb, singleAABB);
 +            // All other value as BLOCK_SHAPE_VANILLA to process
 +        };

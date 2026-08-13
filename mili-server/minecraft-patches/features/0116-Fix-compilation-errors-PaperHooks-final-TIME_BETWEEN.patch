@@ -44,7 +44,7 @@ index 97c514673a454b752ab86b944fd143725ca8090d..7a433ee0cb3b925edf728d3f3eb9b954
 +        public long lastSavedTime = 0L; // Leaves - last saved time
  
          public volatile ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler; // Folia - profiler
-         public final me.earthme.luminol.api.TickRegionData tickRegionDataAPI = new me.earthme.luminol.api.impl.TickRegionDataImpl(this); // Luminol - Tickregion API
+         public final fun.bm.mili.lmili.api.TickRegionData tickRegionDataAPI = new fun.bm.mili.lmili.api.impl.TickRegionDataImpl(this); // Luminol - Tickregion API
 diff --git a/net/minecraft/locale/Language.java b/net/minecraft/locale/Language.java
 index 47cd33bce908744e64356b585853d6a8ecf82443..25ffb5fa8047f7f9c65bb9d66b9bc1fff1e093cf 100644
 --- a/net/minecraft/locale/Language.java

@@ -21,7 +21,7 @@ index 53131c1b8d5562f9a1b45dfab4fdbdd37b655139..0e9c19a820aefa802d6df134b21f5128
 +                        // we don't care if we should clear the memory of JOB_SITE
 +                        // as it will be automatically removed in SetWalkTargetFromBlockMemory
 +                        // so simply break down if it's not loaded
-+                        var poiChunk = me.earthme.luminol.config.modules.fixes.POIRangeFixes.doNotCompetePOIIfUnloaded ? poiManager.get(sectionPosOfJobSite) : poiManager.getOrLoad(sectionPosOfJobSite);
++                        var poiChunk = fun.bm.mili.lmili.config.modules.fixes.POIRangeFixes.doNotCompetePOIIfUnloaded ? poiManager.get(sectionPosOfJobSite) : poiManager.getOrLoad(sectionPosOfJobSite);
 +                        poiChunk.flatMap(poiSection -> poiSection.getType(blockPosOfJobSite))
 +                        // Luminol end - POI fixes
 +                        /*level.getPoiManager() // Luminol - POI fixes

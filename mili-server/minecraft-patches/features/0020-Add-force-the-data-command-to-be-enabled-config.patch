@@ -13,7 +13,7 @@ index 4ddb5e7ce3529466c3930caa9aa6b18158e9a63d..9b1dcfadd6d5ae868b087a18983d03e8
          //CloneCommands.register(this.dispatcher, context); // Folia - region threading - TODO
          DamageCommand.register(this.dispatcher, context);
 -        //DataCommands.register(this.dispatcher); // Folia - region threading - TODO
-+        if(me.earthme.luminol.config.modules.experiment.CommandConfig.data) { // Luminol - Config for data command
++        if(fun.bm.mili.lmili.config.modules.experiment.CommandConfig.data) { // Luminol - Config for data command
 +        DataCommands.register(this.dispatcher); // Folia - region threading - TODO // Luminol - Config for data command
 +        } // Luminol - Config for data command
          //DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO

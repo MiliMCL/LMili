@@ -18,7 +18,7 @@ index 89d545a6d..f53737860 100644
 +
 +    // Luminol start - Tick regions api
 +    @Override
-+    public me.earthme.luminol.api.ThreadedRegionizer getThreadedRegionizer() {
++    public fun.bm.mili.lmili.api.ThreadedRegionizer getThreadedRegionizer() {
 +        return this.world.regioniser.threadedRegionizerAPI;
 +    }
 +    // Luminol end

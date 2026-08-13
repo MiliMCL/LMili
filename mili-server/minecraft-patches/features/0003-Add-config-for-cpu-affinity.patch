@@ -15,7 +15,7 @@ index 5a72fa0d72bfdb927293abe921c57f6ae964a6ec..dc8f23697c28573c20f6cc292f7c9d15
 -                final Thread ret = new TickThreadRunner(this.threadGroup, run, "Folia Region Scheduler Thread #" + this.idGenerator.getAndIncrement());
 +                // Luminol start - cpu affinity
 +                final Runnable actualRun;
-+                if (me.earthme.luminol.config.modules.optimizations.CpuAffinityConfig.cpuAffinityEnabled) {
++                if (fun.bm.mili.lmili.config.modules.optimizations.CpuAffinityConfig.cpuAffinityEnabled) {
 +                    actualRun = new Runnable() {
 +                        private boolean affinitySet = false;
 +
@@ -23,7 +23,7 @@ index 5a72fa0d72bfdb927293abe921c57f6ae964a6ec..dc8f23697c28573c20f6cc292f7c9d15
 +                        public void run() {
 +                            if (!this.affinitySet) {
 +                                this.affinitySet = true;
-+                                net.openhft.affinity.Affinity.setAffinity(me.earthme.luminol.config.modules.optimizations.CpuAffinityConfig.tickRegionAffinityBitSet);
++                                net.openhft.affinity.Affinity.setAffinity(fun.bm.mili.lmili.config.modules.optimizations.CpuAffinityConfig.tickRegionAffinityBitSet);
 +                            }
 +                            run.run();
 +                        }

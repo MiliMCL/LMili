@@ -16,7 +16,7 @@ index c2c744859..d7ce463a9 100644
  
      private void updateWaypoint() {
 -        ServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager();
-+        me.earthme.luminol.utils.FoliaServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager(); // Luminol - Restore waypoints
++        fun.bm.mili.lmili.utils.FoliaServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager(); // Luminol - Restore waypoints
          manager.untrackWaypoint(getHandle());
          manager.trackWaypoint(getHandle());
      }

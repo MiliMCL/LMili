@@ -80,7 +80,7 @@ index 8427f8634afd6d3bf773b2a037a87e9b70c65629..81934fb56744dbbb3fdd100e8ec83cb6
 @@ -239,7 +239,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
          this.paperConfigurations.initializeWorldDefaultsConfiguration(this.registryAccess());
          // Paper end - initialize global and world-defaults configuration
-         me.earthme.luminol.config.ConfigManager.loadConfigFiles(); // Luminol - load config file
+         fun.bm.mili.lmili.config.ConfigManager.loadConfigFiles(); // Luminol - load config file
 -        this.server.spark.enableEarlyIfRequested(); // Paper - spark
 +        if (false) this.server.spark.enableEarlyIfRequested(); // Paper - spark // Luminol - Force disable builtin spark
          // Paper start - fix converting txt to json file; convert old users earlier after PlayerList creation but before file load/save

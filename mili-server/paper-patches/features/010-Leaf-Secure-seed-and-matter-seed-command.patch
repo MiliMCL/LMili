@@ -20,7 +20,7 @@ index 10b351d8b..fb89f6ef3 100644
          // 987234911L is taken from Slime when seeing if a slime can spawn in a chunk
 -        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || WorldgenRandom.seedSlimeChunk(this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
 +        // Leaf start - Matter - Secure Seed
-+        boolean isSlimeChunk = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++        boolean isSlimeChunk = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
 +            ? level.getChunk(this.getX(), this.getZ()).isSlimeChunk()
 +            : WorldgenRandom.seedSlimeChunk(this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
 +        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || isSlimeChunk;
@@ -38,7 +38,7 @@ index a32cd805b..7e522b269 100644
          if (worldGenSettings == null) {
 -            WorldOptions worldOptions = new WorldOptions(creator.seed(), creator.generateStructures(), creator.bonusChest());
 +            // Leaf start - Matter - Secure Seed
-+            WorldOptions worldOptions = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++            WorldOptions worldOptions = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
 +                ? new WorldOptions(creator.seed(), su.plo.matter.Globals.createRandomWorldSeed(), creator.generateStructures(), false)
 +                : new WorldOptions(creator.seed(), creator.generateStructures(), creator.bonusChest());
 +            // Leaf end - Matter - Secure Seed

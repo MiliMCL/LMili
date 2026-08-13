@@ -17,8 +17,8 @@ index 0869ecb4b7fe07efa33d521bef2f525955bd3c30..3fa0ca479922a7c55625c5e7bcd25065
 +    private int notLobotomizedCount = 0; // Purpur
 +
 +    private boolean checkLobotomized() {
-+        int interval = me.earthme.luminol.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeCheckInterval;
-+        boolean shouldCheckForTradeLocked = me.earthme.luminol.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeWaitUntilTradeLocked;
++        int interval = fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeCheckInterval;
++        boolean shouldCheckForTradeLocked = fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeWaitUntilTradeLocked;
 +        if (this.notLobotomizedCount > 3) {
 +            // check half as often if not lobotomized for the last 3+ consecutive checks
 +            interval *= 2;
@@ -72,7 +72,7 @@ index 0869ecb4b7fe07efa33d521bef2f525955bd3c30..3fa0ca479922a7c55625c5e7bcd25065
          ProfilerFiller profiler = Profiler.get();
          profiler.push("villagerBrain");
 +        // Purpur start
-+        if (me.earthme.luminol.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeEnabled) {
++        if (fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeEnabled) {
 +            // treat as inactive if lobotomized
 +            inactive = inactive || checkLobotomized();
 +        } else {

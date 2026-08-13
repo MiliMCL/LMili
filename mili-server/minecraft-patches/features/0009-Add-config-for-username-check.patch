@@ -13,7 +13,7 @@ index f2329d1a9d9d4bf4c9d771e25e54f2f9ef65a76c..780f52973976bc97bddccfeefd54e187
          Validate.validState(this.state == ServerLoginPacketListenerImpl.State.HELLO, "Unexpected hello packet");
          // Paper start - Validate usernames
 -        if (io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
-+        if (me.earthme.luminol.config.modules.misc.UsernameCheckConfig.enabled // Luminol - Add config for username check
++        if (fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled // Luminol - Add config for username check
 +            && io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
              && io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.performUsernameValidation
              && !this.iKnowThisMayNotBeTheBestIdeaButPleaseDisableUsernameValidation) {
@@ -42,7 +42,7 @@ index 7957e0cfc43909c5268698a11c4933d20b4d9155..7ba42c6a020b996419988256b8638f6d
 -    public static boolean isValidPlayerName(final String name) {
 +    // Luminol start - Add config for username checks
 +    public static boolean isValidPlayerName(final String username){
-+        return isValidPlayerName(username, !me.earthme.luminol.config.modules.misc.UsernameCheckConfig.enabled);
++        return isValidPlayerName(username, !fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled);
 +    }
 +    // Luminol end
 +

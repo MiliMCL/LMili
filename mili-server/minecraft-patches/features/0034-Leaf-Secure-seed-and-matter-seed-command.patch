@@ -13,7 +13,7 @@ index 86ee3b3ae028597576b9549bc4954dfcbaa6732c..2042dc0c7046dec25ff46ddd1e5bd45c
                  Component seedText = ComponentUtils.copyOnClickText(String.valueOf(seed));
                  c.getSource().sendSuccess(() -> Component.translatable("commands.seed.success", seedText), false);
 +                // Leaf start - Matter - SecureSeed Command
-+                if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++                if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
 +                    su.plo.matter.Globals.setupGlobals(c.getSource().getLevel());
 +                    String seedStr = su.plo.matter.Globals.seedToString(su.plo.matter.Globals.worldSeed);
 +                    Component featureSeedComponent = ComponentUtils.copyOnClickText(seedStr);
@@ -34,7 +34,7 @@ index 639a5400499266f83cf8b7c1251483cd8fb699a4..8c0bee7856c8ac62880038770c2f430e
          long seed = WorldOptions.parseSeed(levelSeed).orElse(WorldOptions.randomSeed());
 -        this.worldOptions = new WorldOptions(seed, generateStructures, false);
 +        // Leaf start - Matter - Secure Seed
-+        if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
 +            String featureSeedStr = this.get("feature-level-seed", "");
 +            long[] featureSeed = su.plo.matter.Globals.parseSeed(featureSeedStr)
 +                    .orElse(su.plo.matter.Globals.createRandomWorldSeed());
@@ -81,7 +81,7 @@ index 984ec15bdebcb541cd6ee9014a654ea58988f6f1..da3bbf395ef5c173124fc564d0d7d9c9
              ChunkPos chunkPos = ChunkPos.containing(pos);
 -            boolean slimeChunk = level.getMinecraftWorld().paperConfig().entities.spawning.allChunksAreSlimeChunks || WorldgenRandom.seedSlimeChunk(chunkPos.x(), chunkPos.z(), worldGenLevel.getSeed(), level.getMinecraftWorld().spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
 +            // Leaf start - Matter - Secure Seed
-+            boolean isSlimeChunk = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++            boolean isSlimeChunk = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
 +                    ? level.getChunk(chunkPos.x(), chunkPos.z()).isSlimeChunk()
 +                    : WorldgenRandom.seedSlimeChunk(chunkPos.x(), chunkPos.z(), worldGenLevel.getSeed(), level.getMinecraftWorld().spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
 +            boolean slimeChunk = level.getMinecraftWorld().paperConfig().entities.spawning.allChunksAreSlimeChunks || isSlimeChunk;
@@ -132,7 +132,7 @@ index b7325170369299a74be35ecc66a6446c301605b8..bac2047025bf133d14438b5f667bb124
              List<FeatureSorter.StepFeatureData> featureList = this.featuresPerStep.get();
 -            WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
 +            // Leaf start - Matter - Secure Seed
-+            WorldgenRandom random = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++            WorldgenRandom random = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
 +                    ? new su.plo.matter.WorldgenCryptoRandom(origin.getX(), origin.getZ(), su.plo.matter.Globals.Salt.UNDEFINED, 0)
 +                    : new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
 +            // Leaf end - Matter - Secure Seed
@@ -147,7 +147,7 @@ index b7325170369299a74be35ecc66a6446c301605b8..bac2047025bf133d14438b5f667bb124
 -                                random.setLargeFeatureSeed(state.getLevelSeed(), sourceChunkPos.x(), sourceChunkPos.z());
 +                                // Leaf start - Matter - Secure Seed
 +                                WorldgenRandom random;
-+                                if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++                                if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
 +                                    random = new su.plo.matter.WorldgenCryptoRandom(sourceChunkPos.x(), sourceChunkPos.z(), su.plo.matter.Globals.Salt.GENERATE_FEATURE, 0);
 +                                } else {
 +                                    random = new WorldgenRandom(new LegacyRandomSource(0L));
@@ -168,11 +168,11 @@ index 8b4ea2b16da45bcefe743990866e43c94e121825..9d91679a2696c065cd99cd6ce395c0d0
 -        RandomSource random = RandomSource.create();
 -        // Paper start - Add missing structure set seed configs
 +        // Leaf start - Matter - Secure Seed
-+        RandomSource random = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++        RandomSource random = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
 +                ? new su.plo.matter.WorldgenCryptoRandom(0, 0, su.plo.matter.Globals.Salt.STRONGHOLDS, 0)
 +                :RandomSource.create();
 +        // Leaf end - Matter - Secure Seed
-+        if (!me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++        if (!fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
 +        //Paper start - Add missing structure set seed configs
          if (this.conf.strongholdSeed != null && structureSet.is(net.minecraft.world.level.levelgen.structure.BuiltinStructureSets.STRONGHOLDS)) {
              random.setSeed(this.conf.strongholdSeed);
@@ -206,7 +206,7 @@ index 4ad94af024d81b7dfe910dcee2a6ec7a9b200d56..38495536001442b1591251d7625ccdad
  public class WorldOptions {
 +    // Leaf start - Matter - Secure Seed
 +    private static final com.google.gson.Gson gson = new com.google.gson.Gson();
-+    private static final boolean isSecureSeedEnabled = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled;
++    private static final boolean isSecureSeedEnabled = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled;
      public static final MapCodec<WorldOptions> CODEC = RecordCodecBuilder.mapCodec(
 -        i -> i.group(
 +            // Leaf start - Matter - Secure Seed
@@ -333,7 +333,7 @@ index baed0479a4552676844989868ee4c37ffa344def..55abc8e32d9dabbb5699d6eff109f406
          int numPoints = config.distributionPoints().sample(random);
 -        WorldgenRandom random1 = new WorldgenRandom(new LegacyRandomSource(level.getSeed()));
 +        // Leaf start - Matter - Secure Seed
-+        WorldgenRandom random1 = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++        WorldgenRandom random1 = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
 +                ? new su.plo.matter.WorldgenCryptoRandom(0, 0, su.plo.matter.Globals.Salt.GEODE_FEATURE, 0)
 +                : new WorldgenRandom(new LegacyRandomSource(level.getSeed()));
 +        // Leaf end - Matter - Secure Seed
@@ -349,7 +349,7 @@ index f1e13ede1f7345089ece8d8ef391f7fd5e55c445..a3a1ab1b610fd0f75c4d5cc96ab921e4
  
          private static WorldgenRandom makeRandom(final long seed, final ChunkPos chunkPos) {
 +            // Leaf start - Matter - Secure Seed
-+            if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++            if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
 +                return new su.plo.matter.WorldgenCryptoRandom(chunkPos.x(), chunkPos.z(), su.plo.matter.Globals.Salt.GENERATE_FEATURE, seed);
 +            }
 +            // Leaf end - Matter - Secure Seed
@@ -368,7 +368,7 @@ index 1310b2ca994b8f6d3d92bdc676fe44de3619cc09..8fcb08d7ffc90d2d46375faecd177744
 -        random.setLargeFeatureWithSalt(seed, spacedGridX, spacedGridZ, this.salt());
 +        // Leaf start - Matter - Secure Seed
 +        WorldgenRandom random;
-+        if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
 +            random = new su.plo.matter.WorldgenCryptoRandom(spacedGridX, spacedGridZ, su.plo.matter.Globals.Salt.POTENTIONAL_FEATURE, this.salt);
 +        } else {
 +            random = new WorldgenRandom(new LegacyRandomSource(0L));
@@ -390,7 +390,7 @@ index 646df0237a5a2863f75e6c5f9dfe9ddf512c540f..1a5690b793ad6c30690fc9659c7f1746
 -        random.setLargeFeatureWithSalt(seed, sourceX, sourceZ, saltOverride != null ? saltOverride : HIGHLY_ARBITRARY_RANDOM_SALT); // Paper - Add missing structure set seed configs
 +        // Leaf start - Matter - Secure Seed
 +        WorldgenRandom random;
-+        if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
 +            random = new su.plo.matter.WorldgenCryptoRandom(sourceX, sourceZ, su.plo.matter.Globals.Salt.UNDEFINED, saltOverride != null ? saltOverride : HIGHLY_ARBITRARY_RANDOM_SALT);
 +        } else {
 +            random = new WorldgenRandom(new LegacyRandomSource(0L));
@@ -411,7 +411,7 @@ index b92da7acae0789d955a9f71072b95ed030b879e2..484977ebf2cd7b75b228ebd7246fe602
          LevelHeightAccessor heightAccessor = context.heightAccessor();
 -        WorldgenRandom random = context.random();
 +        // Leaf start - Matter - Secure Seed
-+        WorldgenRandom random = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++        WorldgenRandom random = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
 +                ? new su.plo.matter.WorldgenCryptoRandom(context.chunkPos().x(), context.chunkPos().z(), su.plo.matter.Globals.Salt.JIGSAW_PLACEMENT, 0)
 +                : context.random();
 +        // Leaf end - Matter - Secure Seed

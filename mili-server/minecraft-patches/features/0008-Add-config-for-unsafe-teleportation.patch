@@ -13,7 +13,7 @@ index 480b6b2405706fd4d7158d0e160adafd84099887..137389f7ee97fc3a15c8f5f87c058065
      public float fallDamagePerDistance = 0.0F;
      public @Nullable CompoundTag blockData;
 -    public boolean forceTickAfterTeleportToDuplicate;
-+    public boolean forceTickAfterTeleportToDuplicate = me.earthme.luminol.config.modules.fixes.UnsafeTeleportationConfig.enabled; // Luminol - Unsafe teleportation
++    public boolean forceTickAfterTeleportToDuplicate = fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled; // Luminol - Unsafe teleportation
      protected static final EntityDataAccessor<BlockPos> DATA_START_POS = SynchedEntityData.defineId(FallingBlockEntity.class, EntityDataSerializers.BLOCK_POS);
      public boolean autoExpire = true; // Paper - Expand FallingBlock API
  
@@ -22,7 +22,7 @@ index 480b6b2405706fd4d7158d0e160adafd84099887..137389f7ee97fc3a15c8f5f87c058065
          boolean fromOrToEnd = (oldDimension == Level.END || newDimension == Level.END) && oldDimension != newDimension;
          Entity newEntity = super.teleport(transition);
 -        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation; // Paper
-+        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation || me.earthme.luminol.config.modules.fixes.UnsafeTeleportationConfig.enabled); // Paper // Luminol - Unsafe teleportation
++        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation || fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled); // Paper // Luminol - Unsafe teleportation
          return newEntity;
      }
  }
@@ -35,7 +35,7 @@ index 123df098fa987030fe3789f36ff95aeee2979834..fbcf9261880cfce3f37071ea63f572c6
                  player.showEndCredits();
              } else {
 +                // Luminol start - unsafe teleportation
-+                if (me.earthme.luminol.config.modules.fixes.UnsafeTeleportationConfig.enabled && !(entity instanceof net.minecraft.world.entity.player.Player)) {
++                if (fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled && !(entity instanceof net.minecraft.world.entity.player.Player)) {
 +                    entity.endPortalLogicAsync(pos);
 +                }
 +                // Luminol end

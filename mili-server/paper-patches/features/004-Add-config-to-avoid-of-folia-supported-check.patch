@@ -19,7 +19,7 @@ index 6369b13e1..c20c04938 100644
      public PaperPluginParent build(JarFile file, PaperPluginMeta configuration, Path source) {
          // Folia start - block plugins not marked as supported
 -        if (!configuration.isFoliaSupported()) {
-+        if (!configuration.isFoliaSupported() && !me.earthme.luminol.config.modules.unsupported.DisableCheckForFoliaSupported.disableForPaper) { // Luminol - disable check for folia supported
++        if (!configuration.isFoliaSupported() && !fun.bm.mili.lmili.config.modules.unsupported.DisableCheckForFoliaSupported.disableForPaper) { // Luminol - disable check for folia supported
              throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
          }
          // Folia end - block plugins not marked as supported
@@ -32,7 +32,7 @@ index 6ef0042a3..8f0b7b298 100644
      public SpigotPluginProvider build(JarFile file, PluginDescriptionFile configuration, Path source) throws InvalidDescriptionException {
          // Folia start - block plugins not marked as supported
 -        if (!configuration.isFoliaSupported()) {
-+        if (!configuration.isFoliaSupported() && !me.earthme.luminol.config.modules.unsupported.DisableCheckForFoliaSupported.disableForPaper) { // Luminol - disable check for folia supported
++        if (!configuration.isFoliaSupported() && !fun.bm.mili.lmili.config.modules.unsupported.DisableCheckForFoliaSupported.disableForPaper) { // Luminol - disable check for folia supported
              throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
          }
          // Folia end - block plugins not marked as supported
@@ -45,7 +45,7 @@ index 804ea060f..946fa5a71 100644
  
          // Folia start - block plugins not marked as supported
 -        if (!descriptionFile.isFoliaSupported()) {
-+        if (!descriptionFile.isFoliaSupported() && !me.earthme.luminol.config.modules.unsupported.DisableCheckForFoliaSupported.disableForPaper) { // Luminol - disable check for folia supported
++        if (!descriptionFile.isFoliaSupported() && !fun.bm.mili.lmili.config.modules.unsupported.DisableCheckForFoliaSupported.disableForPaper) { // Luminol - disable check for folia supported
              throw new InvalidPluginException("Plugin " + descriptionFile.getFullName() + " is not marked as supporting regionised multithreading");
          }
          // Folia end - block plugins not marked as supported

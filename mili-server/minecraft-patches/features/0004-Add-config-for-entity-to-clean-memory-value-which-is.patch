@@ -33,7 +33,7 @@ index e097bc1268b4050e3948413c52dea69950858458..2a3ae7bc52880ba089f1632f3b3de877
 +                final net.minecraft.world.level.Level ownerLevel = owner.level();
 +
 +                // type: entity
-+                if (me.earthme.luminol.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForEntity && value instanceof LivingEntity entity) {
++                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForEntity && value instanceof LivingEntity entity) {
 +                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
 +                        this.eraseMemory(entry.getKey());
 +                        continue;
@@ -41,7 +41,7 @@ index e097bc1268b4050e3948413c52dea69950858458..2a3ae7bc52880ba089f1632f3b3de877
 +                }
 +
 +                // type: block_pos
-+                if (me.earthme.luminol.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForBlockPos && value instanceof net.minecraft.core.BlockPos blockPos) {
++                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForBlockPos && value instanceof net.minecraft.core.BlockPos blockPos) {
 +                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(ownerLevel, blockPos)) {
 +                        this.eraseMemory(entry.getKey());
 +                        continue;

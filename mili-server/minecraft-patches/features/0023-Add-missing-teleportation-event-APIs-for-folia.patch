@@ -13,7 +13,7 @@ index 5c2930d586ed8f8e31c41e2805dcc189a1d62424..e842358b52366c1500e553c6f79a0ffd
                          respawnComplete.accept(ServerPlayer.this);
                      }
 +                    // Luminol - Add missing teleportation apis
-+                    new me.earthme.luminol.api.entity.player.PostPlayerRespawnEvent(ServerPlayer.this.getBukkitEntity()).callEvent();
++                    new fun.bm.mili.lmili.api.entity.player.PostPlayerRespawnEvent(ServerPlayer.this.getBukkitEntity()).callEvent();
 +                    // Luminol end
                  }
              );
@@ -43,7 +43,7 @@ index 8f6ad64cf1036d521e33414c322f47498cc385c2..ab10f5dcf32a86520bb2e23a9aef9be1
 +            }
 +        }
 +
-+        final me.earthme.luminol.api.entity.EntityTeleportAsyncEvent wrapped = new me.earthme.luminol.api.entity.EntityTeleportAsyncEvent(
++        final fun.bm.mili.lmili.api.entity.EntityTeleportAsyncEvent wrapped = new fun.bm.mili.lmili.api.entity.EntityTeleportAsyncEvent(
 +                this.getBukkitEntity(),
 +                cause,
 +                destinationLoc
@@ -62,7 +62,7 @@ index 8f6ad64cf1036d521e33414c322f47498cc385c2..ab10f5dcf32a86520bb2e23a9aef9be1
 +                    final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
 +                    final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
 +
-+                    final me.earthme.luminol.api.portal.PortalLocateEvent portalLocateEvent = new me.earthme.luminol.api.portal.PortalLocateEvent(
++                    final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
 +                            orginalPortalLocation,
 +                            targetPortalLocation
 +                    );
@@ -80,7 +80,7 @@ index 8f6ad64cf1036d521e33414c322f47498cc385c2..ab10f5dcf32a86520bb2e23a9aef9be1
 +                    final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
 +                    final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, spawnPos);
 +
-+                    final me.earthme.luminol.api.portal.PortalLocateEvent portalLocateEvent = new me.earthme.luminol.api.portal.PortalLocateEvent(
++                    final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
 +                            orginalPortalLocation,
 +                            targetPortalLocation
 +                    );
@@ -98,7 +98,7 @@ index 8f6ad64cf1036d521e33414c322f47498cc385c2..ab10f5dcf32a86520bb2e23a9aef9be1
 +                final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
 +                final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
  
-+                final me.earthme.luminol.api.portal.PortalLocateEvent portalLocateEvent = new me.earthme.luminol.api.portal.PortalLocateEvent(
++                final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
 +                        orginalPortalLocation,
 +                        targetPortalLocation
 +                );
@@ -113,7 +113,7 @@ index 8f6ad64cf1036d521e33414c322f47498cc385c2..ab10f5dcf32a86520bb2e23a9aef9be1
              return false;
          }
 +        // Luminol start - Add missing teleportation events
-+        if (!new me.earthme.luminol.api.entity.PreEntityPortalEvent(
++        if (!new fun.bm.mili.lmili.api.entity.PreEntityPortalEvent(
 +                this.getBukkitEntity(),
 +                io.papermc.paper.util.MCUtil.toLocation(this.level, portalPos),
 +                destination.getWorld()
@@ -136,7 +136,7 @@ index e29e379f9b2238eafe27545681bb19c710003bcc..fdf220424f7693a7ea3ae385ddd77172
 +        final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(toTeleport.level(), portalPos);
 +        final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(portalWorld, teleportPos);
 +
-+        final me.earthme.luminol.api.portal.PortalLocateEvent portalLocateEvent = new me.earthme.luminol.api.portal.PortalLocateEvent(
++        final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
 +                orginalPortalLocation,
 +                targetPortalLocation
 +        );

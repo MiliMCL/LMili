@@ -46,8 +46,8 @@ index 721e3b083846fd363a31311196bc4c681969215c..81aafd64cc80038eaafba059373db368
 +        if (previousX != newX || previousZ != newZ) {
 +            boolean isLoaded = ((net.minecraft.server.level.ServerChunkCache) this.level().getChunkSource()).getChunkAtIfLoadedImmediately(newX, newZ) != null;
 +            if (!isLoaded) {
-+                if (currRegionData.pufferfish$loadedThisTick > me.earthme.luminol.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerTick) {
-+                    if (++this.loadedLifetime > me.earthme.luminol.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile) {
++                if (currRegionData.pufferfish$loadedThisTick > fun.bm.mili.lmili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerTick) {
++                    if (++this.loadedLifetime > fun.bm.mili.lmili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile) {
 +                        this.discard();
 +                    }
 +                    return;

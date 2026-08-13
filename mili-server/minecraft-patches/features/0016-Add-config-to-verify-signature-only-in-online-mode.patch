@@ -13,7 +13,7 @@ index 5e29a9de070e9922513e972254fc7ec43e8774f2..2de1886f9d9f06f8b92755e8421c1766
  
      public static ProfilePublicKey createValidated(final SignatureValidator validator, final UUID profileId, final ProfilePublicKey.Data data) throws ProfilePublicKey.ValidationException {
 -        if (!data.validateSignature(validator, profileId)) {
-+        if (!data.validateSignature(validator, profileId) && (org.bukkit.Bukkit.getServer().getOnlineMode() && me.earthme.luminol.config.modules.misc.PublickeyVerifyConfig.enabled)) { // Luminol - Verify signature only in online-mode
++        if (!data.validateSignature(validator, profileId) && (org.bukkit.Bukkit.getServer().getOnlineMode() && fun.bm.mili.lmili.config.modules.misc.PublickeyVerifyConfig.enabled)) { // Luminol - Verify signature only in online-mode
              throw new ProfilePublicKey.ValidationException(INVALID_SIGNATURE, org.bukkit.event.player.PlayerKickEvent.Cause.INVALID_PUBLIC_KEY_SIGNATURE); // Paper - kick event causes
          } else {
              return new ProfilePublicKey(data);

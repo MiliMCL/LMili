@@ -265,7 +265,7 @@ index 5ffcf20d06f8a0cc0394347d8ef4cfa1e89ebab2..a26025ec6c3c6fe84bfc598176a6d4ff
      private ItemStack lastItemInMainHand = ItemStack.EMPTY;
      private final ItemCooldowns cooldowns = this.createItemCooldowns();
      private Optional<GlobalPos> lastDeathLocation = Optional.empty();
-+    public me.earthme.luminol.functions.bars.TickableStatusBarList statusBarList = new me.earthme.luminol.functions.bars.TickableStatusBarList(this); // Luminol status bars
++    public fun.bm.mili.lmili.functions.bars.TickableStatusBarList statusBarList = new fun.bm.mili.lmili.functions.bars.TickableStatusBarList(this); // Luminol status bars
      public @Nullable FishingHook fishing;
      public float hurtDir;
      public boolean affectsSpawning = true; // Paper - Affects Spawning API

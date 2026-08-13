@@ -46,8 +46,8 @@ index 6d359cce5acd78c0adf27aeb3e361586b6f436c9..559f2b2dbb9dc920078f35aec89a98b4
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
  
 +        // Luminol start - Prevent teleprotAsync calls in move events
-+        if (this.blockTeleportAsync && me.earthme.luminol.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.enabled) {
-+            if (me.earthme.luminol.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.throwWhenCaught) {
++        if (this.blockTeleportAsync && fun.bm.mili.lmili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.enabled) {
++            if (fun.bm.mili.lmili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.throwWhenCaught) {
 +                throw new IllegalStateException("Call teleportAsync during move events!");
 +            }
 +

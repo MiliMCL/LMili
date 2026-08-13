@@ -14,7 +14,7 @@ index 11e6197dec541b28733715f0d7eaa4c7b834d632..85042476c012782b92f6d2aa2f0bf906
      public void registerEnderPearl(ThrownEnderpearl enderPearl) {
 -        //this.enderPearls.add(enderPearl); // Folia - region threading - do not track ender pearls
 +        // Luminol start - restore vanilla ender pearl behavior
-+        if (me.earthme.luminol.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
 +            this.enderPearls.add(enderPearl); // Folia - region threading - do not track ender pearls
 +        }
 +        // Luminol end - restore vanilla ender pearl behavior
@@ -23,7 +23,7 @@ index 11e6197dec541b28733715f0d7eaa4c7b834d632..85042476c012782b92f6d2aa2f0bf906
      public void deregisterEnderPearl(ThrownEnderpearl enderPearl) {
 -        //this.enderPearls.remove(enderPearl); // Folia - region threading - do not track ender pearls
 +        // Luminol start - restore vanilla ender pearl behavior
-+        if (me.earthme.luminol.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
 +            this.enderPearls.add(enderPearl); // Folia - region threading - do not track ender pearls
 +        }
 +        // Luminol end - restore vanilla ender pearl behavior
@@ -40,7 +40,7 @@ index 4ef2816210f06082f2209c51d04aad6bb188232b..87656967282f16684adf7116e7e90b3c
              if (!thrownEnderpearl.level().paperConfig().misc.legacyEnderPearlBehavior) {
 -                thrownEnderpearl.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT); // CraftBukkit - add Bukkit remove cause
 +                // Luminol start - restore vanilla ender pearl behavior
-+                if (me.earthme.luminol.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
++                if (fun.bm.mili.lmili.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
 +                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
 +                            thrownEnderpearl.level().getMinecraftWorld(), thrownEnderpearl.chunkPosition().x, thrownEnderpearl.chunkPosition().z, () -> {
 +                                thrownEnderpearl.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT); // CraftBukkit - add Bukkit remove cause
@@ -62,7 +62,7 @@ index a2b3a744acca66c1d4b2b73512b69e411c2580e4..670abad87a0e826b3787b9d59128b8ae
      private void deregisterFromCurrentOwner() {
          // Folia - region threading - we remove the registration logic, we do not need to fetch the owner
 +        // Luminol start - restore vanilla ender pearl behavior
-+        if (me.earthme.luminol.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
 +            if (this.getOwner() instanceof ServerPlayer serverPlayer) {
 +                serverPlayer.deregisterEnderPearl(this);
 +            }
@@ -73,7 +73,7 @@ index a2b3a744acca66c1d4b2b73512b69e411c2580e4..670abad87a0e826b3787b9d59128b8ae
      private void registerToCurrentOwner() {
          // Folia - region threading - we remove the registration logic, we do not need to fetch the owner
 +        // Luminol start - restore vanilla ender pearl behavior
-+        if (me.earthme.luminol.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.fixes.RestoreVanillaEnderPearlBehaviorConfig.enabled) {
 +            if (this.getOwner() instanceof ServerPlayer serverPlayer) {
 +                serverPlayer.deregisterEnderPearl(this);
 +            }

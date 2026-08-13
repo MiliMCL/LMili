@@ -18,7 +18,7 @@ index 82608f832cc2a77a017541636fe0b482842f156f..b8fd825f42d3ce3081debc9bd7fd2ba6
          super.inactiveTick();
          if (!this.aware) return; // Paper - Do not tick AI for inactive unaware mobs
 -        if (this.goalSelector.inactiveTick()) {
-+        boolean isThrottled = me.earthme.luminol.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig.enabled && _pufferfish_inactiveTickDisableCounter++ % 20 != 0; // Pufferfish - throttle inactive goal selector ticking
++        boolean isThrottled = fun.bm.mili.lmili.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig.enabled && _pufferfish_inactiveTickDisableCounter++ % 20 != 0; // Pufferfish - throttle inactive goal selector ticking
 +        if (this.goalSelector.inactiveTick() && !isThrottled) { // Pufferfish
              this.goalSelector.tick();
          }

@@ -13,7 +13,7 @@ index 21f2b9866e1cf36421e10a945fb6fbaa251009ed..08bccc30a1147603eacf3ac1e42282c4
          TitleCommand.register(this.dispatcher, context);
          //TriggerCommand.register(this.dispatcher); // Folia - region threading - TODO later
 -        //WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later
-+        if (me.earthme.luminol.config.modules.experiment.CommandConfig.waypointsAndWaypointCommand) WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later // Luminol - Restore waypoints
++        if (fun.bm.mili.lmili.config.modules.experiment.CommandConfig.waypointsAndWaypointCommand) WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later // Luminol - Restore waypoints
          WeatherCommand.register(this.dispatcher);
          WorldBorderCommand.register(this.dispatcher);
          if (JvmProfiler.INSTANCE.isAvailable()) {
@@ -42,7 +42,7 @@ index dd33558742af12a8142d6bae3215db58eb486c0d..3a46fb1665f84a11df59b51a2b1b75db
          this.gameEventDispatcher = new GameEventDispatcher(this);
 -        this.waypointManager = new ServerWaypointManager(this); // Paper - optimize ServerWaypointManager with locator bar disabled
 +        //this.waypointManager = new ServerWaypointManager(this); // Paper - optimize ServerWaypointManager with locator bar disabled // Luminol - Restore waypoints
-+        this.waypointManager = new me.earthme.luminol.utils.FoliaServerWaypointManager(this); // Luminol - Restore waypoints
++        this.waypointManager = new fun.bm.mili.lmili.utils.FoliaServerWaypointManager(this); // Luminol - Restore waypoints
          this.environmentAttributes = EnvironmentAttributeSystem.builder().addDefaultLayers(this).build();
          //this.updateSkyBrightness(); // Folia - region threading - delay until first tick
          // Paper start - rewrite chunk system

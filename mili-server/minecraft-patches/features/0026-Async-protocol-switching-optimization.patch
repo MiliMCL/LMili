@@ -157,7 +157,7 @@ index 77c4670868a95dc7b13461dfa67af34b0a3c329a..36955ce5cbe418856f7cbcf28193994c
          }
 +        // Luminol start - Async protocol switch
 +        };
-+        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
 +            this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
 +            afterSwitch.run(); // directly run callback as we won't process any packet this time
 +        } else {
@@ -178,7 +178,7 @@ index cc6e7a12f5fbe7bebca2997554cf403f05fab304..2b01327988df7fa57f657ec61f108108
          } // Folia end - rewrite login process - move connection ownership to global region
          this.waitingForSwitchToConfig = true; // Folia - rewrite login process - fix bad ordering of this field write - moved down
          this.send(ClientboundStartConfigurationPacket.INSTANCE);
-+        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
          this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
 +        // Luminol start - Async protcol switch
 +        } else {
@@ -192,7 +192,7 @@ index cc6e7a12f5fbe7bebca2997554cf403f05fab304..2b01327988df7fa57f657ec61f108108
          }
  
          final ServerConfigurationPacketListenerImpl listener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, this.createCookie(this.player.clientInformation())); // Paper
-+        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
          this.connection
              .setupInboundProtocol(
                  ConfigurationProtocols.SERVERBOUND,
@@ -238,7 +238,7 @@ index 780f52973976bc97bddccfeefd54e187371eecc9..9d324298a1e96c6797ea99aefd6b921c
 +
 +        Runnable afterSwitch = () -> io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(configPacketListener::startConfiguration); // push back to main thread
 +
-+        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
 +            this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
 +            this.connection.setupInboundProtocol(ConfigurationProtocols.SERVERBOUND, configPacketListener);
 +            afterSwitch.run();
@@ -260,7 +260,7 @@ index 259eb7574841b1b885093b534440f8a40db4e8e2..2975a879320faed5f6591489f86d3f90
          // only after setting the connection listener to game type, add the connection to this regions list
          level.getCurrentWorldData().addConnection(player);
          // Folia end - rewrite login process
-+        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch // we will run async switch once these main thread logics became done
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch // we will run async switch once these main thread logics became done
          connection.setupInboundProtocol(
              GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection), playerConnection
          );
@@ -273,7 +273,7 @@ index 259eb7574841b1b885093b534440f8a40db4e8e2..2975a879320faed5f6591489f86d3f90
          }
          // Paper end - Send empty chunk
 +        // Luminol start - Async protocol switch
-+        if (me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
 +            // auto read will be enabled once the async switch is done
 +            connection.setupInboundProtocolAsync(
 +                    GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection),

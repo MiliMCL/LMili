@@ -12,7 +12,7 @@ index 693ce1c23c7be6406eda22da57aa4a1b86a08f5f..4385488983a7544eb6d9193d913dc552
                  JvmProfiler.INSTANCE.start(Environment.SERVER);
              }
  
-+            me.earthme.luminol.config.ConfigManager.initConfigs(); // Luminol - Luminol config
++            fun.bm.mili.lmili.config.ConfigManager.initConfigs(); // Luminol - Luminol config
              io.papermc.paper.plugin.PluginInitializerManager.load(options); // Paper
              Bootstrap.bootStrap();
              Bootstrap.validate();
@@ -24,7 +24,7 @@ index cd5551c0221ad2a7b5c7d452d8d91ffc9711c3ee..1ad4704523a3d90414ac514488207b1b
          this.paperConfigurations.initializeGlobalConfiguration(this.registryAccess());
          this.paperConfigurations.initializeWorldDefaultsConfiguration(this.registryAccess());
          // Paper end - initialize global and world-defaults configuration
-+        me.earthme.luminol.config.ConfigManager.loadConfigFiles(); // Luminol - load config file
++        fun.bm.mili.lmili.config.ConfigManager.loadConfigFiles(); // Luminol - load config file
          this.server.spark.enableEarlyIfRequested(); // Paper - spark
          // Paper start - fix converting txt to json file; convert old users earlier after PlayerList creation but before file load/save
          if (this.convertOldUsers()) {

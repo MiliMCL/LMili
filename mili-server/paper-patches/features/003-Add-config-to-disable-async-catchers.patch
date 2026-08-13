@@ -17,7 +17,7 @@ index 72a3478a9..faf4d9c6e 100644
      @Deprecated
      public static void ensureTickThread(final String reason) {
 -        if (!isTickThread()) {
-+        if (!isTickThread() && !me.earthme.luminol.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
++        if (!isTickThread() && !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
              LOGGER.error("Thread failed main thread check: " + reason + ", context=" + getThreadContext(), new Throwable());
              throw new IllegalStateException(reason);
          }
@@ -25,7 +25,7 @@ index 72a3478a9..faf4d9c6e 100644
  
      public static void ensureTickThread(final Level world, final BlockPos pos, final String reason) {
 -        if (!isTickThreadFor(world, pos)) {
-+        if (!isTickThreadFor(world, pos) && !me.earthme.luminol.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
++        if (!isTickThreadFor(world, pos) && !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
              final String ex = "Thread failed main thread check: " +
                                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos;
              LOGGER.error(ex, new Throwable());
@@ -34,7 +34,7 @@ index 72a3478a9..faf4d9c6e 100644
  
      public static void ensureTickThread(final Level world, final BlockPos pos, final int blockRadius, final String reason) {
 -        if (!isTickThreadFor(world, pos, blockRadius)) {
-+        if (!isTickThreadFor(world, pos, blockRadius) && !me.earthme.luminol.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
++        if (!isTickThreadFor(world, pos, blockRadius) && !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
              final String ex = "Thread failed main thread check: " +
                  reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos + ", block_radius=" + blockRadius;
              LOGGER.error(ex, new Throwable());
@@ -43,7 +43,7 @@ index 72a3478a9..faf4d9c6e 100644
  
      public static void ensureTickThread(final Level world, final ChunkPos pos, final String reason) {
 -        if (!isTickThreadFor(world, pos)) {
-+        if (!isTickThreadFor(world, pos) && !me.earthme.luminol.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
++        if (!isTickThreadFor(world, pos) && !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
              final String ex = "Thread failed main thread check: " +
                  reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + pos;
              LOGGER.error(ex, new Throwable());
@@ -52,7 +52,7 @@ index 72a3478a9..faf4d9c6e 100644
  
      public static void ensureTickThread(final Level world, final int chunkX, final int chunkZ, final String reason) {
 -        if (!isTickThreadFor(world, chunkX, chunkZ)) {
-+        if (!isTickThreadFor(world, chunkX, chunkZ) && !me.earthme.luminol.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
++        if (!isTickThreadFor(world, chunkX, chunkZ) && !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
              final String ex = "Thread failed main thread check: " +
                  reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ);
              LOGGER.error(ex, new Throwable());
@@ -61,7 +61,7 @@ index 72a3478a9..faf4d9c6e 100644
  
      public static void ensureTickThread(final Entity entity, final String reason) {
 -        if (!isTickThreadFor(entity)) {
-+        if (!isTickThreadFor(entity) && !me.earthme.luminol.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
++        if (!isTickThreadFor(entity) && !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
              final String ex = "Thread failed main thread check: " +
                  reason + ", context=" + getThreadContext() + ", entity=" + EntityUtil.dumpEntity(entity);
              LOGGER.error(ex, new Throwable());
@@ -70,7 +70,7 @@ index 72a3478a9..faf4d9c6e 100644
  
      public static void ensureTickThread(final Level world, final AABB aabb, final String reason) {
 -        if (!isTickThreadFor(world, aabb)) {
-+        if (!isTickThreadFor(world, aabb) && !me.earthme.luminol.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
++        if (!isTickThreadFor(world, aabb) && !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
              final String ex = "Thread failed main thread check: " +
                  reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", aabb=" + aabb;
              LOGGER.error(ex, new Throwable());
@@ -79,7 +79,7 @@ index 72a3478a9..faf4d9c6e 100644
  
      public static void ensureTickThread(final Level world, final double blockX, final double blockZ, final String reason) {
 -        if (!isTickThreadFor(world, blockX, blockZ)) {
-+        if (!isTickThreadFor(world, blockX, blockZ) && !me.earthme.luminol.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
++        if (!isTickThreadFor(world, blockX, blockZ) && !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Luminol
              final String ex = "Thread failed main thread check: " +
                  reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + new Vec3(blockX, 0.0, blockZ);
              LOGGER.error(ex, new Throwable());
@@ -92,7 +92,7 @@ index 7e7a0ed94..f2867e375 100644
  
      public static void catchOp(String reason) {
 -        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) { // Paper - chunk system
-+        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThread() && !me.earthme.luminol.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Paper - chunk system  // Luminol
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThread() && !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled) { // Paper - chunk system  // Luminol
              MinecraftServer.LOGGER.error("Thread {} failed main thread check: {}", Thread.currentThread().getName(), reason, new Throwable()); // Paper
              throw new IllegalStateException("Asynchronous " + reason + "!");
          }

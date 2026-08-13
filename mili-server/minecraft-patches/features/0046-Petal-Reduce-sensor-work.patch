@@ -16,7 +16,7 @@ index d23cbf17d7261d6da6d99e3ae29aeb4759e8a763..82608f832cc2a77a017541636fe0b482
          ProfilerFiller profiler = Profiler.get();
          profiler.push("sensing");
 -        this.sensing.tick();
-+        if (idBasedTickCount % me.earthme.luminol.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !me.earthme.luminol.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Luminol - Petal - Reduce sensor work
++        if (idBasedTickCount % fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Luminol - Petal - Reduce sensor work
          profiler.pop();
 -        int idBasedTickCount = this.tickCount + this.getId();
 +        //int idBasedTickCount = this.tickCount + this.getId(); // Luminol - Petal - Move up

@@ -15,7 +15,7 @@ index 236c793d2655e67bb2f900e6b4481b529e6493a0..f60f4c0589fd12b33f30970582be9ada
                  }
 +
 +                //type: position_tracker and walk_target
-+                if (me.earthme.luminol.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForPositionTracker) {
++                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForPositionTracker) {
 +                    net.minecraft.world.entity.ai.behavior.PositionTracker tracker = null;
 +
 +                    if (value instanceof net.minecraft.world.entity.ai.behavior.PositionTracker positionTracker) {

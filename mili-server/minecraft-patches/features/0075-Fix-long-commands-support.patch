@@ -13,7 +13,7 @@ index 491af2413a4e793a121fec368259ff8211ed031e..042cb4792b0084f143608f05dd08da13
  
      private ServerboundChatCommandPacket(final FriendlyByteBuf input) {
 -        this(input.readUtf(MAX_CHAT_PACKET_INPUT_SIZE)); // Paper - limit chat command inputs
-+        this(me.earthme.luminol.config.modules.fixes.LongCommandSupportConfig.enabled ? input.readUtf() : input.readUtf(MAX_CHAT_PACKET_INPUT_SIZE)); // Paper - limit chat command inputs // Luminol - add support for long command inputs
++        this(fun.bm.mili.lmili.config.modules.fixes.LongCommandSupportConfig.enabled ? input.readUtf() : input.readUtf(MAX_CHAT_PACKET_INPUT_SIZE)); // Paper - limit chat command inputs // Luminol - add support for long command inputs
      }
  
      private void write(final FriendlyByteBuf output) {

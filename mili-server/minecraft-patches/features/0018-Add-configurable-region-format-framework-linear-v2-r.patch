@@ -165,7 +165,7 @@ index 63b40c420030d935bb81a219fb33defe0946e21f..49fb94848d2336e7c6a2d2c0fa45e990
      }
 +    // Luminol start - Configurable region file format
 +    public static abomination.IRegionFile createNew(RegionStorageInfo info, Path filePath, Path folder, boolean sync) throws IOException{
-+        final me.earthme.luminol.enums.EnumRegionFormat regionFormat = me.earthme.luminol.config.modules.function.RegionFormatConfig.regionFormat;
++        final fun.bm.mili.lmili.enums.EnumRegionFormat regionFormat = fun.bm.mili.lmili.config.modules.function.RegionFormatConfig.regionFormat;
 +        final String fullFileName = filePath.getFileName().toString();
 +        final String[] fullNameSplit = fullFileName.split("\\.");
 +        final String extensionName = fullNameSplit[fullNameSplit.length - 1];
@@ -175,11 +175,11 @@ index 63b40c420030d935bb81a219fb33defe0946e21f..49fb94848d2336e7c6a2d2c0fa45e990
 +            throw new IOException("Invalid region file format: " + extensionName + " expected " + regionFormat.getArgument());
 +        }
 +
-+        return regionFormat.getCreator().create(new me.earthme.luminol.utils.RegionCreatorInfo(info, filePath, folder, sync));
++        return regionFormat.getCreator().create(new fun.bm.mili.lmili.utils.RegionCreatorInfo(info, filePath, folder, sync));
 +    }
 +
 +    public static String getExtensionName() {
-+        return "." + me.earthme.luminol.config.modules.function.RegionFormatConfig.regionFormat.getArgument();
++        return "." + fun.bm.mili.lmili.config.modules.function.RegionFormatConfig.regionFormat.getArgument();
 +    }
 +    // Luminol end
  
