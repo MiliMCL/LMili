@@ -39,12 +39,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Clean paperweight cache
-        run: |
-          set -eux
-          rm -rf .gradle/caches/paperweight/upstreams/folia || true
-          ls -la .gradle/caches || true
-
       - name: Set up JDK
         uses: actions/setup-java@v5
         with:
@@ -73,11 +67,11 @@ jobs:
           git config --global advice.mergeConflict false
           git config --global init.defaultBranch main
 
-      - name: Clean build artifacts
+      - name: Clean build output only
         run: |
-          rm -rf mili-server/build mili-api/build
-          rm -rf mili-server/src/minecraft
-          rm -rf folia-server paper-server
+          set -eux
+          # Only clean build outputs — keep committed lmili-server/src/minecraft/ intact
+          rm -rf lmili-server/build leaves-api/build
           rm -rf .gradle/configuration-cache
 
       - name: Setup Gradle
@@ -90,19 +84,31 @@ jobs:
             **/paperweight/**
             **/caches/paperweight/**
 
-      - name: Apply All Patches
-        run: ./gradlew applyAllPatches --no-configuration-cache
+      - name: Generate Upstream Sources (paper-api + paper-server + folia-server)
+        run: |
+          set -eux
+          # Run applyFoliaPatches for paper-api, then applyServerPatches for paper-server/folia-server.
+          # Do NOT run applyAllPatches/applyMinecraftPatches which would regenerate lmili-server/src/minecraft/
+          # with incompatible source — we keep the committed version.
+          ./gradlew applyFoliaPatches applyServerPatches --no-configuration-cache
 
       - name: Verify Generated Source
         run: |
-          echo "=== Checking generated source dirs ==="
-          for d in paper-api folia-api mili-api paper-server folia-server mili-server; do
+          echo "=== Checking source dirs ==="
+          for d in paper-api lmili-api paper-server folia-server; do
             if [ -d "$d" ] && [ "$(ls -A $d 2>/dev/null)" ]; then
               echo "OK: $d/ exists ($(find $d -name '*.java' | wc -l) java files)"
             else
               echo "MISSING: $d/"
             fi
           done
+          # Verify committed mili-server/src/minecraft is still present
+          if [ -d "lmili-server/src/minecraft" ] && [ "$(ls -A lmili-server/src/minecraft 2>/dev/null)" ]; then
+            echo "OK: lmili-server/src/minecraft/ preserved ($(find lmili-server/src/minecraft -name '*.java' | wc -l) java files)"
+          else
+            echo "ERROR: lmili-server/src/minecraft/ was deleted!"
+            exit 1
+          fi
 
       - name: Build Paperclip Jar
         run: ./gradlew :lmili-server:createPaperclipJar --no-configuration-cache -PbstatsPluginId=${{ secrets.BSTATS_PLUGIN_ID }}
