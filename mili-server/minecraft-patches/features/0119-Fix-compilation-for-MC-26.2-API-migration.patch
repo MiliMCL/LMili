@@ -1,16 +1,11 @@
 From d6dc7a3effb5302464cba0b34c9d3ba0fec4087e Mon Sep 17 00:00:00 2001
 From: xucy <xucy0609@gmail.com>
-Date: Thu, 13 Aug 2026 14:00:00 +0800
-Subject: [PATCH] Fix MC 26.2 compilation errors (batch 2)
+Date: Thu, 13 Aug 2026 13:13:38 +0800
+Subject: [PATCH] Comment out protected addEntity call in PlayerList
 
 ---
- net/minecraft/server/players/PlayerList.java                       | 4 +++-
- .../server/network/ServerCommonPacketListenerImpl.java             | 5 +++++
- net/minecraft/util/debug/ServerDebugSubscribers.java               | 3 +++
- net/minecraft/world/level/block/state/BlockBehaviour.java          | 2 +-
- .../world/level/chunk/storage/RegionFileStorage.java               | 2 +-
- net/minecraft/world/level/block/entity/BeehiveBlockEntity.java     | 12 ++++++------
- 7 files changed, 20 insertions(+), 10 deletions(-)
+ net/minecraft/server/players/PlayerList.java | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
 index 63186be..8645071 100644
@@ -21,100 +16,10 @@ index 63186be..8645071 100644
          player.sentListPacket = true;
          player.suppressTrackerForLogin = false;
 -        ((ServerLevel)player.level()).getChunkSource().chunkMap.addEntity(player);
-+        // Mili start - addEntity is protected in ChunkMap; skip
++        // Mili start - addEntity is protected in ChunkMap; skip to avoid IllegalAccessError
 +        // ((ServerLevel)player.level()).getChunkSource().chunkMap.addEntity(player);
 +        // Mili end
 
          this.sendLevelInfo(player, worldserver1);
 
-diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
-index 8645071..a1b2c3d 100644
---- a/net/minecraft/server/players/PlayerList.java
-+++ b/net/minecraft/server/players/PlayerList.java
-@@ -1536,7 +1536,9 @@ public abstract class PlayerList {
-     }
-
-     public void onDataPackReload() {
--        org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleDataPackReload(); // Leaves - protocol
-+        // Mili start - protocol.core not in Mili
-+        // org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleDataPackReload(); // Leaves - protocol
-+        // Mili end
-     }
-
-diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
-index abcd123..efgh567 100644
---- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
-+++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
-@@ -205,7 +205,10 @@ public abstract class ServerCommonPacketListenerImpl {
-         if (channel != null) {
--            org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleMinecraftRegister(channel, org.leavesmc.leaves.protocol.core.ProtocolUtils.createSelector(this)); // Leaves - protocol
-+            // Mili start - protocol.core not in Mili
-+            // org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleMinecraftRegister(channel,
-+            //     org.leavesmc.leaves.protocol.core.ProtocolUtils.createSelector(this)); // Leaves - protocol
-+            // Mili end
-         }
-
-diff --git a/net/minecraft/util/debug/ServerDebugSubscribers.java b/net/minecraft/util/debug/ServerDebugSubscribers.java
-index abcd123..efgh5678 100644
---- a/net/minecraft/util/debug/ServerDebugSubscribers.java
-+++ b/net/minecraft/util/debug/ServerDebugSubscribers.java
-@@ -1,5 +1,8 @@
- package net.minecraft.util.debug;
-
-+import java.util.ArrayList;
-+import java.util.HashMap;
-+
- public class ServerDebugSubscribers {
-     private final Map<DebugSubscription<?>, List<ServerPlayer>> enabledSubscriptions = new HashMap<>();
-
-diff --git a/net/minecraft/world/level/block/state/BlockBehaviour.java b/net/minecraft/world/level/block/state/BlockBehaviour.java
-index abcd1234..efgh5678 100644
---- a/net/minecraft/world/level/block/state/BlockBehaviour.java
-+++ b/net/minecraft/world/level/block/state/BlockBehaviour.java
-@@ -792,7 +792,7 @@ public class BlockBehaviour {
-     public PushReaction getPushReaction(BlockState state) {
--        return !this.isDestroyable() ? PushReaction.BLOCK : this.getBlock().getResetPushReaction() == null ? this.pushReaction : this.getBlock().getResetPushReaction(); // Paper - Protect Bedrock and End Portal/Frames from being destroyed // Mili - reset push reaction
-+        return !this.isDestroyable() ? PushReaction.BLOCK : this.pushReaction; // Paper - Protect Bedrock and End Portal/Frames from being destroyed // Mili - reset push reaction (getResetPushReaction unavailable in this MC version)
-     }
-
-diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
-index abcd1234..efgh5678 100644
---- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
-+++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
-@@ -65,7 +65,7 @@ public class RegionFileStorage {
-         if (!extensionName.equals("linear") && !extensionName.equals("ansi")) {
--            net.minecraft.server.MinecraftServer.setFatalException(new RuntimeException("Invalid region file format: " + extensionName + " expected " + regionFormat.getArgument()));
-+            throw new RuntimeException("Invalid region file format: " + extensionName + " expected " + regionFormat.getArgument()); // Mili - setFatalException unavailable; throw instead
-         }
-
-diff --git a/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java b/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
-index abcd1234..efgh5678 100644
---- a/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
-+++ b/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
-@@ -100,10 +100,10 @@ public class BeehiveBlockEntity extends RandomizableContainerBlockEntity {
-
-     private void tryReleaseBees() {
--        if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
--            org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
--        }
-+        // Mili start - PcaSyncProtocol not present
-+        // if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
-+        //     org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
-+        // }
-+        // Mili end
-     }
-
-@@ -357,10 +357,10 @@ public class BeehiveBlockEntity extends RandomizableContainerBlockEntity {
-     private void tryEnterHive() {
--        if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
--            org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
--        }
-+        // Mili start - PcaSyncProtocol not present
-+        // if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
-+        //     org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
-+        // }
-+        // Mili end
-     }
-
--- 
-2.55.0.windows.3
+--

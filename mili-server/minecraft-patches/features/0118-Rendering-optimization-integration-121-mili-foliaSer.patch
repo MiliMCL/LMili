@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Mili <mili@bm.fun>
+From: xucy10 <xucy0609@gmail.com>
 Date: Tue, 11 Aug 2026 22:08:19 +0800
 Subject: [PATCH] Rendering optimization integration 121 mili foliaServer File
  Patches
@@ -50,7 +50,6 @@ index 0101808..e8c02d1 100644
          final String channel = new String(data, from, length, java.nio.charset.StandardCharsets.US_ASCII);
          if (register) {
              bridge.addChannel(channel);
-+            org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleMinecraftRegister(channel, org.leavesmc.leaves.protocol.core.ProtocolUtils.createSelector(this)); // Leaves - protocol
          } else {
              bridge.removeChannel(channel);
          }
@@ -78,7 +77,6 @@ index f9c9861..2167ddf 100644
          this.reloadAdvancementData();
          this.reloadTagData();
          this.reloadRecipes();
-+        org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleDataPackReload(); // Leaves - protocol
      }
      public void reloadAdvancementData() {
          // Paper end - API for updating recipes on clients
@@ -88,14 +86,12 @@ index ffbc6e6..19caac6 100644
 +++ b/net/minecraft/util/debug/ServerDebugSubscribers.java
 @@ -1,10 +1,10 @@
  package net.minecraft.util.debug;
- 
--import java.util.ArrayList;
--import java.util.HashMap;
+
+ import java.util.ArrayList;
+ import java.util.HashMap;
  import java.util.List;
  import java.util.Map;
  import java.util.Set;
-+import java.util.concurrent.ConcurrentHashMap;
-+import java.util.concurrent.CopyOnWriteArrayList;
  import net.minecraft.SharedConstants;
  import net.minecraft.network.protocol.Packet;
  import net.minecraft.server.MinecraftServer;
@@ -137,7 +133,7 @@ index 9750a2a..b7f8b52 100644
          } else {
 -            return super.useOn(context);
 +            // Mili start - shears wrench
-+            InteractionResult result = org.leavesmc.leaves.util.ShearsWrenchUtil.tryApplyRotate(context, blockState);
++            InteractionResult result = org.leavesmc.leaves.util.ShearsWrenchUtil.tryApplyRotate(context, context.getLevel().getBlockState(context.getClickedPos()));
 +            return result == null ? super.useOn(context) : result;
 +            // Mili end - shears wrench
          }
@@ -238,11 +234,6 @@ index 0bbce88..91976d9 100644
          }
  
          super.setChanged();
-+        // Leaves start - pca
-+        if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
-+            org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
-+        }
-+        // Leaves end - pca
      }
  
      public boolean isFireNearby() {
@@ -250,11 +241,6 @@ index 0bbce88..91976d9 100644
          input.read("bees", BeehiveBlockEntity.Occupant.LIST_CODEC).orElse(List.of()).forEach(this::storeBee);
          this.savedFlowerPos = input.read("flower_pos", BlockPos.CODEC).orElse(null);
          this.maxBees = input.getIntOr("Bukkit.MaxEntities", MAX_OCCUPANTS); // Paper - persist max bukkit occupants
-+        // Leaves start - pca
-+        if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
-+            org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
-+        }
-+        // Leaves end - pca
      }
  
      @Override
@@ -290,10 +276,10 @@ index 9ee150a..f573f57 100644
 @@ -792,7 +792,7 @@ public abstract class BlockBehaviour implements FeatureElement {
          }
  
-         public PushReaction getPistonPushReaction() {
+ public PushReaction getPistonPushReaction() {
 -            return !this.isDestroyable() ? PushReaction.BLOCK : this.pushReaction; // Paper - Protect Bedrock and End Portal/Frames from being destroyed
-+            return !this.isDestroyable() ? PushReaction.BLOCK : this.getBlock().getResetPushReaction() == null ? this.pushReaction : this.getBlock().getResetPushReaction(); // Paper - Protect Bedrock and End Portal/Frames from being destroyed // Mili - reset push reaction
-         }
++            return !this.isDestroyable() ? PushReaction.BLOCK : this.pushReaction; // Paper - Protect Bedrock and End Portal/Frames from being destroyed // Mili - reset push reaction (getResetPushReaction unavailable in this MC version)
+ }
  
          public boolean isSolidRender() {
 diff --git a/net/minecraft/world/level/dimension/end/EnderDragonFight.java b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
