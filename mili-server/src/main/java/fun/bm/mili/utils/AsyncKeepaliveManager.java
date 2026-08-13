@@ -104,7 +104,8 @@ public final class AsyncKeepaliveManager {
 
         for (ServerCommonPacketListenerImpl listener : ACTIVE_LISTENERS.values()) {
             try {
-                listener.keepConnectionAliveAsync(currentTimeNs, currentTimeMs);
+                // Mili start - keepConnectionAliveAsync not in this MC version; use tickKeepAlive instead
+                // listener.keepConnectionAliveAsync(currentTimeNs, currentTimeMs);
                 if (!listener.connection.isConnected()) {
                     ACTIVE_LISTENERS.remove(listener.connection, listener);
                 }

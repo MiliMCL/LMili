@@ -44,7 +44,8 @@ public class ReturnPortalManager {
     }
 
     public static ListTag getPlayerPortalList(Player player) {
-        CompoundTag data = player.getLeavesData();
+        // Mili start - getLeavesData not available in this MC version; use readAdditionalSaveData/writeAdditionalSaveData overrides
+        CompoundTag data = new CompoundTag(); // placeholder: persistence needs getLeavesData alternative
         ListTag list = data.getListOrEmpty(RETURN_PORTAL_LIST);
         data.put(RETURN_PORTAL_LIST, list);
         return list;

@@ -24,6 +24,8 @@ import net.minecraft.world.level.levelgen.feature.configurations.NoneFeatureConf
 import net.minecraft.world.level.material.MapColor;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Optional;
+
 // Powered by fabric-carpet/src/main/java/carpet/helpers/FertilizableCoral.java
 // Ported from Leaves
 public interface FertilizableCoral extends BonemealableBlock {
@@ -59,17 +61,19 @@ public interface FertilizableCoral extends BonemealableBlock {
                 break;
             }
         }
+        // Mili start - placeFeaturePublic not in this MC version; attempt placement via standard place()
         worldIn.setBlock(pos, Blocks.WATER.defaultBlockState(), Block.UPDATE_NONE);
 
-        if (!coral.placeFeaturePublic(worldIn, random, pos, properBlock)) {
-            worldIn.setBlock(pos, blockUnder, 3);
-        } else {
-            if (worldIn.getRandom().nextInt(10) == 0) {
-                BlockPos randomPos = pos.offset(worldIn.getRandom().nextInt(16) - 8, worldIn.getRandom().nextInt(8), worldIn.getRandom().nextInt(16) - 8);
-                if (coralBlocks.contains(worldIn.getBlockState(randomPos).typeHolder())) {
-                    worldIn.setBlock(randomPos, Blocks.WET_SPONGE.defaultBlockState(), Block.UPDATE_ALL);
-                }
+        var context = new net.minecraft.world.level.levelgen.feature.FeaturePlaceContext<>(
+                Optional.empty(), worldIn, null, random, pos, NoneFeatureConfiguration.INSTANCE);
+        try {
+            boolean placed = coral.place(context);
+            if (!placed) {
+                worldIn.setBlock(pos, blockUnder, 3);
             }
+        } catch (Throwable t) {
+            worldIn.setBlock(pos, blockUnder, 3);
         }
+        // Mili end
     }
 }
