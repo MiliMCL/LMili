@@ -1,8 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: xucy10 <xucy0609@gmail.com>
 Date: Tue, 11 Aug 2026 22:08:19 +0800
-Subject: [PATCH] Rendering optimization integration 121 mili foliaServer File
- Patches
+Subject: [PATCH] Rendering optimization integration 121 mili foliaServer File Patches
 
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
@@ -46,13 +45,6 @@ index 0101808..e8c02d1 100644
      }
  
      // Paper start - configuration phase API
-@@ -202,6 +205,7 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
-         final String channel = new String(data, from, length, java.nio.charset.StandardCharsets.US_ASCII);
-         if (register) {
-             bridge.addChannel(channel);
-         } else {
-             bridge.removeChannel(channel);
-         }
 diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
 index f9c9861..2167ddf 100644
 --- a/net/minecraft/server/players/PlayerList.java
@@ -73,28 +65,6 @@ index f9c9861..2167ddf 100644
              }
          }
          // This removes the scoreboard (and player reference) for the specific player in the manager
-@@ -1527,6 +1534,7 @@ public abstract class PlayerList {
-         this.reloadAdvancementData();
-         this.reloadTagData();
-         this.reloadRecipes();
-     }
-     public void reloadAdvancementData() {
-         // Paper end - API for updating recipes on clients
-diff --git a/net/minecraft/util/debug/ServerDebugSubscribers.java b/net/minecraft/util/debug/ServerDebugSubscribers.java
-index ffbc6e6..19caac6 100644
---- a/net/minecraft/util/debug/ServerDebugSubscribers.java
-+++ b/net/minecraft/util/debug/ServerDebugSubscribers.java
-@@ -1,10 +1,10 @@
- package net.minecraft.util.debug;
-
- import java.util.ArrayList;
- import java.util.HashMap;
- import java.util.List;
- import java.util.Map;
- import java.util.Set;
- import net.minecraft.SharedConstants;
- import net.minecraft.network.protocol.Packet;
- import net.minecraft.server.MinecraftServer;
 diff --git a/net/minecraft/world/entity/EntityType.java b/net/minecraft/world/entity/EntityType.java
 index cfabd7f..3161989 100644
 --- a/net/minecraft/world/entity/EntityType.java
@@ -226,24 +196,6 @@ index 78dbdf4..6620b24 100644
          if (slot == 0 && !same && this.level instanceof ServerLevel serverLevel) {
              this.cookingTotalTime = getTotalCookTime(serverLevel, this, this.recipeType, this.cookSpeedMultiplier); // Paper - cook speed multiplier API
              this.cookingTimer = 0;
-diff --git a/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java b/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
-index 0bbce88..91976d9 100644
---- a/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
-+++ b/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
-@@ -99,6 +99,11 @@ public class BeehiveBlockEntity extends BlockEntity {
-         }
- 
-         super.setChanged();
-     }
- 
-     public boolean isFireNearby() {
-@@ -351,6 +356,11 @@ public class BeehiveBlockEntity extends BlockEntity {
-         input.read("bees", BeehiveBlockEntity.Occupant.LIST_CODEC).orElse(List.of()).forEach(this::storeBee);
-         this.savedFlowerPos = input.read("flower_pos", BlockPos.CODEC).orElse(null);
-         this.maxBees = input.getIntOr("Bukkit.MaxEntities", MAX_OCCUPANTS); // Paper - persist max bukkit occupants
-     }
- 
-     @Override
 diff --git a/net/minecraft/world/level/block/entity/HopperBlockEntity.java b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
 index a858cb6..1aaac29 100644
 --- a/net/minecraft/world/level/block/entity/HopperBlockEntity.java
@@ -273,13 +225,13 @@ diff --git a/net/minecraft/world/level/block/state/BlockBehaviour.java b/net/min
 index 9ee150a..f573f57 100644
 --- a/net/minecraft/world/level/block/state/BlockBehaviour.java
 +++ b/net/minecraft/world/level/block/state/BlockBehaviour.java
-@@ -792,7 +792,7 @@ public abstract class BlockBehaviour implements FeatureElement {
+@@ -794,7 +794,7 @@ public abstract class BlockBehaviour implements FeatureElement {
          }
- 
- public PushReaction getPistonPushReaction() {
+
+         public PushReaction getPistonPushReaction() {
 -            return !this.isDestroyable() ? PushReaction.BLOCK : this.pushReaction; // Paper - Protect Bedrock and End Portal/Frames from being destroyed
 +            return !this.isDestroyable() ? PushReaction.BLOCK : this.pushReaction; // Paper - Protect Bedrock and End Portal/Frames from being destroyed // Mili - reset push reaction (getResetPushReaction unavailable in this MC version)
- }
+         }
  
          public boolean isSolidRender() {
 diff --git a/net/minecraft/world/level/dimension/end/EnderDragonFight.java b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
@@ -295,3 +247,4 @@ index 7c68eff..83953a9 100644
              int i, j;
              for (i = cachePortalChunkIteratorX; i <= 8; ++i) {
                  for (j = cachePortalChunkIteratorZ; j <= 8; ++j) {
+ 
