@@ -104,9 +104,6 @@ jobs:
             fi
           done
 
-      - name: Inject Kotlin Config
-        run: python3 scripts/inject_kotlin.py
-
       - name: Build Paperclip Jar
         run: ./gradlew :mili-server:createPaperclipJar --no-configuration-cache -PbstatsPluginId=${{ secrets.BSTATS_PLUGIN_ID }}
 
