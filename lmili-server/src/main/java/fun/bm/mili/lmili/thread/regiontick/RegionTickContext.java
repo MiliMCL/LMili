@@ -21,6 +21,7 @@ public final class RegionTickContext {
     private volatile Phaser tickBarrier;
     private volatile long tickStartNanos;
     private volatile long lastTickDurationNanos;
+    private volatile long currentTick;
 
     public RegionTickContext(
             final long regionId,
@@ -52,6 +53,8 @@ public final class RegionTickContext {
     public long getLastTickDurationNanos() { return this.lastTickDurationNanos; }
     public int getWorkerCount() { return this.workerCount.get(); }
     public void setWorkerCount(int count) { this.workerCount.set(count); }
+    public long getCurrentTick() { return this.currentTick; }
+    public void setCurrentTick(final long tick) { this.currentTick = tick; }
 
     public int computeDesiredWorkers(final int maxWorkersPerRegion, final int parallelismThreshold) {
         int chunkCount = this.ownedChunks.get().size();

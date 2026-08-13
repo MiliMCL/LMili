@@ -6,7 +6,9 @@ import fun.bm.mili.lmili.thread.regiontick.RegionTickExecutor;
 import fun.bm.mili.lmili.thread.regiontick.RegionTickSlice;
 import fun.bm.mili.lmili.thread.regiontick.RegionTickWorker;
 import fun.bm.mili.lmili.thread.regiontick.dag.*;
+import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 import java.util.*;
@@ -51,6 +53,49 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
                               @NotNull final RegionTickSlice slice,
                               @NotNull final RegionTickContext context) {
         foliaExecutor.executeSlice(worker, slice, context);
+    }
+
+    /**
+     * 使用给定的 level-aware executors 执行系统 DAG。
+     *
+     * <p>与 {@link #executeSystems(long, RegionTickContext, List)} 不同，此方法接受一个
+     * {@code Map<systemName, executor>} 用于本次 tick 的实际执行逻辑。
+     * 这允许调用者在每次 tick 传入基于当前 level 状态的闭包。
+     *
+     * @param regionId       区域 ID
+     * @param context        tick 上下文
+     * @param systemScopePairs 系统-Scope 对列表
+     * @param level          当前 ServerLevel
+     * @param executors      系统名称到执行器的映射（接收 Scope + ServerLevel）
+     */
+    public void executeSystems(final long regionId,
+                                @NotNull final RegionTickContext context,
+                                @NotNull final List<Map.Entry<SystemProfile, Scope>> systemScopePairs,
+                                @NotNull final ServerLevel level,
+                                @NotNull final Map<String, BiConsumer<Scope, ServerLevel>> executors) {
+        if (systemScopePairs.isEmpty()) return;
+
+        RegionDag dag = getOrBuildDag(regionId, systemScopePairs);
+        if (dag == null) return;
+
+        int threadCount = Math.min(systemScopePairs.size(), Runtime.getRuntime().availableProcessors());
+        RegionDagExecutor executor = new RegionDagExecutor(threadCount);
+        for (Map.Entry<SystemProfile, Scope> entry : systemScopePairs) {
+            final SystemProfile profile = entry.getKey();
+            final Scope scope = entry.getValue();
+            final BiConsumer<Scope, ServerLevel> sysExec = executors.get(profile.name());
+            executor.registerSystemExecutor(profile.name(), (node, ctx) -> {
+                if (sysExec != null) sysExec.accept(scope, level);
+            });
+        }
+
+        try {
+            executor.executeDag(dag, context);
+        } catch (Throwable throwable) {
+            LOGGER.error("[DagBasedTickExecutor] DAG execution failed for region #{}", regionId, throwable);
+        } finally {
+            executor.close();
+        }
     }
 
     public void executeSystems(final long regionId,

@@ -2,15 +2,25 @@ package fun.bm.mili.lmili.thread.regiontick;
 
 import com.mojang.logging.LogUtils;
 import fun.bm.mili.config.modules.experiment.RegionTickPoolConfig;
+import fun.bm.mili.lmili.thread.regiontick.MiliGameSystems;
 import fun.bm.mili.lmili.thread.regiontick.dag.Scope;
 import fun.bm.mili.lmili.thread.regiontick.dag.SystemProfile;
 import fun.bm.mili.lmili.thread.regiontick.executor.DagBasedTickExecutor;
 import fun.bm.mili.lmili.thread.regiontick.executor.FoliaTickExecutor;
 import fun.bm.mili.lmili.thread.regiontick.migration.TickMigrationQueue;
 import io.papermc.paper.threadedregions.TickRegions;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ChunkPos;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -88,6 +98,20 @@ public final class RegionTickDispatcher {
 
     public void unregisterRegion(final long regionId) { this.activeContexts.remove(regionId); }
 
+    public RegionTickContext getOrCreateContext(
+            final io.papermc.paper.threadedregions.TickRegions.TickRegionData regionData) {
+        final long regionId = regionData.id;
+        RegionTickContext context = this.activeContexts.get(regionId);
+        if (context != null) return context;
+        synchronized (this) {
+            context = this.activeContexts.get(regionId);
+            if (context != null) return context;
+            context = new RegionTickContext(regionId, regionData.region);
+            this.activeContexts.put(regionId, context);
+            return context;
+        }
+    }
+
     public void dispatchTick(@NotNull final RegionTickContext context, final long tickCount) {
         if (this.shutdown.get()) return;
 
@@ -159,6 +183,79 @@ public final class RegionTickDispatcher {
                                    @NotNull final RegionTickContext context,
                                    @NotNull final List<Map.Entry<SystemProfile, Scope>> systemScopePairs) {
         dagExecutor.executeSystems(regionId, context, systemScopePairs);
+    }
+
+    /**
+     * DAG 并行化实体 + 方块实体 tick。
+     *
+     * <p>将 region 内的 ticking 实体按所在 chunk 分组，每个 chunk 生成一个
+     * {@code ChunkScope}，连同系统 Profile 一起提交给 DAG 执行器。
+     * 不同 chunk 上的实体因 Scope 不重叠可安全并行 tick。
+     *
+     * @param regionId          区域 ID
+     * @param context           tick 上下文
+     * @param level             当前 ServerLevel
+     * @param regionizedWorldData 当前 region 数据
+     */
+    public void dispatchDagTick(final long regionId,
+                                 @NotNull final RegionTickContext context,
+                                 @NotNull final ServerLevel level,
+                                 @NotNull final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData) {
+        if (this.shutdown.get()) return;
+
+        // 按 chunk 分组实体
+        final Long2ObjectOpenHashMap<List<Entity>> entitiesByChunk = new Long2ObjectOpenHashMap<>();
+        regionizedWorldData.forEachTickingEntity(entity -> {
+            long chunkKey = ChunkPos.pack(entity.blockPosition());
+            List<Entity> list = entitiesByChunk.get(chunkKey);
+            if (list == null) {
+                list = new ArrayList<>();
+                entitiesByChunk.put(chunkKey, list);
+            }
+            list.add(entity);
+        });
+
+        if (entitiesByChunk.isEmpty()) return;
+
+        // 构建 (SystemProfile, Scope) 对 — 每个 chunk 一个 entity_tick 系统实例
+        final List<Map.Entry<SystemProfile, Scope>> systemScopePairs = new ArrayList<>(entitiesByChunk.size());
+        for (long chunkKey : entitiesByChunk.keySet()) {
+            LongSet chunks = new LongOpenHashSet();
+            chunks.add(chunkKey);
+            Scope scope = new Scope.ChunkScope(regionId, chunks);
+            systemScopePairs.add(new AbstractMap.SimpleEntry<>(MiliGameSystems.ENTITY_TICK, scope));
+        }
+
+        // 构建 level-aware executors
+        final Map<String, java.util.function.BiConsumer<Scope, ServerLevel>> executors = new HashMap<>();
+        executors.put("entity_tick", (scope, lvl) -> {
+            if (scope instanceof Scope.ChunkScope chunkScope) {
+                for (long chunkKey : chunkScope.chunkPositions()) {
+                    List<Entity> entities = entitiesByChunk.get(chunkKey);
+                    if (entities == null) continue;
+                    for (Entity entity : entities) {
+                        if (entity.isRemoved()) continue;
+                        if (lvl.tickRateManager().isEntityFrozen(entity)) continue;
+                        entity.checkDespawn();
+                        if (entity.isRemoved()) continue;
+                        Entity vehicle = entity.getVehicle();
+                        if (vehicle != null) {
+                            if (!vehicle.isRemoved() && vehicle.hasPassenger(entity)) continue;
+                            entity.stopRiding();
+                        }
+                        if (dev.kaiijumc.kaiiju.KaiijuEntityLimits.enabled) {
+                            dev.kaiijumc.kaiiju.KaiijuEntityThrottler.EntityThrottlerReturn throttle =
+                                    regionizedWorldData.entityThrottler.tickLimiterShouldSkip(entity);
+                            if (throttle.remove && !entity.hasCustomName()) entity.remove(Entity.RemovalReason.DISCARDED);
+                            if (throttle.skip) continue;
+                        }
+                        lvl.guardEntityTick(lvl::tickNonPassenger, entity);
+                    }
+                }
+            }
+        });
+
+        dagExecutor.executeSystems(regionId, context, systemScopePairs, level, executors);
     }
 
     public Map<String, Object> getStats() {
