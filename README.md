@@ -33,7 +33,7 @@ Minecraft（原版）
               └── Mili（本项目）
 ```
 
-> Mili 原为 Lophine/Luminol 的衍生分支，现已迁移为直接基于 Folia。
+> Mili 原为 Lophine/Luminol 的衍生分支，现已迁移为直接基于 Folia。包名已重命名为 `fun.bm.mili.lmili`。
 
 ---
 
@@ -60,12 +60,13 @@ Minecraft（原版）
 
 ### 通用性能优化
 
-来自 Gale / Lithium / Pufferfish / SparklyPaper / Kaiiju / Petal / Krypton 等上游的通用优化（不涉及生电行为修改），例如：
+来自 Gale / Lithium / Pufferfish / SparklyPaper / Kaiiju / Petal / Krypton / Leaves 等上游的通用优化（不涉及生电行为修改），例如：
 
 - 噪声生成、AI 属性集合、大脑映射、准则映射等数据结构优化
 - 实体移动零位移跳过、可变实体唤醒时长、canSee 检查优化
 - 区块加载查找削减、投射物区块加载削减、寻路区域限制
 - 网络与协议层优化、区块增量压缩
+- 村民 lobotomize（发呆）优化、传感器工作削减
 
 ### API 扩展
 
@@ -76,8 +77,9 @@ Minecraft（原版）
 | **Tick Regions API** | 查询/操作 tick 区域的 API（`ThreadedRegion`、`RegionStats` 等） |
 | **ReplayMod 摄影师** | 创建 ReplayMod 摄影师实体进行录像，`Photographer` / `PhotographerManager` API |
 | **Bytebuf API** | 面向插件的自定义数据包读写 API |
-| **KioCG Chunk API** | 区块级辅助 API |
 | **实体传送异步事件** | `EntityTeleportAsyncEvent`、`PreEntityPortalEvent`、`PostEntityPortalEvent` 等 |
+| **Waypoint API** | 实体路径点追踪与恢复 API |
+| **ThreadedRegionizer** | 获取全局 `ThreadedRegionizer` 实例的 API |
 
 ---
 
@@ -107,11 +109,11 @@ git config --global core.longpaths true
 python scripts/inject_kotlin.py
 
 # 5. 构建 Paperclip JAR
-./gradlew :mili-server:createMojmapPaperclipJar
+./gradlew :mili-server:createPaperclipJar
 ```
 
 构建产物位于 `mili-server/build/libs/`：
-- `mili-paperclip-26.2-R0.1-SNAPSHOT.jar` — 可直接运行的 Paperclip JAR
+- `mili-26.2-paperclip.jar` — 可直接运行的 Paperclip JAR
 
 ---
 
@@ -158,9 +160,9 @@ dependencies {
 ```
 Mili/
 ├── mili-api/                  # Mili API 模块
-│   └── src/main/java/         #   Photographer、Bytebuf、事件 API
+│   └── src/main/java/         #   事件 API、Photographer、Bytebuf
 ├── mili-server/               # Mili 服务端核心
-│   ├── minecraft-patches/     #   补丁文件（features/ + resources/ + sources/）
+│   ├── minecraft-patches/     #   97 个特征补丁（features/）
 │   ├── paper-patches/         #   Paper API/Server 层补丁
 │   └── src/main/
 │       └── java/fun/bm/mili/  #   Java 源码
@@ -172,10 +174,11 @@ Mili/
 │           ├── portal/        #     传送门管理
 │           ├── utils/         #     工具类（区域调度、网络优化、内存管理等）
 │           └── villager/      #     村民优化器
-├── lmili-api/                 # LMili 附加 API 源（原 luminol-api）
+├── lmili-api/                 # LMili 附加 API 源（原 luminol-api，包名 fun.bm.mili.lmili）
+├── folia-server/              # Folia 子模块（上游，不直接修改）
+├── paper-server/              # Paper 服务器（补丁应用目标）
+├── paper-api/                 # Paper API（补丁应用目标）
 ├── docs/                      # 文档
-│   ├── WIKI.md                #   中文 Wiki
-│   └── CONTRIBUTING.md        #   贡献指南
 ├── build.gradle.kts           # 根构建脚本
 └── gradle.properties          # 版本与上游 ref 配置
 ```
@@ -194,11 +197,11 @@ Mili 提供 TOML 配置文件（纯 Java 解析实现）：
 
 | 类别 | 说明 | 代表模块 |
 |------|------|----------|
-| `function` | 游戏机制与实用功能 | `LanguageConfig`、`ContainerExpansionConfig`、`ReplayAPIConfig` |
-| `experiment` | 实验性性能/并发功能 | `RegionBalancerConfig`、`CrossRegionHelperConfig` |
-| `optimizations` | 性能优化 | `NetworkOptimizerConfig`、`MmapRegionStorageConfig` |
-| `fixes` | 崩溃/行为修复 | `PortalLinkFixConfig` |
-| `misc` | 杂项 | `AutoUpdateConfig`、`BStatsConfig` |
+| `function` | 游戏机制与实用功能 | `LanguageConfig`、`TpsBarConfig`、`RegionBarConfig` |
+| `experiment` | 实验性性能/并发功能 | `RegionBalancerConfig`、`CrossDimensionTeleportQueueConfig` |
+| `optimizations` | 性能优化 | `NetworkOptimizerConfig`、`MmapRegionStorageConfig`、`VillagerOptimizerConfig` |
+| `fixes` | 崩溃/行为修复 | `PortalLinkFixConfig`、`CollisionBehaviorConfig` |
+| `misc` | 杂项 | `AutoUpdateConfig`、`BStatsConfig`、`ServerModNameConfig` |
 
 ---
 
@@ -206,7 +209,7 @@ Mili 提供 TOML 配置文件（纯 Java 解析实现）：
 
 Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理 feature 补丁：
 
-1. 在 `mili-server/src/minecraft/` 或 `mili-api/` 中修改代码
+1. 在 `mili-server/src/minecraft/java/` 中修改代码
 2. 提交变更：`git commit -m "描述"`
 3. 重建补丁：`./gradlew :mili-server:rebuildAllServerPatches`
 4. 提交补丁文件并推送
@@ -238,7 +241,9 @@ Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理 featu
 
 ## 社区
 
-[Discord](https://discord.com/invite/BSa67dbvVf)
+<!-- [Discord](https://discord.com/invite/BSa67dbvVf)  -->
+
+QQ 群：（待添加）
 
 ## 感谢
 

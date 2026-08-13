@@ -30,7 +30,6 @@ git config --global core.longpaths true
 | 依赖 | 版本 | 说明 |
 |------|------|------|
 | JDK | 25+ | Mili 26.2 分支需要 Java 25，不是 JDK 21 |
-| Rust | stable (edition 2024) | 可选，编译原生优化库 |
 | Git | 2.x | Windows 需启用长路径支持 |
 
 ## 补丁模型概览
@@ -38,11 +37,13 @@ git config --global core.longpaths true
 Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统，仓库在应用补丁后生成工作树目录：
 
 - `mili-api/` — Mili API 模块
-- `mili-server/src/minecraft/` — 服务器实现（应用 121 个 feature 补丁后的源码）
+- `mili-server/src/minecraft/` — 服务器实现（应用 97 个 feature 补丁后的源码）
 - `folia-server/` — Folia 子模块（上游，不直接修改）
+- `paper-server/` — Paper 服务器（补丁应用目标）
+- `paper-api/` — Paper API（补丁应用目标）
 
 这些目录中的修改通过 `.patch` 文件管理：
-- 补丁文件位于 `mili-server/minecraft-patches/features/`（121 个）
+- 补丁文件位于 `mili-server/minecraft-patches/features/`（97 个）
 - 每次修改源码后需要重建补丁文件
 
 ## 如何添加新补丁
@@ -61,30 +62,26 @@ Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统，仓库在
 4. 运行 `./gradlew :mili-server:rebuildAllServerPatches`
 5. 推送并更新 PR
 
-## Rust 模块开发
+## 配置系统
 
-Rust 源码位于 `mili-rust/src/rust/src/`，共 4 个模块文件：
+Mili 的配置系统基于纯 Java 实现（night-config 库），不依赖任何原生代码：
 
-```bash
-cd mili-rust/src/rust
+- 配置模块源码位于 `mili-server/src/main/java/fun/bm/mili/config/`
+- 配置 TOML 文件运行时生成于服务器目录
 
-# 编译
-cargo build --release
+如需添加新的配置项：
 
-# 代码检查（必须 0 warning）
-cargo clippy --release
+1. 在 `fun.bm.mili.config.modules` 对应分类下新建 Config 类（参考已有模块如 `NetworkOptimizerConfig`）
+2. 实现 `IConfigModule` 接口
+3. 在 `ConfigManager` 中注册新模块
 
-# 单元测试（28 个）
-cargo test --release
+## 包名约定
 
-# 打包进 JAR
-./gradlew :mili-rust:stageRustBinary
-```
-
-**edition 2024 注意事项**：
-- `#[no_mangle]` 必须写 `#[unsafe(no_mangle)]`
-- unsafe fn 内部必须显式 unsafe 块
-- JNI 的 `catch_unwind` 需用 `AssertUnwindSafe` 包装 `JNIEnv`
+| 用途 | 包名 |
+|------|------|
+| Mili 核心源码 | `fun.bm.mili.*` |
+| LMili 遗留功能 | `fun.bm.mili.lmili.*` |
+| Mili 公开 API | `fun.bm.mili.api.*`（在 mili-api 模块中） |
 
 ## 常见问题
 
@@ -92,14 +89,16 @@ cargo test --release
 不建议。组织 Fork 的 PR 无法由本项目直接编辑，合并过程会更复杂。
 
 **构建失败怎么办？**
-先运行 `./gradlew assemble --stacktrace` 并检查错误输出与依赖问题。确保使用 JDK 25。
+先运行 `./gradlew :mili-server:compileJava --stacktrace` 并检查错误输出与依赖问题。确保使用 JDK 25。
 
 **修改 `mili-server/src/minecraft/` 下的文件后被覆盖？**
 这些是 `applyAllPatches` 生成的文件。必须通过 `minecraft-patches/features/` 下的补丁文件修改，修改后执行 `rebuildAllServerPatches`。
 
 **如何运行本地测试？**
-- Java：`./gradlew test`
-- Rust：`cd mili-rust/src/rust && cargo test --release`
+- Java：`./gradlew :mili-server:test`
+
+**我需要安装 Rust 吗？**
+不需要。本项目已移除所有 Rust 原生代码，配置系统已替换为纯 Java 实现。
 
 ## 更多帮助
 

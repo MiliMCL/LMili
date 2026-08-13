@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Minecraft-26.2-green" alt="Minecraft 26.2">
+  <img src="https://img.shields.io/badge/Minecraft-1.21.x_(26.2)-green" alt="Minecraft 26.2">
   <img src="https://img.shields.io/badge/JDK-25+-orange" alt="JDK 25+">
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="GPL-3.0">
 </p>
@@ -33,7 +33,7 @@ Minecraft (vanilla)
               └── Mili (this project)
 ```
 
-> Mili was originally derived from Lophine/Luminol but has since migrated to be directly based on Folia.
+> Mili was originally derived from Lophine/Luminol but has since migrated to be directly based on Folia. Package names have been rebranded from `me.earthme.luminol` to `fun.bm.mili.lmili`.
 
 ---
 
@@ -60,12 +60,13 @@ Numerous fixes targeting Folia's region threading model, including (but not limi
 
 ### General Performance Optimizations
 
-General-purpose optimizations from Gale / Lithium / Pufferfish / SparklyPaper / Kaiiju / Petal / Krypton and others (none of which alter technical gameplay behavior), for example:
+General-purpose optimizations from Gale / Lithium / Pufferfish / SparklyPaper / Kaiiju / Petal / Krypton / Leaves and others (none of which alter technical gameplay behavior), for example:
 
 - Data structure optimizations for noise generation, AI attributes, brain maps, criterion maps
 - Zero-movement entity move skipping, variable entity wake-up duration, optimized canSee checks
 - Reduced chunk loading lookups, projectile chunk loading reduction, region-limited pathfinding
 - Network/protocol layer optimizations, chunk delta compression
+- Villager lobotomize optimization, sensor work reduction
 
 ### API Extensions
 
@@ -76,8 +77,9 @@ More capabilities on top of the Folia/Paper API:
 | **Tick Regions API** | APIs for querying/operating tick regions (`ThreadedRegion`, `RegionStats`, etc.) |
 | **ReplayMod Photographer** | Create ReplayMod photographer entities for recording, `Photographer` / `PhotographerManager` API |
 | **Bytebuf API** | Custom packet read/write API for plugins |
-| **KioCG Chunk API** | Chunk-level helper APIs |
 | **Async entity teleport events** | `EntityTeleportAsyncEvent`, `PreEntityPortalEvent`, `PostEntityPortalEvent`, etc. |
+| **Waypoint API** | Entity waypoint tracking and restoration API |
+| **ThreadedRegionizer** | API to obtain the global `ThreadedRegionizer` instance |
 
 ---
 
@@ -107,11 +109,11 @@ git config --global core.longpaths true
 python scripts/inject_kotlin.py
 
 # 5. Build Paperclip JAR
-./gradlew :mili-server:createMojmapPaperclipJar
+./gradlew :mili-server:createPaperclipJar
 ```
 
 Build artifacts in `mili-server/build/libs/`:
-- `mili-paperclip-26.2-R0.1-SNAPSHOT.jar` — runnable Paperclip JAR
+- `mili-26.2-paperclip.jar` — runnable Paperclip JAR
 
 ---
 
@@ -158,9 +160,9 @@ dependencies {
 ```
 Mili/
 ├── mili-api/                  # Mili API module
-│   └── src/main/java/         #   Photographer, Bytebuf, event API
+│   └── src/main/java/         #   Event API, Photographer, Bytebuf
 ├── mili-server/               # Mili server core
-│   ├── minecraft-patches/     #   Patch files (features/ + resources/ + sources/)
+│   ├── minecraft-patches/     #   97 feature patches (features/)
 │   ├── paper-patches/         #   Paper API/Server layer patches
 │   └── src/main/
 │       └── java/fun/bm/mili/  #   Java source
@@ -172,10 +174,11 @@ Mili/
 │           ├── portal/        #     Portal management
 │           ├── utils/         #     Utilities (region scheduling, network optimization, memory management, etc.)
 │           └── villager/      #     Villager optimizer
-├── lmili-api/                 # LMili extra API sources (formerly luminol-api)
+├── lmili-api/                 # LMili extra API sources (formerly luminol-api, package fun.bm.mili.lmili)
+├── folia-server/              # Folia submodule (upstream, do not modify directly)
+├── paper-server/              # Paper server (patch application target)
+├── paper-api/                 # Paper API (patch application target)
 ├── docs/                      # Documentation
-│   ├── WIKI.md                #   Wiki
-│   └── CONTRIBUTING.md        #   Contributing guide
 ├── build.gradle.kts           # Root build script
 └── gradle.properties          # Version & upstream ref configuration
 ```
@@ -194,11 +197,11 @@ Config categories:
 
 | Category | Description | Example modules |
 |----------|-------------|-----------------|
-| `function` | Gameplay mechanics & utilities | `LanguageConfig`, `ContainerExpansionConfig`, `ReplayAPIConfig` |
-| `experiment` | Experimental performance/concurrency features | `RegionBalancerConfig`, `CrossRegionHelperConfig` |
-| `optimizations` | Performance optimizations | `NetworkOptimizerConfig`, `MmapRegionStorageConfig` |
-| `fixes` | Crash/behavior fixes | `PortalLinkFixConfig` |
-| `misc` | Miscellaneous | `AutoUpdateConfig`, `BStatsConfig` |
+| `function` | Gameplay mechanics & utilities | `LanguageConfig`, `TpsBarConfig`, `RegionBarConfig` |
+| `experiment` | Experimental performance/concurrency features | `RegionBalancerConfig`, `CrossDimensionTeleportQueueConfig` |
+| `optimizations` | Performance optimizations | `NetworkOptimizerConfig`, `MmapRegionStorageConfig`, `VillagerOptimizerConfig` |
+| `fixes` | Crash/behavior fixes | `PortalLinkFixConfig`, `CollisionBehaviorConfig` |
+| `misc` | Miscellaneous | `AutoUpdateConfig`, `BStatsConfig`, `ServerModNameConfig` |
 
 ---
 
@@ -206,14 +209,14 @@ Config categories:
 
 Mili manages feature patches with the **Hyacinthusweight** (paperweight-based) patch system:
 
-1. Modify code in `mili-server/src/minecraft/` or `mili-api/`
+1. Modify code in `mili-server/src/minecraft/java/`
 2. Commit changes: `git commit -m "description"`
 3. Rebuild patches: `./gradlew :mili-server:rebuildAllServerPatches`
 4. Commit the patch files and push
 
 Edits to generated files under `mili-server/src/minecraft/java/` are overwritten by `applyAllPatches`; changes must go through patch files in `minecraft-patches/features/`.
 
-See the [contributing guide](docs/CONTRIBUTING.md) for details.
+See the [contributing guide](docs/CONTRIBUTING_EN.md) for details.
 
 ---
 
@@ -238,7 +241,9 @@ Pull requests and issues are welcome! Please read first:
 
 ## Community
 
-[Discord](https://discord.com/invite/BSa67dbvVf)
+<!-- [Discord](https://discord.com/invite/BSa67dbvVf) -->
+
+QQ Group: (TBA)
 
 ## Acknowledgements
 
