@@ -235,7 +235,7 @@ Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理 featu
 |------|------|
 | Folia（直接上游） | https://github.com/PaperMC/Folia |
 | Paper | https://github.com/PaperMC/Paper |
-| Lophine（原直接上游） | https://github.com/LophineLabs/Lophine 由原开发者继续开发 |
+| Luminol（大量代码移植出处） | https://github.com/LuminolMC/Luminol 已删库 |
 
 ---
 
