@@ -1,11 +1,14 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 33efebab90a473ad62d6f48b6e5511c2b7f91434 Mon Sep 17 00:00:00 2001
 From: MrHua269 <wangxyper@163.com>
 Date: Tue, 11 Feb 2025 11:58:56 +0800
 Subject: [PATCH] Add config for server mod name
 
+---
+ .../paper/network/PaperServerListPingEventImpl.java             | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/main/java/com/destroystokyo/paper/network/PaperServerListPingEventImpl.java b/src/main/java/com/destroystokyo/paper/network/PaperServerListPingEventImpl.java
-index 13b03dab807c5d83e086993af705e1d9a2676b4d..6776af9928b3f24dd18bb3a19ad85629e42a1b5d 100644
+index 13b03dab8..6776af992 100644
 --- a/src/main/java/com/destroystokyo/paper/network/PaperServerListPingEventImpl.java
 +++ b/src/main/java/com/destroystokyo/paper/network/PaperServerListPingEventImpl.java
 @@ -14,7 +14,7 @@ class PaperServerListPingEventImpl extends PaperServerListPingEvent {
@@ -17,3 +20,6 @@ index 13b03dab807c5d83e086993af705e1d9a2676b4d..6776af9928b3f24dd18bb3a19ad85629
          this.server = server;
      }
  
+-- 
+2.55.0.windows.3
+

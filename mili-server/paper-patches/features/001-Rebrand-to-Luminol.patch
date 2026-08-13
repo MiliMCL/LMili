@@ -1,11 +1,18 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 976cb19769e51bd28020c0e9c6477060ad5ec714 Mon Sep 17 00:00:00 2001
 From: Bacteriawa <A3167717663@hotmail.com>
 Date: Wed, 21 Jan 2026 16:32:50 +0800
 Subject: [PATCH] Rebrand to Luminol
 
+---
+ .../java/com/destroystokyo/paper/Metrics.java |   6 +++---
+ .../paper/PaperVersionFetcher.java            |   6 +++---
+ .../io/papermc/paper/ServerBuildInfoImpl.java |   7 ++++---
+ .../java/org/spigotmc/WatchdogThread.java     |   5 +++--
+ src/main/resources/logo.png                   | Bin 36428 -> 32775 bytes
+ 5 files changed, 13 insertions(+), 11 deletions(-)
 
 diff --git a/src/main/java/com/destroystokyo/paper/Metrics.java b/src/main/java/com/destroystokyo/paper/Metrics.java
-index 08745a35b1ce8cc56d970472088de3cd17b9e43a..fcdfd4f6de5e1c2d5e80c7f3d8cb0b33a62d257d 100644
+index 08745a35b..fcdfd4f6d 100644
 --- a/src/main/java/com/destroystokyo/paper/Metrics.java
 +++ b/src/main/java/com/destroystokyo/paper/Metrics.java
 @@ -593,7 +593,7 @@ public class Metrics {
@@ -32,7 +39,7 @@ index 08745a35b1ce8cc56d970472088de3cd17b9e43a..fcdfd4f6de5e1c2d5e80c7f3d8cb0b33
                  metrics.addCustomChart(new Metrics.DrilldownPie("java_version", () -> {
                      Map<String, Map<String, Integer>> map = new HashMap<>();
 diff --git a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
-index 30815c8970b1f1c88a3c7bb5fd36efd915f1687d..5dc8e9065ea1f3eeea73fcd049c1f9818f5d25d8 100644
+index 30815c897..5dc8e9065 100644
 --- a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
 +++ b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
 @@ -40,8 +40,8 @@ public class PaperVersionFetcher implements VersionFetcher {
@@ -56,7 +63,7 @@ index 30815c8970b1f1c88a3c7bb5fd36efd915f1687d..5dc8e9065ea1f3eeea73fcd049c1f981
              } else {
                  final Optional<String> gitBranch = BUILD_INFO.gitBranch();
 diff --git a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
-index 10a0be7a4db1a51579d113d279af7a9effe7f438..4ada790812957657d580cb748077c4961987d0cb 100644
+index 10a0be7a4..4ada79081 100644
 --- a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
 +++ b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
 @@ -31,6 +31,7 @@ public record ServerBuildInfoImpl(
@@ -89,7 +96,7 @@ index 10a0be7a4db1a51579d113d279af7a9effe7f438..4ada790812957657d580cb748077c496
  
      @Override
 diff --git a/src/main/java/org/spigotmc/WatchdogThread.java b/src/main/java/org/spigotmc/WatchdogThread.java
-index 5607f4cc8ca2f620461eb5e97d01d9db0d6b2303..1f8eba1a93d6844bc2e1ddf8c1e261fbf7caa925 100644
+index 5607f4cc8..1f8eba1a9 100644
 --- a/src/main/java/org/spigotmc/WatchdogThread.java
 +++ b/src/main/java/org/spigotmc/WatchdogThread.java
 @@ -80,9 +80,10 @@ public class WatchdogThread extends ca.spottedleaf.moonrise.common.util.TickThre
@@ -1334,4 +1341,7 @@ z<m%aiR7>&U_W59BH!1$s)hu^KiQk_~Nm2)tAc$|ZFdYb<NY&qb#mE655Aw~~^i#1e
 z6u%_JPf0pz6P2D)tYWzcM_|bHdi0+5dM(Sy3E;w1I6RvvFjCXtN~4D|mdjRXG%7Jf
 zBq)Y_UrzM}lhm^PIRFB#2ma}vTKd{uO*4J<v*R!7ct=^;PH_YP&Km2{@s6tIv8N6D
 w|1kyt000000000000000000000001h-~8pj()Vetm;e9(07*qoM6N<$f(agZz5oCK
+
+-- 
+2.55.0.windows.3
 

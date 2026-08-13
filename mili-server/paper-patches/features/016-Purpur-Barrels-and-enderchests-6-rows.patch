@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From a5966534cbac846746018384fb2e4313817ac34c Mon Sep 17 00:00:00 2001
 From: Suisuroru <qwertyuiop14077@qq.com>
 Date: Thu, 20 Feb 2025 01:00:29 +0800
 Subject: [PATCH] Purpur: Barrels and enderchests 6 rows
@@ -6,9 +6,13 @@ Subject: [PATCH] Purpur: Barrels and enderchests 6 rows
 Co-authored by: William Blake Galbreath <Blake.Galbreath@GMail.com>
 As part of: Purpur (https://github.com/PurpurMC/Purpur/blob/09f547de09fc5d886f18f6d99ff389289766ec9d/purpur-server/paper-patches/features/0003-Barrels-and-enderchests-6-rows.patch)
 Licensed under: MIT (https://github.com/PurpurMC/Purpur/blob/09f547de09fc5d886f18f6d99ff389289766ec9d/LICENSE)
+---
+ .../craftbukkit/inventory/CraftContainer.java | 21 +++++++++++++++++--
+ .../craftbukkit/inventory/CraftInventory.java |  2 +-
+ 2 files changed, 20 insertions(+), 3 deletions(-)
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/inventory/CraftContainer.java b/src/main/java/org/bukkit/craftbukkit/inventory/CraftContainer.java
-index 2f41a92465b9da28e026297cc3528898bb1c8412..74408f39a8c12a486e8e4f59c33b9ad0b5c9b454 100644
+index 2f41a9246..74408f39a 100644
 --- a/src/main/java/org/bukkit/craftbukkit/inventory/CraftContainer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/inventory/CraftContainer.java
 @@ -148,9 +148,26 @@ public class CraftContainer extends AbstractContainerMenu {
@@ -41,7 +45,7 @@ index 2f41a92465b9da28e026297cc3528898bb1c8412..74408f39a8c12a486e8e4f59c33b9ad0
              case DROPPER:
                  this.delegate = new DispenserMenu(windowId, bottom, top);
 diff --git a/src/main/java/org/bukkit/craftbukkit/inventory/CraftInventory.java b/src/main/java/org/bukkit/craftbukkit/inventory/CraftInventory.java
-index 9d5fe6fc727948955d89f9ed5e181185393a9611..1343972a3a230dcef7349f014a80362ffcb0fe94 100644
+index 9d5fe6fc7..1343972a3 100644
 --- a/src/main/java/org/bukkit/craftbukkit/inventory/CraftInventory.java
 +++ b/src/main/java/org/bukkit/craftbukkit/inventory/CraftInventory.java
 @@ -85,7 +85,7 @@ public class CraftInventory implements Inventory {
@@ -53,3 +57,6 @@ index 9d5fe6fc727948955d89f9ed5e181185393a9611..1343972a3a230dcef7349f014a80362f
  
          for (int i = 0; i < this.getSize(); i++) {
              if (i >= items.length) {
+-- 
+2.55.0.windows.3
+

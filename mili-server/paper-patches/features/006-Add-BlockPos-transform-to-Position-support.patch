@@ -1,11 +1,14 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 28d21b0db07496bdcefac4ae1ff90948283ffdfc Mon Sep 17 00:00:00 2001
 From: Helvetica Volubi <suisuroru@blue-millennium.fun>
 Date: Sat, 24 May 2025 04:27:17 +0800
 Subject: [PATCH] Add BlockPos transform to Position support
 
+---
+ src/main/java/io/papermc/paper/util/MCUtil.java | 6 ++++++
+ 1 file changed, 6 insertions(+)
 
 diff --git a/src/main/java/io/papermc/paper/util/MCUtil.java b/src/main/java/io/papermc/paper/util/MCUtil.java
-index 532076c7358aa355ce5144075fe6bd79de6ef9e6..359fa0f7fb99f6b0d9999c864bcdfd59d5b78173 100644
+index 532076c73..359fa0f7f 100644
 --- a/src/main/java/io/papermc/paper/util/MCUtil.java
 +++ b/src/main/java/io/papermc/paper/util/MCUtil.java
 @@ -183,6 +183,12 @@ public final class MCUtil {
@@ -21,3 +24,6 @@ index 532076c7358aa355ce5144075fe6bd79de6ef9e6..359fa0f7fb99f6b0d9999c864bcdfd59
      /**
       * Converts a NMS World/Vector to Bukkit Location
       *
+-- 
+2.55.0.windows.3
+

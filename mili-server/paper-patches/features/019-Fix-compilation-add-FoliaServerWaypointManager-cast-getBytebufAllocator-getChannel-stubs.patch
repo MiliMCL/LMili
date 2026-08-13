@@ -1,0 +1,91 @@
+From 0640abe1b5dfe1f95dd4186ffcbf2f3b06b759fe Mon Sep 17 00:00:00 2001
+From: xucy <xucy0609@gmail.com>
+Date: Thu, 13 Aug 2026 15:30:00 +0800
+Subject: [PATCH] Fix compilation: add FoliaServerWaypointManager cast,
+ getBytebufAllocator, getChannel, getPhotographerManager, PacketAudience.send
+ stubs
+
+---
+ src/main/java/org/bukkit/craftbukkit/CraftServer.java      | 14 ++++++++++++++
+ .../org/bukkit/craftbukkit/entity/CraftLivingEntity.java   | 2 +-
+ src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java | 14 ++++++++++++++
+ 3 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 24c68dd69..141acc1cd 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -58,6 +58,9 @@ import net.minecraft.core.registries.Registries;
+ import net.minecraft.resources.Identifier;
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.server.MinecraftServer;
++import org.leavesmc.leaves.bytebuf.Bytebuf;
++import org.leavesmc.leaves.bytebuf.PacketType;
++import org.leavesmc.leaves.entity.photographer.PhotographerManager;
+ import net.minecraft.server.ReloadableServerRegistries;
+ import net.minecraft.server.bossevents.CustomBossEvent;
+ import net.minecraft.server.commands.ReloadCommand;
+@@ -3100,4 +3103,18 @@ public final class CraftServer implements Server {
+         }
+     }
+     // Folia end - region TPS API
++
++    // Mili start - Bytebuf API
++    @Override
++    public org.leavesmc.leaves.bytebuf.BytebufAllocator getBytebufAllocator() {
++        return null; // stub: not implemented in Mili
++    }
++    // Mili end
++
++    // Mili start - Photographer
++    @Override
++    public PhotographerManager getPhotographerManager() {
++        return null; // stub: not implemented in Mili
++    }
++    // Mili end
+ }
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
+index 71c62f384..ca07897c9 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
+@@ -1152,7 +1152,7 @@ public class CraftLivingEntity extends CraftEntity implements LivingEntity {
+     }
+
+     private void updateWaypoint() {
+-        fun.bm.mili.lmili.utils.FoliaServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager(); // Luminol - Restore waypoints
++        fun.bm.mili.lmili.utils.FoliaServerWaypointManager manager = (fun.bm.mili.lmili.utils.FoliaServerWaypointManager) ((ServerLevel) getHandle().level()).getWaypointManager(); // Mili - Restore waypoints
+         manager.untrackWaypoint(getHandle());
+         manager.trackWaypoint(getHandle());
+     }
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index 3bf5cbbcb..b85ccf93a 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -21,6 +21,8 @@ import io.papermc.paper.entity.PlayerGiveResult;
+ import io.papermc.paper.math.Angle;
+ import io.papermc.paper.math.Position;
+ import io.papermc.paper.util.MCUtil;
++import org.leavesmc.leaves.bytebuf.Bytebuf;
++import org.leavesmc.leaves.bytebuf.PacketType;
+ import it.unimi.dsi.fastutil.shorts.ShortArraySet;
+ import it.unimi.dsi.fastutil.shorts.ShortSet;
+ import java.io.ByteArrayOutputStream;
+@@ -3453,4 +3455,16 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+         return this.getHandle().getNearbyChunkHot();
+     }
+     // KioCG end
++
++    // Mili start - Bytebuf PacketAudience
++    @Override
++    public @org.jetbrains.annotations.NotNull Object getChannel() {
++        return new Object(); // stub: no underlying network channel for CraftPlayer
++    }
++
++    @Override
++    public void send(PacketType packetType, Bytebuf bytebuf) {
++        // stub: not implemented in Mili
++    }
++    // Mili end
+ }
+--
+2.55.0.windows.3

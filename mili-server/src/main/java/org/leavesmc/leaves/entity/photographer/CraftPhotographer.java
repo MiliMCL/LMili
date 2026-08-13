@@ -23,6 +23,8 @@ import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.leavesmc.leaves.bytebuf.Bytebuf;
+import org.leavesmc.leaves.bytebuf.PacketType;
 import org.leavesmc.leaves.replay.ServerPhotographer;
 
 import java.io.File;
@@ -87,4 +89,16 @@ public class CraftPhotographer extends CraftPlayer implements Photographer {
     public String toString() {
         return "CraftPhotographer{" + "name=" + getName() + '}';
     }
+
+    // Mili start - Bytebuf PacketAudience
+    @Override
+    public @org.jetbrains.annotations.NotNull Object getChannel() {
+        return new Object(); // stub: photographer has no network channel
+    }
+
+    @Override
+    public void send(PacketType packetType, Bytebuf bytebuf) {
+        // stub: not implemented in Mili
+    }
+    // Mili end
 }

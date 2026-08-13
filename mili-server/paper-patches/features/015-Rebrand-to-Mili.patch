@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From ce82ea4071714f8d1c7ed250cd1b260dadffb70d Mon Sep 17 00:00:00 2001
 From: xucy10 <someonm20141923@outlook.com>
 Date: Sun, 8 Jun 2025 00:58:13 +0800
 Subject: [PATCH] Rebrand to Mili
@@ -6,9 +6,15 @@ Subject: [PATCH] Rebrand to Mili
 Special thanks (Logo author):
 Helvetica Volubi <suisuroru@blue-millennium.fun>
 bdlvl <bdlvl@blendreams.cn>
+---
+ .../java/com/destroystokyo/paper/Metrics.java |   6 +++---
+ .../paper/PaperVersionFetcher.java            |   4 ++--
+ .../io/papermc/paper/ServerBuildInfoImpl.java |   9 +++++----
+ src/main/resources/logo.png                   | Bin 32775 -> 188156 bytes
+ 4 files changed, 10 insertions(+), 9 deletions(-)
 
 diff --git a/src/main/java/com/destroystokyo/paper/Metrics.java b/src/main/java/com/destroystokyo/paper/Metrics.java
-index fcdfd4f6de5e1c2d5e80c7f3d8cb0b33a62d257d..f187e1ddd87f1b738a8e27be97151429a7d73da2 100644
+index fcdfd4f6d..f187e1ddd 100644
 --- a/src/main/java/com/destroystokyo/paper/Metrics.java
 +++ b/src/main/java/com/destroystokyo/paper/Metrics.java
 @@ -593,7 +593,7 @@ public class Metrics {
@@ -35,7 +41,7 @@ index fcdfd4f6de5e1c2d5e80c7f3d8cb0b33a62d257d..f187e1ddd87f1b738a8e27be97151429
                  metrics.addCustomChart(new Metrics.DrilldownPie("java_version", () -> {
                      Map<String, Map<String, Integer>> map = new HashMap<>();
 diff --git a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
-index 5dc8e9065ea1f3eeea73fcd049c1f9818f5d25d8..e01ffbc8ae4a1047cfb7fb0ab473965b4ff62b01 100644
+index 5dc8e9065..e01ffbc8a 100644
 --- a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
 +++ b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
 @@ -40,8 +40,8 @@ public class PaperVersionFetcher implements VersionFetcher {
@@ -50,7 +56,7 @@ index 5dc8e9065ea1f3eeea73fcd049c1f9818f5d25d8..e01ffbc8ae4a1047cfb7fb0ab473965b
      private static final String USER_AGENT = BUILD_INFO.brandName() + "/" + BUILD_INFO.asString(VERSION_SIMPLE) + " (https://papermc.io)";
      private static final Gson GSON = new Gson();
 diff --git a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
-index 4ada790812957657d580cb748077c4961987d0cb..c2b5850211dc6277add3cc4789e7b95bbf91f4c6 100644
+index 4ada79081..c2b585021 100644
 --- a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
 +++ b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
 @@ -31,7 +31,8 @@ public record ServerBuildInfoImpl(
@@ -4120,4 +4126,7 @@ z_9WwZ_pQ@<+gad^p@tO?oir>q$<F7`4570+FV&XlOR)4tf$)QCL5`x)nTj`J$;-2V
 z#r1$-!3SQd4A;^3F{5Gxh136UrW$(H2LML+)I-z+KL5S-|6tLgjQKB{{{NAtWmjWy
 zbS=t?OuH^35}LO-rwh?J3}{{PRsP<MetC8c6bd9AtwsO7wn6_M99~&Am(V4N{Pz}M
 i!hbo2io*Z90wdBVaayS*vv5U}j~_jCB<(Qe=KlipT2bBr
+
+-- 
+2.55.0.windows.3
 

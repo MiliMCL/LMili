@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From dad1f75d346f730c90d8156d5e089adc4e3c657f Mon Sep 17 00:00:00 2001
 From: Helvetica Volubi <suisuroru@blue-millennium.fun>
 Date: Sat, 24 May 2025 02:26:33 +0800
 Subject: [PATCH] Leaves: Fix SculkCatalyst exp skip
@@ -6,9 +6,12 @@ Subject: [PATCH] Leaves: Fix SculkCatalyst exp skip
 Co-authored by: violetc <58360096+s-yh-china@users.noreply.github.com>
 As part of: Leaves (https://github.com/LeavesMC/Leaves/blob/f553c53e4230aa032e54a69b6479f1959ed24a60/leaves-server/paper-patches/features/0016-Fix-SculkCatalyst-exp-skip.patch)
 Licensed under: GPL-3.0 (https://www.gnu.org/licenses/gpl-3.0.html)
+---
+ .../java/org/bukkit/craftbukkit/event/CraftEventFactory.java  | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java b/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java
-index 0754bd441290bacc27f3d1ae2d6cf5af94345745..a2ea996d82b06ea8e6e295acc2cd27880a1303cd 100644
+index 0754bd441..a2ea996d8 100644
 --- a/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java
 +++ b/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java
 @@ -968,7 +968,7 @@ public class CraftEventFactory {
@@ -36,3 +39,6 @@ index 0754bd441290bacc27f3d1ae2d6cf5af94345745..a2ea996d82b06ea8e6e295acc2cd2788
          victim.newExp = event.getNewExp();
  
          dropAllItems(drops, item -> victim.drop(item, true, false));
+-- 
+2.55.0.windows.3
+
