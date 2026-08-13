@@ -105,11 +105,11 @@ jobs:
           done
 
       - name: Build Paperclip Jar
-        run: ./gradlew :mili-server:createPaperclipJar --no-configuration-cache -PbstatsPluginId=${{ secrets.BSTATS_PLUGIN_ID }}
+        run: ./gradlew :lmili-server:createPaperclipJar --no-configuration-cache -PbstatsPluginId=${{ secrets.BSTATS_PLUGIN_ID }}
 
       - name: Post-Build Verification
         run: |
-          JAR_PATH="mili-server/build/libs"
+          JAR_PATH="lmili-server/build/libs"
           echo "=== Build Verification ==="
           if ls "$JAR_PATH"/*-paperclip-*.jar 1>/dev/null 2>&1; then
             JAR=$(ls "$JAR_PATH"/*-paperclip-*.jar | head -1)
@@ -121,9 +121,9 @@ jobs:
 
       - name: Check for Pending Patch Rebuild
         run: |
-          if git diff --name-only | grep -q "^mili-server/src/minecraft/"; then
+          if git diff --name-only | grep -q "^lmili-server/src/minecraft/"; then
             echo "WARN: Patched source has uncommitted changes — run 'rebuildPatches' to generate patch files"
-            git diff --stat -- "mili-server/src/minecraft/"
+            git diff --stat -- "lmili-server/src/minecraft/"
           else
             echo "OK: No pending patch rebuild needed"
           fi
@@ -132,7 +132,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Mili CI Artifacts
-          path: mili-server/build/libs/*-paperclip-*.jar
+          path: lmili-server/build/libs/*-paperclip-*.jar
           if-no-files-found: error
           retention-days: 14
           compression-level: 9
