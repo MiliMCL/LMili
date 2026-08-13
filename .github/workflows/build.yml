@@ -84,13 +84,20 @@ jobs:
             **/paperweight/**
             **/caches/paperweight/**
 
-      - name: Generate Upstream Sources (paper-api + paper-server + folia-server)
+      - name: Apply All Patches (generate paper-api + paper-server + folia-server)
         run: |
           set -eux
-          # Run applyFoliaPatches for paper-api, then applyServerPatches for paper-server/folia-server.
-          # Do NOT run applyAllPatches/applyMinecraftPatches which would regenerate lmili-server/src/minecraft/
-          # with incompatible source — we keep the committed version.
-          ./gradlew applyFoliaPatches applyServerPatches --no-configuration-cache
+          # Run full applyAllPatches to ensure correct task chain for upstream checkout.
+          # This regenerates everything including lmili-server/src/minecraft/.
+          ./gradlew applyAllPatches --no-configuration-cache
+
+      - name: Restore Committed lmili-server/src/minecraft/
+        run: |
+          set -eux
+          # applyAllPatches regenerated lmili-server/src/minecraft/ with CI environment mappings
+          # which may be incompatible with our patches. Restore the committed version.
+          git checkout HEAD -- lmili-server/src/minecraft/
+          echo "Restored lmili-server/src/minecraft/ ($(find lmili-server/src/minecraft -name '*.java' | wc -l) java files)"
 
       - name: Verify Generated Source
         run: |
