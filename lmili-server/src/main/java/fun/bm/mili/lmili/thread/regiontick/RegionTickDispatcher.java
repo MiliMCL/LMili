@@ -243,12 +243,6 @@ public final class RegionTickDispatcher {
                             if (!vehicle.isRemoved() && vehicle.hasPassenger(entity)) continue;
                             entity.stopRiding();
                         }
-                        if (dev.kaiijumc.kaiiju.KaiijuEntityLimits.enabled) {
-                            dev.kaiijumc.kaiiju.KaiijuEntityThrottler.EntityThrottlerReturn throttle =
-                                    regionizedWorldData.entityThrottler.tickLimiterShouldSkip(entity);
-                            if (throttle.remove && !entity.hasCustomName()) entity.remove(Entity.RemovalReason.DISCARDED);
-                            if (throttle.skip) continue;
-                        }
                         lvl.guardEntityTick(lvl::tickNonPassenger, entity);
                     }
                 }
