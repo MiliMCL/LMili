@@ -80,7 +80,7 @@ index 3de7fd2b084c38e72d7a6bc416880a881f514ad3..d3350dee1d6d5bc15dcdfba3611f93ad
  import org.slf4j.Logger;
  
 -public class RegionFile implements AutoCloseable, ca.spottedleaf.moonrise.patches.chunk_system.storage.ChunkSystemRegionFile { // Paper - rewrite chunk system
-+public class RegionFile implements AutoCloseable, ca.spottedleaf.moonrise.patches.chunk_system.storage.ChunkSystemRegionFile , abomination.IRegionFile{ // Paper - rewrite chunk system // Luminol - Configurable region file format
++public class RegionFile implements AutoCloseable, ca.spottedleaf.moonrise.patches.chunk_system.storage.ChunkSystemRegionFile, abomination.IRegionFile { // Paper - rewrite chunk system // Luminol - Configurable region file format
      private static final Logger LOGGER = LogUtils.getLogger();
      public static final int MAX_CHUNK_SIZE = 500 * 1024 * 1024; // Paper - don't write garbage data to disk if writing serialization fails
      private static final int SECTOR_BYTES = 4096;
@@ -262,7 +262,7 @@ index 63b40c420030d935bb81a219fb33defe0946e21f..49fb94848d2336e7c6a2d2c0fa45e990
      }
  
 -    @org.jetbrains.annotations.Contract("_, false -> !null") private @Nullable RegionFile getRegionFile(final ChunkPos pos, boolean existingOnly) throws IOException { // CraftBukkit
-+    @org.jetbrains.annotations.Contract("_, false -> !null") private abomination.@Nullable IRegionFile getRegionFile(final ChunkPos pos, boolean existingOnly) throws IOException { // CraftBukkit // Luminol - Configurable region file format
++    @org.jetbrains.annotations.Contract("_, false -> !null") private @Nullable abomination.IRegionFile getRegionFile(final ChunkPos pos, boolean existingOnly) throws IOException { // CraftBukkit // Luminol - Configurable region file format
          // Paper start - rewrite chunk system
          if (existingOnly) {
              return this.moonrise$getRegionFileIfExists(pos.x(), pos.z());
