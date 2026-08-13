@@ -13,18 +13,18 @@ paperweight {
 
         patchFile {
             path = "folia-server/build.gradle.kts"
-            outputFile = file("mili-server/build.gradle.kts.base")
-            patchFile = file("mili-server/build.gradle.kts.patch")
+            outputFile = file("lmili-server/build.gradle.kts.base")
+            patchFile = file("lmili-server/build.gradle.kts.patch")
         }
         patchFile {
             path = "folia-api/build.gradle.kts"
-            outputFile = file("mili-api/build.gradle.kts.base")
-            patchFile = file("mili-api/build.gradle.kts.patch")
+            outputFile = file("leaves-api/build.gradle.kts.base")
+            patchFile = file("leaves-api/build.gradle.kts.patch")
         }
 
         patchRepo("paperApi") {
             upstreamPath = "paper-api"
-            patchesDir = file("mili-api/paper-patches")
+            patchesDir = file("leaves-api/paper-patches")
             outputDir = file("paper-api")
         }
     }

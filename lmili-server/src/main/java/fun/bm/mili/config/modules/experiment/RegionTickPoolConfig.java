@@ -1,0 +1,58 @@
+package fun.bm.mili.config.modules.experiment;
+
+import fun.bm.mili.lmili.config.IConfigModule;
+import fun.bm.mili.lmili.config.flags.ConfigClassInfo;
+import fun.bm.mili.lmili.config.flags.ConfigInfo;
+import fun.bm.mili.lmili.config.flags.HotReloadUnsupported;
+import fun.bm.mili.lmili.enums.EnumConfigCategory;
+
+@ConfigClassInfo(category = EnumConfigCategory.EXPERIMENT, name = "region_tick_pool")
+public class RegionTickPoolConfig implements IConfigModule {
+
+    @HotReloadUnsupported
+    @ConfigInfo(name = "enabled", comments = """
+            启用 RegionTickPool —— Mili 独立并行 tick 框架。
+            将每个 region 的 tick 工作拆分给一批 worker 线程共同执行，
+            替代 Folia 原有的一对一线程模型。
+            启用后 RegionBalancer 将自动禁用。
+            注意：这是实验性功能，请在充分测试后用于生产环境""")
+    public static boolean enabled = false;
+
+    @HotReloadUnsupported
+    @ConfigInfo(name = "worker-count", comments = """
+            RegionTickPool 的 worker 线程总数。
+            默认为 (CPU 核心数 - 1)，最小为 2。""")
+    public static int workerCount = 0;
+
+    @ConfigInfo(name = "max-workers-per-region", comments = """
+            单个 region 最多可分配的 worker 数。
+            默认为 worker-count 的一半，最小为 1。""")
+    public static int maxWorkersPerRegion = 0;
+
+    @ConfigInfo(name = "parallelism-threshold", comments = """
+            region 拥有的 chunk 数量达到此阈值时才启用并行 tick。
+            低于此值的 region 由单线程 tick，避免调度开销。""")
+    public static int parallelismThreshold = 4;
+
+    @ConfigInfo(name = "slice-size", comments = """
+            每个 tick 切片包含的 chunk 数量。
+            较小值 → 更好的负载均衡但更多调度开销
+            较大值 → 更少调度开销但可能负载不均""")
+    public static int sliceSize = 16;
+
+    @ConfigInfo(name = "use-virtual-threads", comments = """
+            是否使用 virtual thread 作为 worker (JDK 24+)。
+            启用后 worker-count 变为软上限，实际线程按需创建。""")
+    public static boolean useVirtualThreads = true;
+
+    public static int getWorkerCount() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        if (workerCount > 0) return Math.max(2, workerCount);
+        return Math.max(2, cores - 1);
+    }
+
+    public static int getMaxWorkersPerRegion() {
+        if (maxWorkersPerRegion > 0) return Math.max(1, maxWorkersPerRegion);
+        return Math.max(1, getWorkerCount() / 2);
+    }
+}

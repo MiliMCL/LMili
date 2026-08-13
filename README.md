@@ -33,7 +33,7 @@ Minecraft（原版）
               └── Mili（本项目）
 ```
 
-> Mili 原为 Lophine/Luminol 的衍生分支，现已迁移为直接基于 Folia。包名已重命名为 `fun.bm.mili.lmili`。
+> Mili 现为直接基于 Folia 的服务端，包名 `fun.bm.mili.lmili`。
 
 ---
 
@@ -174,7 +174,7 @@ Mili/
 │           ├── portal/        #     传送门管理
 │           ├── utils/         #     工具类（区域调度、网络优化、内存管理等）
 │           └── villager/      #     村民优化器
-├── lmili-api/                 # LMili 附加 API 源（原 luminol-api，包名 fun.bm.mili.lmili）
+├── lmili-api/                 # LMili 附加 API 源（包名 fun.bm.mili.lmili）
 ├── folia-server/              # Folia 子模块（上游，不直接修改）
 ├── paper-server/              # Paper 服务器（补丁应用目标）
 ├── paper-api/                 # Paper API（补丁应用目标）

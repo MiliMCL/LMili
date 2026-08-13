@@ -33,7 +33,7 @@ Minecraft (vanilla)
               └── Mili (this project)
 ```
 
-> Mili was originally derived from Lophine/Luminol but has since migrated to be directly based on Folia. Package names have been rebranded from `me.earthme.luminol` to `fun.bm.mili.lmili`.
+> Mili is now a server directly based on Folia, with package name `fun.bm.mili.lmili`.
 
 ---
 
@@ -174,7 +174,7 @@ Mili/
 │           ├── portal/        #     Portal management
 │           ├── utils/         #     Utilities (region scheduling, network optimization, memory management, etc.)
 │           └── villager/      #     Villager optimizer
-├── lmili-api/                 # LMili extra API sources (formerly luminol-api, package fun.bm.mili.lmili)
+├── lmili-api/                 # LMili extra API sources (package fun.bm.mili.lmili)
 ├── folia-server/              # Folia submodule (upstream, do not modify directly)
 ├── paper-server/              # Paper server (patch application target)
 ├── paper-api/                 # Paper API (patch application target)

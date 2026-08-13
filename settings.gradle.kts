@@ -20,5 +20,5 @@ plugins {
 
 rootProject.name = "mili"
 
-include("mili-api")
-include("mili-server")
+include("leaves-api")
+include("lmili-server")

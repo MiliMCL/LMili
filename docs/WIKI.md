@@ -26,8 +26,7 @@ Minecraft（原版）
               └── Mili（本项目）
 ```
 
-> Mili 原为 Lophine/Luminol 的衍生分支，现已迁移为直接基于 Folia，将 Luminol 的优化源码内联合并。
-> Luminol、Hyacinthusweight 均已删库。
+> Mili 现为直接基于 Folia 的服务端。
 
 Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理多层 fork：
 
@@ -67,7 +66,7 @@ Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理多层
 
 | 改动 | 说明 | 位置 |
 |------|------|------|
-| 重命名为 Mili | 服务端 Mod 名、自动更新指向 `MiliMC/Mili` | `0001-Rebrand-to-Luminol.patch` |
+| 重命名为 Mili | 服务端 Mod 名、自动更新指向 `MiliMC/Mili` | `0001-Rebrand-to-Mili.patch` |
 | 新增 Mili 全局配置 | 注册 `mili_config.toml`，命名空间 `fun.bm.mili.config.modules` | 品牌补丁 |
 | 新增 Mili Carpet 配置 | 注册 `mili_carpet_config.toml`，命名空间 `fun.bm.mili.carpet.config.modules` | 品牌补丁 |
 

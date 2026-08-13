@@ -194,7 +194,7 @@ jobs:
           tag: ${{ env.tag }}
           name: ${{ env.project_id_b }} ${{ env.mcversion }} - ${{ env.commit_id }}${{ env.release_count }}
           body: |
-            📦Version: `${{ env.mcversion }}` | Commit ${{ env.commit_id }} [![download](https://img.shields.io/github/downloads/LuminolMC/${{ env.project_id }}/${{ env.tag }}/total?color=red&style=flat)
+            📦Version: `${{ env.mcversion }}` | Commit ${{ env.commit_id }} [![download](https://img.shields.io/github/downloads/MiliMC/${{ env.project_id }}/${{ env.tag }}/total?color=red&style=flat)
             This release is automatically compiled by GitHub Actions
             ### Branch Info
             > ${{ github.ref_name }}
@@ -213,7 +213,7 @@ jobs:
           tag: ${{ env.tag }}
           name: ${{ env.project_id_b }} ${{ env.mcversion }} - ${{ env.commit_id }}${{ env.release_count }}
           body: |
-            📦Version: `${{ env.mcversion }}` | Commit ${{ env.commit_id }} [![download](https://img.shields.io/github/downloads/LuminolMC/${{ env.project_id }}/${{ env.tag }}/total?color=red&style=flat)
+            📦Version: `${{ env.mcversion }}` | Commit ${{ env.commit_id }} [![download](https://img.shields.io/github/downloads/MiliMC/${{ env.project_id }}/${{ env.tag }}/total?color=red&style=flat)
             This release is automatically compiled by GitHub Actions
             ### Comments
             > ${{ inputs.comments }}

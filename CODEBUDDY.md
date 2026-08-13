@@ -11,7 +11,7 @@ This file provides guidance to CodeBuddy / AI code assistants when working with 
 **上游**：Folia `57f643f`（`foliaRef` in `gradle.properties`）
 **包名**：`fun.bm.mili`（lmili 子包 `fun.bm.mili.lmili`）
 
-> Mili 原为 Lophine/Luminol 衍生分支，现已直接基于 Folia。原 Rust 模块已移除，配置系统已替换为纯 Java night-config 实现。原 `me.earthme.luminol` 包名已重命名为 `fun.bm.mili.lmili`。
+> Mili 现为直接基于 Folia 的服务端。原 Rust 模块已移除，配置系统已替换为纯 Java night-config 实现。包名 `fun.bm.mili.lmili`。
 
 ---
 
@@ -52,11 +52,11 @@ This file provides guidance to CodeBuddy / AI code assistants when working with 
 
 ```
 Mili/
-├── mili-api/          # 对外公开 API（Photographer、Bytebuf、事件）
-├── mili-server/       # 服务器核心
-│   ├── minecraft-patches/features/   # 97 个特征补丁文件
+├── leaves-api/        # 对外公开 API（Photographer、Bytebuf、事件）
+├── lmili-server/      # 服务器核心
+│   ├── minecraft-patches/features/   # 特征补丁文件
 │   └── src/main/java/fun/bm/mili/   # Java 源码
-├── lmili-api/         # LMili 附加 API（原 luminol-api，包 fun.bm.mili.lmili）
+├── lmili-api/         # LMili 附加 API（包 fun.bm.mili.lmili）
 ├── folia-server/      # Folia 子模块（上游，不修改）
 ├── folia-api/         # Folia API（不修改）
 ├── paper-server/      # Paper 服务器（补丁应用目标）
@@ -78,7 +78,7 @@ Mili/
 | `villager` | 村民优化器 |
 | `lithium` | Leaves Lithium 移植（漏斗、方块实体、实体追踪优化） |
 | `threadedregions` | Folia 区域调度相关辅助类 |
-| `lmili` | Luminol 遗留功能（包名仍保留历史引用至 lmili 子包） |
+| `lmili` | Mili 核心功能子包（`fun.bm.mili.lmili`） |
 
 ### 继承链
 
