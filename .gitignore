@@ -6,9 +6,8 @@ build
 /run
 **/bin/
 *.class
-/lophine-server/build.gradle.kts
-/lophine-api/build.gradle.kts
-/lmili-server/src/minecraft
+/lmili-server/build.gradle.kts
+/lmili-api/build.gradle.kts
 /paper-server
 /folia-server
 /paper-api

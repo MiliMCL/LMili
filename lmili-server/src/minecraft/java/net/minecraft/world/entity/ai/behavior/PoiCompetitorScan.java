@@ -1,0 +1,96 @@
+package net.minecraft.world.entity.ai.behavior;
+
+import java.util.List;
+import java.util.Optional;
+import net.minecraft.core.GlobalPos;
+import net.minecraft.core.Holder;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.behavior.declarative.BehaviorBuilder;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.ai.village.poi.PoiType;
+import net.minecraft.world.entity.npc.villager.Villager;
+import net.minecraft.world.entity.npc.villager.VillagerProfession;
+
+public class PoiCompetitorScan {
+    public static BehaviorControl<Villager> create() {
+        return BehaviorBuilder.create(
+            i -> i.group(i.present(MemoryModuleType.JOB_SITE), i.present(MemoryModuleType.NEAREST_LIVING_ENTITIES))
+                .apply(
+                    i,
+                    (jobSite, nearestEntities) -> (level, body, timestamp) -> {
+                        GlobalPos pos = i.get(jobSite);
+                        // Folia start - region threading
+                        if (pos.dimension() != level.dimension() || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos.pos())) {
+                            return true;
+                        }
+                        // Folia end - region threading
+                        // Luminol start - POI fixes
+                        var blockPosOfJobSite = pos.pos();
+                        var sectionPosOfJobSite = net.minecraft.core.SectionPos.asLong(blockPosOfJobSite);
+                        var poiManager = level.getPoiManager();
+                        // we don't care if we should clear the memory of JOB_SITE
+                        // as it will be automatically removed in SetWalkTargetFromBlockMemory
+                        // so simply break down if it's not loaded
+                        var poiChunk = fun.bm.mili.lmili.config.modules.fixes.POIRangeFixes.doNotCompetePOIIfUnloaded ? poiManager.get(sectionPosOfJobSite) : poiManager.getOrLoad(sectionPosOfJobSite);
+                        poiChunk.flatMap(poiSection -> poiSection.getType(blockPosOfJobSite))
+                        // Luminol end - POI fixes
+                        /*level.getPoiManager() // Luminol - POI fixes
+                            .getType(pos.pos())*/ // Luminol - POI fixes
+                            .ifPresent(
+                                // Paper start - Improve performance of PoiCompetitorScan by unrolling stream
+                                // The previous logic used Stream#reduce to simulate a form of single-iteration bubble sort
+                                // in which the "winning" villager would maintain MemoryModuleType.JOB_SITE while all others
+                                // would lose said memory module type by passing each "current winner" and incoming next
+                                // villager to #selectWinner.
+                                poiType -> {
+                                    final List<LivingEntity> livingEntities = i.get(nearestEntities);
+
+                                    Villager winner = body;
+                                    for (final LivingEntity other : livingEntities) {
+                                        if (other == body) {
+                                            continue;
+                                        }
+                                        if (!(other instanceof final Villager otherVillager)) {
+                                            continue;
+                                        }
+                                        if (!other.isAlive()) {
+                                            continue;
+                                        }
+                                        if (!competesForSameJobsite(pos, poiType, otherVillager)) {
+                                            continue;
+                                        }
+                                        winner = selectWinner(winner, otherVillager);
+                                    }
+                                }
+                                // Paper end - Improve performance of PoiCompetitorScan by unrolling stream
+                            );
+                        return true;
+                    }
+                )
+        );
+    }
+
+    private static Villager selectWinner(final Villager first, final Villager second) {
+        Villager winner;
+        Villager loser;
+        if (first.getVillagerXp() > second.getVillagerXp()) {
+            winner = first;
+            loser = second;
+        } else {
+            winner = second;
+            loser = first;
+        }
+
+        loser.getBrain().eraseMemory(MemoryModuleType.JOB_SITE);
+        return winner;
+    }
+
+    private static boolean competesForSameJobsite(final GlobalPos pos, final Holder<PoiType> poiType, final Villager nearbyVillager) {
+        Optional<GlobalPos> jobSite = nearbyVillager.getBrain().getMemory(MemoryModuleType.JOB_SITE);
+        return jobSite.isPresent() && pos.equals(jobSite.get()) && hasMatchingProfession(poiType, nearbyVillager.getVillagerData().profession());
+    }
+
+    private static boolean hasMatchingProfession(final Holder<PoiType> poiType, final Holder<VillagerProfession> profession) {
+        return profession.value().heldJobSite().test(poiType);
+    }
+}
