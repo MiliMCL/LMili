@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mrhua269 <mrhua269@gmail.com>
+Date: Sat, 14 Feb 2026 22:41:07 +0800
+Subject: [PATCH] Add config for waypoint restoration
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
+index c2c74485901a974301302ad30493dc321345ea0e..d7ce463a9922ab6713e77f5e845724629bbc87b1 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
+@@ -1152,7 +1152,7 @@ public class CraftLivingEntity extends CraftEntity implements LivingEntity {
+     }
+ 
+     private void updateWaypoint() {
+-        ServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager();
++        me.earthme.luminol.utils.FoliaServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager(); // Luminol - Restore waypoints
+         manager.untrackWaypoint(getHandle());
+         manager.trackWaypoint(getHandle());
+     }

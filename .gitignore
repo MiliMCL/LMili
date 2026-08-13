@@ -1,0 +1,24 @@
+# Ignore Gradle project-specific cache directory
+.gradle
+
+# Ignore Gradle build output directory
+build
+/run
+**/bin/
+*.class
+/lophine-server/build.gradle.kts
+/lophine-api/build.gradle.kts
+/lophine-server/src/minecraft
+/paper-server
+/paper-api
+/paper-api-generator
+/lophine-src
+
+.idea/
+.vscode/
+libs/
+mili-rust/src/rust/target
+
+# Paperweight auto-clones Minecraft resources/data into these dirs during build
+# They contain their own .git repos which get mistaken for submodules
+mili-server/src/minecraft/resources

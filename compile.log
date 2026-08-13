@@ -1,0 +1,356 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Calculating task graph as configuration cache cannot be reused because file 'settings.gradle.kts' has changed.
+
+> Configure project :
+hyacinthusweight-patcher v2.0.15 (running on 'Windows 10')
+
+> Configure project :mili-server
+hyacinthusweight-core v2.0.15 (running on 'Windows 10')
+
+> Task :mili-server:checkKotlinGradlePluginConfigurationErrors SKIPPED
+
+> Task :mili-api:compileJava
+注: 某些输入文件使用或覆盖了已过时的 API。
+注: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。
+注: 某些输入文件使用或覆盖了标记为待删除的已过时 API。
+注: 有关详细信息, 请使用 -Xlint:removal 重新编译。
+注: 某些输入文件使用了未经检查或不安全的操作。
+注: 有关详细信息, 请使用 -Xlint:unchecked 重新编译。
+
+> Task :mili-server:compileKotlin NO-SOURCE
+> Task :mili-server:compileJava
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\replay\ServerPhotographer.java:35: 错误: 程序包org.leavesmc.leaves.bot不存在
+import org.leavesmc.leaves.bot.BotStatsCounter;
+                              ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\replay\ReplayFile.java:36: 错误: 程序包org.leavesmc.leaves.protocol.core不存在
+import org.leavesmc.leaves.protocol.core.ProtocolUtils;
+                                        ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\fun\bm\mili\utils\AdaptiveTPSManager.java:5: 错误: 程序包fun.bm.mili.rust不存在
+import fun.bm.mili.rust.RustCow;
+                       ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\fun\bm\mili\utils\AdaptiveTPSManager.java:23: 错误: 找不到符号
+    private static final RustCow<Collection<RegionLoadMonitor.RegionLoadSnapshot>> snapshotCache =
+                         ^
+  符号:   类 RustCow
+  位置: 类 AdaptiveTPSManager
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\bytebuf\internal\InternalBytebufHandler.java:16: 错误: 找不到符号
+import fun.bm.mili.config.modules.misc.LeavesPacketEventConfig;
+                                      ^
+  符号:   类 LeavesPacketEventConfig
+  位置: 程序包 fun.bm.mili.config.modules.misc
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\command\arguments\BotArgumentType.java:28: 错误: 程序包org.leavesmc.leaves.bot不存在
+import org.leavesmc.leaves.bot.BotList;
+                              ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\command\arguments\BotArgumentType.java:29: 错误: 程序包org.leavesmc.leaves.bot不存在
+import org.leavesmc.leaves.bot.ServerBot;
+                              ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\command\arguments\BotArgumentType.java:34: 错误: 找不到符号
+public class BotArgumentType implements CustomArgumentType.Converted<@NotNull ServerBot, @NotNull String> {
+                                                                              ^
+  符号: 类 ServerBot
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\command\arguments\BotArgumentType.java:56: 错误: 找不到符号
+    public ServerBot convert(String nativeType) throws CommandSyntaxException {
+           ^
+  符号:   类 ServerBot
+  位置: 类 BotArgumentType
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\block\entity\SleepingBlockEntity.java:49: 错误: RebindableTickingBlockEntityWrapper 在 LevelChunk 中是 private 访问控制
+    LevelChunk.RebindableTickingBlockEntityWrapper lithium$getTickWrapper();
+              ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\block\entity\SleepingBlockEntity.java:51: 错误: RebindableTickingBlockEntityWrapper 在 LevelChunk 中是 private 访问控制
+    void lithium$setTickWrapper(LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper);
+                                          ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\util\ShearsWrenchUtil.java:3: 错误: 找不到符号
+import fun.bm.mili.config.modules.function.RedStoneConfig;
+                                          ^
+  符号:   类 RedStoneConfig
+  位置: 程序包 fun.bm.mili.config.modules.function
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\entity\Entity.java:4694: 错误: 不兼容的类型: BlockPos无法转换为Vec3
+                    final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
+                                                                                                                      ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\entity\Entity.java:4695: 错误: 不兼容的类型: BlockPos无法转换为Vec3
+                    final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
+                                                                                                                          ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\entity\Entity.java:4732: 错误: 不兼容的类型: BlockPos无法转换为Vec3
+                    final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
+                                                                                                                      ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\entity\Entity.java:4733: 错误: 不兼容的类型: BlockPos无法转换为Vec3
+                    final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, spawnPos);
+                                                                                                                          ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\entity\Entity.java:4800: 错误: 不兼容的类型: BlockPos无法转换为Vec3
+                final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
+                                                                                                                  ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\entity\Entity.java:4801: 错误: 不兼容的类型: BlockPos无法转换为Vec3
+                final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
+                                                                                                                      ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\entity\Entity.java:4949: 错误: 不兼容的类型: BlockPos无法转换为Vec3
+                io.papermc.paper.util.MCUtil.toLocation(this.level, portalPos),
+                                                                    ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\server\level\ChunkMap.java:1396: 错误: 找不到符号
+                if (visibleToPlayer && (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player) || !player.getBukkitEntity().canSeeChunkMapUpdatePlayer(this.entity.getBukkitEntity()))) { // Paper - only consider hits // Folia - region threading // SparklyPaper - optimize canSee checks
+                                                                                                                                            ^
+  符号:   方法 canSeeChunkMapUpdatePlayer(CraftEntity)
+  位置: 类 CraftPlayer
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\server\players\PlayerList.java:300: 错误: addEntity(Entity) 在 ChunkMap 中是 protected 访问控制
+        ((ServerLevel)player.level()).getChunkSource().chunkMap.addEntity(player);
+                                                               ^
+E:\Program Files\Tencent\AndrowsData\Mili\paper-server\src\main\java\org\bukkit\craftbukkit\entity\CraftPlayer.java:226: 错误: CraftPlayer不是抽象的, 并且未覆盖Player中的抽象方法getNearbyChunkHot()
+public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessageBridgeImpl {
+       ^
+E:\Program Files\Tencent\AndrowsData\Mili\paper-server\src\main\java\org\bukkit\craftbukkit\CraftWorld.java:166: 错误: CraftWorld不是抽象的, 并且未覆盖World中的抽象方法getThreadedRegionizer()
+public class CraftWorld extends CraftRegionAccessor implements World {
+       ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\level\NaturalSpawner.java:93: 错误: 找不到符号
+                    if (!fun.bm.mili.config.modules.function.TechnicalSurvivalModeConfig.enabled && !entity.level().paperConfig().entities.spawning.countAllMobsForSpawning && // Mili - mc technical survival mode
+                                                            ^
+  符号:   类 TechnicalSurvivalModeConfig
+  位置: 程序包 fun.bm.mili.config.modules.function
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\replay\Recorder.java:99: 错误: packetListener 在 Connection 中是 private 访问控制
+        this.packetListener = listener;
+            ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\replay\ServerPhotographer.java:62: 错误: 无法为 final 变量 gameMode 分配值
+        this.gameMode = new ServerPhotographerGameMode(this);
+            ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\replay\ServerPhotographer.java:64: 错误: 找不到符号
+        this.stats = new BotStatsCounter(server);
+                         ^
+  符号:   类 BotStatsCounter
+  位置: 类 ServerPhotographer
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\entity\photographer\CraftPhotographer.java:30: 错误: CraftPhotographer不是抽象的, 并且未覆盖Player中的抽象方法getNearbyChunkHot()
+public class CraftPhotographer extends CraftPlayer implements Photographer {
+       ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\replay\ReplayFile.java:125: 错误: 找不到符号
+        data.generator = ProtocolUtils.buildProtocolVersion("replay");
+                         ^
+  符号:   变量 ProtocolUtils
+  位置: 类 ReplayFile
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\fun\bm\mili\lmili\config\modules\misc\SentryConfig.java:36: 错误: 找不到符号
+                : configInstance.getOrElse("sentry.dsn", sentryDsn);
+                                ^
+  符号:   方法 getOrElse(String,String)
+  位置: 类型为TomlConfigData的变量 configInstance
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\fun\bm\mili\lmili\config\modules\misc\SentryConfig.java:38: 错误: 找不到符号
+        logLevel = configInstance.getOrElse("sentry.log-level", logLevel);
+                                 ^
+  符号:   方法 getOrElse(String,String)
+  位置: 类型为TomlConfigData的变量 configInstance
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\fun\bm\mili\lmili\config\modules\misc\SentryConfig.java:39: 错误: 找不到符号
+        onlyLogThrown = configInstance.getOrElse("sentry.only-log-thrown", onlyLogThrown);
+                                      ^
+  符号:   方法 getOrElse(String,boolean)
+  位置: 类型为TomlConfigData的变量 configInstance
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\fun\bm\mili\utils\AdaptiveTPSManager.java:24: 错误: 找不到符号
+            RustCow.owned(new ArrayList<>());
+            ^
+  符号:   变量 RustCow
+  位置: 类 AdaptiveTPSManager
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\bytebuf\internal\InternalBytebufHandler.java:93: 错误: 找不到符号
+            if (!LeavesPacketEventConfig.enabled || msg instanceof BundlePacket<?> || msg instanceof BundleDelimiterPacket<?>) {
+                 ^
+  符号:   变量 LeavesPacketEventConfig
+  位置: 类 PacketHandler
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\bytebuf\internal\InternalBytebufHandler.java:115: 错误: 找不到符号
+            if (!LeavesPacketEventConfig.enabled || msg instanceof BundlePacket<?> || msg instanceof BundleDelimiterPacket<?>) {
+                 ^
+  符号:   变量 LeavesPacketEventConfig
+  位置: 类 PacketHandler
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\command\arguments\BotArgumentType.java:45: 错误: 找不到符号
+        Collection<ServerBot> bots = BotList.INSTANCE.bots;
+                   ^
+  符号:   类 ServerBot
+  位置: 类 BotArgumentType
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\command\arguments\BotArgumentType.java:45: 错误: 程序包BotList不存在
+        Collection<ServerBot> bots = BotList.INSTANCE.bots;
+                                            ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\command\arguments\BotArgumentType.java:51: 错误: 找不到符号
+        bots.stream().map(ServerBot::getScoreboardName).forEach(builder::suggest);
+                          ^
+  符号:   变量 ServerBot
+  位置: 类 BotArgumentType
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\command\arguments\BotArgumentType.java:57: 错误: 找不到符号
+        ServerBot bot = BotList.INSTANCE.getBotByName(nativeType);
+        ^
+  符号:   类 ServerBot
+  位置: 类 BotArgumentType
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\command\arguments\BotArgumentType.java:57: 错误: 程序包BotList不存在
+        ServerBot bot = BotList.INSTANCE.getBotByName(nativeType);
+                               ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:48: 错误: list 在 NonNullList 中是 private 访问控制
+        super(original.list, ItemStack.EMPTY);
+                      ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:66: 错误: 找不到符号
+                stack.lithium$subscribe(this, i);
+                     ^
+  符号:   方法 lithium$subscribe(LithiumStackList,int)
+  位置: 类型为ItemStack的变量 stack
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:100: 错误: 找不到符号
+                stack.lithium$unsubscribe(this);
+                     ^
+  符号:   方法 lithium$unsubscribe(LithiumStackList)
+  位置: 类型为ItemStack的变量 stack
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:106: 错误: 找不到符号
+                stack.lithium$subscribe(this, i);
+                     ^
+  符号:   方法 lithium$subscribe(LithiumStackList,int)
+  位置: 类型为ItemStack的变量 stack
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:137: 错误: 找不到符号
+            boolean notSubscribed = previous.lithium$isSubscribedWithData(this, index);
+                                            ^
+  符号:   方法 lithium$isSubscribedWithData(LithiumStackList,int)
+  位置: 类型为ItemStack的变量 previous
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:145: 错误: 找不到符号
+                previous.lithium$unsubscribeWithData(this, index);
+                        ^
+  符号:   方法 lithium$unsubscribeWithData(LithiumStackList,int)
+  位置: 类型为ItemStack的变量 previous
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:148: 错误: 找不到符号
+                element.lithium$subscribe(this, index);
+                       ^
+  符号:   方法 lithium$subscribe(LithiumStackList,int)
+  位置: 类型为ItemStack的变量 element
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:163: 错误: 找不到符号
+            element.lithium$subscribe(this, this.indexOf(element));
+                   ^
+  符号:   方法 lithium$subscribe(LithiumStackList,int)
+  位置: 类型为ItemStack的变量 element
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:172: 错误: 找不到符号
+            previous.lithium$unsubscribeWithData(this, index);
+                    ^
+  符号:   方法 lithium$unsubscribeWithData(LithiumStackList,int)
+  位置: 类型为ItemStack的变量 previous
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:184: 错误: 找不到符号
+                stack.lithium$unsubscribeWithData(this, i);
+                     ^
+  符号:   方法 lithium$unsubscribeWithData(LithiumStackList,int)
+  位置: 类型为ItemStack的变量 stack
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:219: 错误: 找不到符号
+                f += org.leavesmc.leaves.util.ItemOverstackUtils.getItemStackSignalStrength(this.maxCountPerStack, itemStack);
+                                             ^
+  符号:   类 ItemOverstackUtils
+  位置: 程序包 org.leavesmc.leaves.util
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\LithiumStackList.java:296: 错误: 找不到符号
+            stack.lithium$unsubscribeWithData(this, index);
+                 ^
+  符号:   方法 lithium$unsubscribeWithData(LithiumStackList,int)
+  位置: 类型为ItemStack的变量 stack
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\block\entity\inventory_comparator_tracking\ComparatorTracking.java:40: 错误: 找不到符号
+                    BlockEntity blockEntity = world.lithium$getLoadedExistingBlockEntity(searchPos);
+                                                   ^
+  符号:   方法 lithium$getLoadedExistingBlockEntity(MutableBlockPos)
+  位置: 类型为Level的变量 world
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\block\entity\inventory_comparator_tracking\ComparatorTracking.java:42: 错误: 找不到符号
+                        blockEntity.lithium$onComparatorAdded(searchDirection, searchOffset);
+                                   ^
+  符号:   方法 lithium$onComparatorAdded(Direction,int)
+  位置: 类型为BlockEntity的变量 blockEntity
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\block\entity\SleepingBlockEntity.java:62: 错误: RebindableTickingBlockEntityWrapper 在 LevelChunk 中是 private 访问控制
+        LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
+                  ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\block\entity\SleepingBlockEntity.java:73: 错误: RebindableTickingBlockEntityWrapper 在 LevelChunk 中是 private 访问控制
+        LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
+                  ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\block\entity\SleepingBlockEntity.java:92: 错误: RebindableTickingBlockEntityWrapper 在 LevelChunk 中是 private 访问控制
+        LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
+                  ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\block\entity\SleepUntilTimeBlockEntityTickInvoker.java:71: 错误: 方法不会覆盖或实现超类型的方法
+    @Override
+    ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\block\entity\SleepUntilTimeBlockEntityTickInvoker.java:75: 错误: 找不到符号
+        this.delegate.updateTicksForLithium(redstoneGameTimeOffset);
+                     ^
+  符号:   方法 updateTicksForLithium(long)
+  位置: 类型为TickingBlockEntity的变量 delegate
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\HopperHelper.java:43: 错误: 找不到符号
+        if (to.lithium$itemInsertionTestRequiresStackSize1()) {
+              ^
+  符号:   方法 lithium$itemInsertionTestRequiresStackSize1()
+  位置: 类型为Container的变量 to
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\HopperHelper.java:160: 错误: 找不到符号
+                    BlockEntity hopper = blockEntities != null ? blockEntities.get(offsetPos) : level.lithium$getLoadedExistingBlockEntity(offsetPos);
+                                                                                                     ^
+  符号:   方法 lithium$getLoadedExistingBlockEntity(BlockPos)
+  位置: 类型为Level的变量 level
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\hopper\HopperHelper.java:162: 错误: 找不到符号
+                        hopperBlockEntity.lithium$invalidateCacheOnNeighborUpdate(direction == Direction.DOWN);
+                                         ^
+  符号:   方法 lithium$invalidateCacheOnNeighborUpdate(boolean)
+  位置: 类型为HopperBlockEntity的变量 hopperBlockEntity
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\tracking\entity\ChunkSectionInventoryEntityTracker.java:25: 错误: 找不到符号
+            this.level.getCurrentWorldData().containerEntityMovementTrackerMap.remove(this.sectionKey);
+                                            ^
+  符号:   变量 containerEntityMovementTrackerMap
+  位置: 类 RegionizedWorldData
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\tracking\entity\ChunkSectionInventoryEntityTracker.java:60: 错误: 找不到符号
+        ChunkSectionInventoryEntityTracker tracker = level.getCurrentWorldData().containerEntityMovementTrackerMap.computeIfAbsent(
+                                                                                ^
+  符号:   变量 containerEntityMovementTrackerMap
+  位置: 类 RegionizedWorldData
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\tracking\entity\ChunkSectionItemEntityMovementTracker.java:25: 错误: 找不到符号
+            this.level.getCurrentWorldData().itemEntityMovementTrackerMap.remove(this.sectionKey);
+                                            ^
+  符号:   变量 itemEntityMovementTrackerMap
+  位置: 类 RegionizedWorldData
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\lithium\common\tracking\entity\ChunkSectionItemEntityMovementTracker.java:60: 错误: 找不到符号
+        ChunkSectionItemEntityMovementTracker tracker = level.getCurrentWorldData().itemEntityMovementTrackerMap.computeIfAbsent(
+                                                                                   ^
+  符号:   变量 itemEntityMovementTrackerMap
+  位置: 类 RegionizedWorldData
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\util\BlockPatternHelper.java:20: 错误: 对于matches(BlockPos,Direction,Direction,LoadingCache<BlockPos,BlockInWorld>), 找不到合适的方法
+                    if (direction2 == direction || direction2 == direction.getOpposite() || (result = pattern.matches(blockPos, direction, direction2, loadingCache)) == null) {
+                                                                                                             ^
+    方法 BlockPattern.matches(BlockPos,Direction,Direction,LoadingCache<BlockPos,BlockInWorld>)不适用
+      (matches(BlockPos,Direction,Direction,LoadingCache<BlockPos,BlockInWorld>) 在 BlockPattern 中是 private 访问控制)
+    方法 BlockPattern.matches(LevelReader,BlockPos,Direction,Direction)不适用
+      (参数不匹配; BlockPos无法转换为LevelReader)
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\util\ShearsWrenchUtil.java:28: 错误: 找不到符号
+        if (!RedStoneConfig.shears || !(block instanceof ObserverBlock || block instanceof DispenserBlock || block instanceof PistonBaseBlock || block instanceof HopperBlock || block instanceof RepeaterBlock || block instanceof ComparatorBlock || block instanceof CrafterBlock || block instanceof LeverBlock || block instanceof CocoaBlock || block instanceof TrapDoorBlock || block instanceof FenceGateBlock || block instanceof LightningRodBlock || block instanceof CalibratedSculkSensorBlock || block instanceof BaseRailBlock)) {
+             ^
+  符号:   变量 RedStoneConfig
+  位置: 类 ShearsWrenchUtil
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\level\block\entity\TheEndGatewayBlockEntity.java:196: 错误: 不兼容的类型: BlockPos无法转换为Vec3
+        final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(toTeleport.level(), portalPos);
+                                                                                                                      ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\level\block\entity\TheEndGatewayBlockEntity.java:197: 错误: 不兼容的类型: BlockPos无法转换为Vec3
+        final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(portalWorld, teleportPos);
+                                                                                                              ^
+E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\minecraft\java\net\minecraft\world\level\block\entity\HopperBlockEntity.java:273: 错误: 找不到符号
+        if (foundItem && level.paperConfig().hopper.cooldownWhenFull && !fun.bm.mili.config.modules.function.TechnicalSurvivalModeConfig.enabled) { // Inventory was full - cooldown // Mili - mc technical survival mode
+                                                                                                            ^
+  符号:   类 TechnicalSurvivalModeConfig
+  位置: 程序包 fun.bm.mili.config.modules.function
+E:\Program Files\Tencent\AndrowsData\Mili\paper-server\src\main\java\org\bukkit\craftbukkit\CraftChunk.java:45: 错误: CraftChunk不是抽象的, 并且未覆盖Chunk中的抽象方法getChunkHotAvg()
+public class CraftChunk implements Chunk {
+       ^
+E:\Program Files\Tencent\AndrowsData\Mili\paper-server\src\main\java\org\bukkit\craftbukkit\entity\CraftVillager.java:31: 错误: CraftVillager不是抽象的, 并且未覆盖Villager中的抽象方法isLobotomized()
+public class CraftVillager extends CraftAbstractVillager implements Villager {
+       ^
+注: 某些输入文件使用或覆盖了已过时的 API。
+注: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。
+注: 某些输入文件使用或覆盖了标记为待删除的已过时 API。
+注: 有关详细信息, 请使用 -Xlint:removal 重新编译。
+注: 某些输入文件使用了未经检查或不安全的操作。
+注: 有关详细信息, 请使用 -Xlint:unchecked 重新编译。
+注: 某些消息已经过简化; 请使用 -Xdiags:verbose 重新编译以获得完整输出
+73 个错误
+
+> Task :mili-server:compileJava FAILED
+
+[Incubating] Problems report is available at: file:///E:/Program%20Files/Tencent/AndrowsData/Mili/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':mili-server:compileJava'.
+> Compilation failed; see the compiler output below.
+  E:\Program Files\Tencent\AndrowsData\Mili\mili-server\src\main\java\org\leavesmc\leaves\replay\ServerPhotographer.java:35: 错误: 程序包org.leavesmc.leaves.bot不存在
+  import org.leavesmc.leaves.bot.BotStatsCounter;
+                                ^
+  73 个错误
+
+* Try:
+> Check your code and dependencies to fix the compilation error(s)
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 1m 59s
+2 actionable tasks: 2 executed
+Configuration cache entry stored.

@@ -1,0 +1,1400 @@
+From 1a7285ac4da0bcebc7d7ef2afacb5d7f318f0069 Mon Sep 17 00:00:00 2001
+From: xucy <xucy0609@gmail.com>
+Date: Wed, 12 Aug 2026 12:41:55 +0800
+Subject: [PATCH] Fix compilation for MC 26.2 API migration
+
+---
+ .../patches/collisions/CollisionUtil.java     |  6 ++--
+ .../entity/activation/ActivationRange.java    |  2 +-
+ .../threadedregions/FoliaWatchdogThread.java  |  2 +-
+ .../threadedregions/RegionizedWorldData.java  | 10 +++----
+ .../threadedregions/ThreadedRegionizer.java   |  6 ++--
+ .../threadedregions/TickRegionScheduler.java  |  4 +--
+ .../paper/threadedregions/TickRegions.java    |  4 +--
+ net/minecraft/commands/Commands.java          |  4 +--
+ net/minecraft/network/Connection.java         |  2 +-
+ .../network/chat/SignedMessageChain.java      |  2 +-
+ .../game/ServerboundChatCommandPacket.java    |  2 +-
+ net/minecraft/server/Main.java                |  2 +-
+ net/minecraft/server/MinecraftServer.java     |  2 +-
+ .../server/commands/SeedCommand.java          |  2 +-
+ .../server/dedicated/DedicatedServer.java     |  4 +--
+ .../dedicated/DedicatedServerProperties.java  |  2 +-
+ net/minecraft/server/level/ServerLevel.java   |  2 +-
+ net/minecraft/server/level/ServerPlayer.java  |  2 +-
+ net/minecraft/server/level/TicketType.java    |  2 +-
+ .../ServerCommonPacketListenerImpl.java       | 25 +++++++++++++++-
+ ...ServerConfigurationPacketListenerImpl.java |  2 +-
+ .../network/ServerGamePacketListenerImpl.java | 20 ++++++-------
+ .../ServerLoginPacketListenerImpl.java        |  4 +--
+ net/minecraft/server/players/PlayerList.java  | 11 +++++--
+ net/minecraft/util/StringUtil.java            |  2 +-
+ .../util/debug/ServerDebugSubscribers.java    |  6 ++--
+ net/minecraft/world/entity/Entity.java        | 30 ++++++++++++-------
+ net/minecraft/world/entity/Mob.java           |  4 +--
+ net/minecraft/world/entity/ai/Brain.java      |  6 ++--
+ .../entity/ai/behavior/PoiCompetitorScan.java |  2 +-
+ .../ai/navigation/FlyingPathNavigation.java   |  2 +-
+ .../entity/ai/navigation/PathNavigation.java  |  6 ++--
+ .../world/entity/item/FallingBlockEntity.java |  4 +--
+ .../world/entity/monster/cubemob/Slime.java   |  2 +-
+ .../world/entity/npc/villager/Villager.java   |  6 ++--
+ net/minecraft/world/entity/player/Player.java |  2 +-
+ .../world/entity/player/ProfilePublicKey.java |  2 +-
+ .../world/entity/projectile/Projectile.java   |  4 +--
+ net/minecraft/world/item/ShearsItem.java      |  2 +-
+ .../world/level/BaseCommandBlock.java         |  2 +-
+ net/minecraft/world/level/Level.java          |  8 ++---
+ net/minecraft/world/level/block/Block.java    |  7 +++++
+ .../world/level/block/EndPortalBlock.java     |  2 +-
+ .../world/level/block/TripWireHookBlock.java  |  2 +-
+ .../block/entity/BeehiveBlockEntity.java      | 10 -------
+ .../entity/TheEndGatewayBlockEntity.java      |  2 +-
+ .../world/level/chunk/ChunkGenerator.java     |  4 +--
+ .../chunk/ChunkGeneratorStructureState.java   |  4 +--
+ .../chunk/storage/RegionFileStorage.java      |  8 ++---
+ .../world/level/levelgen/Heightmap.java       |  2 +-
+ .../world/level/levelgen/RandomState.java     | 12 ++++----
+ .../world/level/levelgen/WorldOptions.java    |  2 +-
+ .../level/levelgen/feature/CoralFeature.java  |  6 ++++
+ .../levelgen/feature/EndPlatformFeature.java  | 12 ++++----
+ .../level/levelgen/feature/GeodeFeature.java  |  2 +-
+ .../level/levelgen/structure/Structure.java   |  2 +-
+ .../RandomSpreadStructurePlacement.java       |  2 +-
+ .../placement/StructurePlacement.java         |  2 +-
+ .../structure/pools/JigsawPlacement.java      |  2 +-
+ 59 files changed, 169 insertions(+), 128 deletions(-)
+
+diff --git a/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java b/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java
+index 09e1d70..dbd7bb8 100644
+--- a/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java
++++ b/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java
+@@ -2098,9 +2098,9 @@ public final class CollisionUtil {
+     // Leaves start - Configurable collision behavior
+     private static boolean shouldSkip(AABB aabb, VoxelShape blockCollision, AABB singleAABB) {
+         boolean isBlockShape = blockCollision == Shapes.block();
+-        return switch (me.earthme.luminol.config.modules.fixes.CollisionBehaviorConfig.behaviorMode) {
+-            case me.earthme.luminol.enums.EnumCollisionBehaviorMode.VANILLA -> !voxelShapeIntersectVanilla(aabb, singleAABB);
+-            case me.earthme.luminol.enums.EnumCollisionBehaviorMode.PAPER -> !voxelShapeIntersect(aabb, singleAABB);
++        return switch (fun.bm.mili.lmili.config.modules.fixes.CollisionBehaviorConfig.behaviorMode) {
++            case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.VANILLA -> !voxelShapeIntersectVanilla(aabb, singleAABB);
++            case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.PAPER -> !voxelShapeIntersect(aabb, singleAABB);
+             default -> isBlockShape && !voxelShapeIntersectVanilla(aabb, singleAABB) || !isBlockShape && !voxelShapeIntersect(aabb, singleAABB);
+             // All other value as BLOCK_SHAPE_VANILLA to process
+         };
+diff --git a/io/papermc/paper/entity/activation/ActivationRange.java b/io/papermc/paper/entity/activation/ActivationRange.java
+index 6e1c2dc..0cf0890 100644
+--- a/io/papermc/paper/entity/activation/ActivationRange.java
++++ b/io/papermc/paper/entity/activation/ActivationRange.java
+@@ -86,7 +86,7 @@ public final class ActivationRange {
+     private static final java.util.concurrent.ThreadLocalRandom wakeUpDurationRandom = java.util.concurrent.ThreadLocalRandom.current();
+ 
+     private static int getWakeUpDurationWithVariance(Entity entity, int wakeUpDuration) {
+-        double deviation = me.earthme.luminol.config.modules.optimizations.GaleVariableEntityWakeupConfig.entityWakeUpDurationRatioStandardDeviation;
++        double deviation = fun.bm.mili.lmili.config.modules.optimizations.GaleVariableEntityWakeupConfig.entityWakeUpDurationRatioStandardDeviation;
+         if (deviation <= 0) {
+             return wakeUpDuration;
+         }
+diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+index fe15605..ce81c8b 100644
+--- a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
++++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+@@ -65,7 +65,7 @@ public final class FoliaWatchdogThread extends Thread {
+ 
+             for (final RunningTick tick : ticks) {
+                 final long elapsed = now - tick.lastPrint;
+-                if (elapsed <= TimeUnit.MILLISECONDS.toNanos(me.earthme.luminol.config.modules.misc.FoliaWatchogConfig.tickRegionTimeOutMs)) { // Luminol - Add config for watchdog timeout
++                if (elapsed <= TimeUnit.MILLISECONDS.toNanos(fun.bm.mili.lmili.config.modules.misc.FoliaWatchogConfig.tickRegionTimeOutMs)) { // Luminol - Add config for watchdog timeout
+                     continue;
+                 }
+                 tick.lastPrint = now;
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+index aedc2e1..9057776 100644
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -465,20 +465,20 @@ public final class RegionizedWorldData {
+     public Reference2ObjectOpenHashMap<EnvironmentAttribute<?>, EnvironmentAttributeSystem.ValueSampler<?>> attributeSamplers;
+ 
+     // Luminol start - Portal rate limiter
+-    public final me.earthme.luminol.utils.RateThrottler portalRateThrottler = new me.earthme.luminol.utils.RateThrottler();
+-    public final net.objecthunter.exp4j.Expression portalRateCapExpression = me.earthme.luminol.config.modules.function.PortalRateLimiterConfig.getExpressionIfConfigured();
++    public final fun.bm.mili.lmili.utils.RateThrottler portalRateThrottler = new fun.bm.mili.lmili.utils.RateThrottler();
++    public final net.objecthunter.exp4j.Expression portalRateCapExpression = fun.bm.mili.lmili.config.modules.function.PortalRateLimiterConfig.getExpressionIfConfigured();
+ 
+     private int computePortalRateCap() {
+         // expression mode is disabled
+         if (this.portalRateCapExpression == null) {
+-            return me.earthme.luminol.config.modules.function.PortalRateLimiterConfig.maxPortalTeleportsPerTick;
++            return fun.bm.mili.lmili.config.modules.function.PortalRateLimiterConfig.maxPortalTeleportsPerTick;
+         }
+ 
+         final int tickingEntityCount = this.entityTickList.size();
+         final int tickingChunkCount = this.tickingChunks.size();
+         final int playerCount = this.localPlayers.size();
+ 
+-        return me.earthme.luminol.config.modules.function.PortalRateLimiterConfig.computeExpression(
++        return fun.bm.mili.lmili.config.modules.function.PortalRateLimiterConfig.computeExpression(
+                 this.portalRateCapExpression,
+                 tickingEntityCount,
+                 tickingChunkCount,
+@@ -486,7 +486,7 @@ public final class RegionizedWorldData {
+         );
+     }
+     public boolean isPortalTeleportationOutOfRate() {
+-        if (!me.earthme.luminol.config.modules.function.PortalRateLimiterConfig.enabled) {
++        if (!fun.bm.mili.lmili.config.modules.function.PortalRateLimiterConfig.enabled) {
+             return false;
+         }
+ 
+diff --git a/io/papermc/paper/threadedregions/ThreadedRegionizer.java b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+index a346b96..94e5ba0 100644
+--- a/io/papermc/paper/threadedregions/ThreadedRegionizer.java
++++ b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+@@ -43,7 +43,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
+     private final RegionCallbacks<R, S> callbacks;
+     private final StampedLock regionLock = new StampedLock();
+     private Thread writeLockOwner;
+-    public final me.earthme.luminol.api.ThreadedRegionizer threadedRegionizerAPI; // Luminol - Tick region API
++    public final fun.bm.mili.lmili.api.ThreadedRegionizer threadedRegionizerAPI; // Luminol - Tick region API
+ 
+     /*
+     static final record Operation(String type, int chunkX, int chunkZ) {}
+@@ -73,7 +73,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
+         this.world = world;
+         this.callbacks = callbacks;
+         //this.loadTestData();
+-        this.threadedRegionizerAPI = new me.earthme.luminol.api.impl.ThreadedRegionizerImpl(this.world); // Luminol - Tick region API
++        this.threadedRegionizerAPI = new fun.bm.mili.lmili.api.impl.ThreadedRegionizerImpl(this.world); // Luminol - Tick region API
+     }
+ 
+     /*
+@@ -695,7 +695,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
+ 
+         private final ReferenceOpenHashSet<ThreadedRegion<R, S>> mergeIntoLater = new ReferenceOpenHashSet<>();
+         private final ReferenceOpenHashSet<ThreadedRegion<R, S>> expectingMergeFrom = new ReferenceOpenHashSet<>();
+-        public final me.earthme.luminol.api.ThreadedRegion threadedRegionAPI = new me.earthme.luminol.api.impl.ThreadedRegionImpl((ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>) this); // Luminol - Tickregion API
++        public final fun.bm.mili.lmili.api.ThreadedRegion threadedRegionAPI = new fun.bm.mili.lmili.api.impl.ThreadedRegionImpl((ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>) this); // Luminol - Tickregion API
+ 
+         public ThreadedRegion(final ThreadedRegionizer<R, S> regioniser) {
+             this.regioniser = regioniser;
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+index b8d1427..5caaa50 100644
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -68,7 +68,7 @@ public final class TickRegionScheduler {
+             public Thread newThread(final Runnable run) {
+                 // Luminol start - cpu affinity
+                 final Runnable actualRun;
+-                if (me.earthme.luminol.config.modules.optimizations.CpuAffinityConfig.cpuAffinityEnabled) {
++                if (fun.bm.mili.lmili.config.modules.optimizations.CpuAffinityConfig.cpuAffinityEnabled) {
+                     actualRun = new Runnable() {
+                         private boolean affinitySet = false;
+ 
+@@ -76,7 +76,7 @@ public final class TickRegionScheduler {
+                         public void run() {
+                             if (!this.affinitySet) {
+                                 this.affinitySet = true;
+-                                net.openhft.affinity.Affinity.setAffinity(me.earthme.luminol.config.modules.optimizations.CpuAffinityConfig.tickRegionAffinityBitSet);
++                                net.openhft.affinity.Affinity.setAffinity(fun.bm.mili.lmili.config.modules.optimizations.CpuAffinityConfig.tickRegionAffinityBitSet);
+                             }
+                             run.run();
+                         }
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index 7a433ee..664f51b 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -156,7 +156,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         private final AtomicInteger entityCount = new AtomicInteger();
+         private final AtomicInteger playerCount = new AtomicInteger();
+         private final AtomicInteger chunkCount = new AtomicInteger();
+-        public final me.earthme.luminol.api.RegionStats regionStatsAPI = new me.earthme.luminol.api.impl.RegionStatsImpl(this); // Luminol - Tickregion API
++        public final fun.bm.mili.lmili.api.RegionStats regionStatsAPI = new fun.bm.mili.lmili.api.impl.RegionStatsImpl(this); // Luminol - Tickregion API
+ 
+         public int getEntityCount() {
+             return this.entityCount.get();
+@@ -209,7 +209,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         public long lastSavedTime = 0L; // Leaves - last saved time
+ 
+         public volatile ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler; // Folia - profiler
+-        public final me.earthme.luminol.api.TickRegionData tickRegionDataAPI = new me.earthme.luminol.api.impl.TickRegionDataImpl(this); // Luminol - Tickregion API
++        public final fun.bm.mili.lmili.api.TickRegionData tickRegionDataAPI = new fun.bm.mili.lmili.api.impl.TickRegionDataImpl(this); // Luminol - Tickregion API
+ 
+         private TickRegionData(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+             this.region = region;
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index 08bccc3..b3bf9e0 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -202,7 +202,7 @@ public class Commands {
+         ClearInventoryCommands.register(this.dispatcher, context);
+         //CloneCommands.register(this.dispatcher, context); // Folia - region threading - TODO
+         DamageCommand.register(this.dispatcher, context);
+-        if(me.earthme.luminol.config.modules.experiment.CommandConfig.data) { // Luminol - Config for data command
++        if(fun.bm.mili.lmili.config.modules.experiment.CommandConfig.data) { // Luminol - Config for data command
+         DataCommands.register(this.dispatcher); // Folia - region threading - TODO // Luminol - Config for data command
+         } // Luminol - Config for data command
+         DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO // Luminol - Add back read-only datapack command
+@@ -263,7 +263,7 @@ public class Commands {
+         TimeCommand.register(this.dispatcher, context);
+         TitleCommand.register(this.dispatcher, context);
+         //TriggerCommand.register(this.dispatcher); // Folia - region threading - TODO later
+-        if (me.earthme.luminol.config.modules.experiment.CommandConfig.waypointsAndWaypointCommand) WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later // Luminol - Restore waypoints
++        if (fun.bm.mili.lmili.config.modules.experiment.CommandConfig.waypointsAndWaypointCommand) WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later // Luminol - Restore waypoints
+         WeatherCommand.register(this.dispatcher);
+         WorldBorderCommand.register(this.dispatcher);
+         if (JvmProfiler.INSTANCE.isAvailable()) {
+diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
+index d2e9d46..c8076af 100644
+--- a/net/minecraft/network/Connection.java
++++ b/net/minecraft/network/Connection.java
+@@ -258,7 +258,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+             if (this.stopReadingPackets) {
+                 return;
+             }
+-            if (!me.earthme.luminol.config.modules.misc.PaperPacketLimiterConfig.forceDisable && (this.allPacketCounts != null || // Luminol - Add config to force disable the packet limiter of Paper
++            if (!fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && (this.allPacketCounts != null || // Luminol - Add config to force disable the packet limiter of Paper
+                 io.papermc.paper.configuration.GlobalConfiguration.get().packetLimiter.overrides.containsKey(packet.getClass()))) { // Luminol - Add config to force disable the packet limiter of Paper
+                 long time = System.nanoTime();
+                 synchronized (PACKET_LIMIT_LOCK) {
+diff --git a/net/minecraft/network/chat/SignedMessageChain.java b/net/minecraft/network/chat/SignedMessageChain.java
+index 04d5433..dd3a43c 100644
+--- a/net/minecraft/network/chat/SignedMessageChain.java
++++ b/net/minecraft/network/chat/SignedMessageChain.java
+@@ -49,7 +49,7 @@ public class SignedMessageChain {
+                     throw new SignedMessageChain.DecodeException(SignedMessageChain.DecodeException.CHAIN_BROKEN);
+                 }
+ 
+-                if (me.earthme.luminol.config.modules.misc.InorderChatConfig.enabled && body.timeStamp().isBefore(SignedMessageChain.this.lastTimeStamp)) { // Luminol - Add config for out-of-order chat checks
++                if (fun.bm.mili.lmili.config.modules.misc.InorderChatConfig.enabled && body.timeStamp().isBefore(SignedMessageChain.this.lastTimeStamp)) { // Luminol - Add config for out-of-order chat checks
+                     this.setChainBroken();
+                     throw new SignedMessageChain.DecodeException(SignedMessageChain.DecodeException.OUT_OF_ORDER_CHAT, org.bukkit.event.player.PlayerKickEvent.Cause.OUT_OF_ORDER_CHAT); // Paper - kick event causes
+                 }
+diff --git a/net/minecraft/network/protocol/game/ServerboundChatCommandPacket.java b/net/minecraft/network/protocol/game/ServerboundChatCommandPacket.java
+index 042cb47..8be6a5c 100644
+--- a/net/minecraft/network/protocol/game/ServerboundChatCommandPacket.java
++++ b/net/minecraft/network/protocol/game/ServerboundChatCommandPacket.java
+@@ -12,7 +12,7 @@ public record ServerboundChatCommandPacket(String command) implements Packet<Ser
+     );
+ 
+     private ServerboundChatCommandPacket(final FriendlyByteBuf input) {
+-        this(me.earthme.luminol.config.modules.fixes.LongCommandSupportConfig.enabled ? input.readUtf() : input.readUtf(MAX_CHAT_PACKET_INPUT_SIZE)); // Paper - limit chat command inputs // Luminol - add support for long command inputs
++        this(fun.bm.mili.lmili.config.modules.fixes.LongCommandSupportConfig.enabled ? input.readUtf() : input.readUtf(MAX_CHAT_PACKET_INPUT_SIZE)); // Paper - limit chat command inputs // Luminol - add support for long command inputs
+     }
+ 
+     private void write(final FriendlyByteBuf output) {
+diff --git a/net/minecraft/server/Main.java b/net/minecraft/server/Main.java
+index 4385488..0562543 100644
+--- a/net/minecraft/server/Main.java
++++ b/net/minecraft/server/Main.java
+@@ -110,7 +110,7 @@ public class Main {
+                 JvmProfiler.INSTANCE.start(Environment.SERVER);
+             }
+ 
+-            me.earthme.luminol.config.ConfigManager.initConfigs(); // Luminol - Luminol config
++            fun.bm.mili.lmili.config.ConfigManager.initConfigs(); // Luminol - Luminol config
+             io.papermc.paper.plugin.PluginInitializerManager.load(options); // Paper
+             Bootstrap.bootStrap();
+             Bootstrap.validate();
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index fda77b6..f669aeb 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -2136,7 +2136,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     }
+ 
+     public String getServerModName() {
+-        return me.earthme.luminol.config.modules.misc.ServerModNameConfig.fakeVanilla ? "vanilla" : me.earthme.luminol.config.modules.misc.ServerModNameConfig.serverModName; // Paper // Luminol - Add config for this
++        return fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.fakeVanilla ? "vanilla" : fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.serverModName; // Paper // Luminol - Add config for this
+     }
+ 
+     public ServerClockManager clockManager() {
+diff --git a/net/minecraft/server/commands/SeedCommand.java b/net/minecraft/server/commands/SeedCommand.java
+index 2042dc0..75c79a1 100644
+--- a/net/minecraft/server/commands/SeedCommand.java
++++ b/net/minecraft/server/commands/SeedCommand.java
+@@ -14,7 +14,7 @@ public class SeedCommand {
+                 Component seedText = ComponentUtils.copyOnClickText(String.valueOf(seed));
+                 c.getSource().sendSuccess(() -> Component.translatable("commands.seed.success", seedText), false);
+                 // Leaf start - Matter - SecureSeed Command
+-                if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++                if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+                     su.plo.matter.Globals.setupGlobals(c.getSource().getLevel());
+                     String seedStr = su.plo.matter.Globals.seedToString(su.plo.matter.Globals.worldSeed);
+                     Component featureSeedComponent = ComponentUtils.copyOnClickText(seedStr);
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index 81934fb..732d04d 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -238,7 +238,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         this.paperConfigurations.initializeGlobalConfiguration(this.registryAccess());
+         this.paperConfigurations.initializeWorldDefaultsConfiguration(this.registryAccess());
+         // Paper end - initialize global and world-defaults configuration
+-        me.earthme.luminol.config.ConfigManager.loadConfigFiles(); // Luminol - load config file
++        fun.bm.mili.lmili.config.ConfigManager.loadConfigFiles(); // Luminol - load config file
+         if (false) this.server.spark.enableEarlyIfRequested(); // Paper - spark // Luminol - Force disable builtin spark
+         // Paper start - fix converting txt to json file; convert old users earlier after PlayerList creation but before file load/save
+         if (this.convertOldUsers()) {
+@@ -304,7 +304,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         String proxyFlavor = (io.papermc.paper.configuration.GlobalConfiguration.get().proxies.velocity.enabled) ? "Velocity" : "BungeeCord";
+         String proxyLink = (io.papermc.paper.configuration.GlobalConfiguration.get().proxies.velocity.enabled) ? "https://docs.papermc.io/velocity/security" : "http://www.spigotmc.org/wiki/firewall-guide/";
+         // Paper end - Add Velocity IP Forwarding Support
+-        if (!this.usesAuthentication() && !me.earthme.luminol.config.modules.misc.DisableWarningConfig.disableOfflineModeWarning) { //Luminol - Add config for offline mod warning
++        if (!this.usesAuthentication() && !fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableOfflineModeWarning) { //Luminol - Add config for offline mod warning
+             LOGGER.warn("**** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!");
+             LOGGER.warn("The server will make no attempt to authenticate usernames. Beware.");
+             // Spigot start
+diff --git a/net/minecraft/server/dedicated/DedicatedServerProperties.java b/net/minecraft/server/dedicated/DedicatedServerProperties.java
+index 8c0bee7..0499a2a 100644
+--- a/net/minecraft/server/dedicated/DedicatedServerProperties.java
++++ b/net/minecraft/server/dedicated/DedicatedServerProperties.java
+@@ -140,7 +140,7 @@ public class DedicatedServerProperties extends Settings<DedicatedServerPropertie
+         boolean generateStructures = this.get("generate-structures", true);
+         long seed = WorldOptions.parseSeed(levelSeed).orElse(WorldOptions.randomSeed());
+         // Leaf start - Matter - Secure Seed
+-        if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+             String featureSeedStr = this.get("feature-level-seed", "");
+             long[] featureSeed = su.plo.matter.Globals.parseSeed(featureSeedStr)
+                     .orElse(su.plo.matter.Globals.createRandomWorldSeed());
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 8f00081..c924a3e 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -687,7 +687,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         this.sleepStatus = new SleepStatus();
+         this.gameEventDispatcher = new GameEventDispatcher(this);
+         //this.waypointManager = new ServerWaypointManager(this); // Paper - optimize ServerWaypointManager with locator bar disabled // Luminol - Restore waypoints
+-        this.waypointManager = new me.earthme.luminol.utils.FoliaServerWaypointManager(this); // Luminol - Restore waypoints
++        this.waypointManager = new fun.bm.mili.lmili.utils.FoliaServerWaypointManager(this); // Luminol - Restore waypoints
+         this.environmentAttributes = EnvironmentAttributeSystem.builder().addDefaultLayers(this).build();
+         //this.updateSkyBrightness(); // Folia - region threading - delay until first tick
+         // Paper start - rewrite chunk system
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 44ae05b..98e1e1f 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1790,7 +1790,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                         respawnComplete.accept(ServerPlayer.this);
+                     }
+                     // Luminol - Add missing teleportation apis
+-                    new me.earthme.luminol.api.entity.player.PostPlayerRespawnEvent(ServerPlayer.this.getBukkitEntity()).callEvent();
++                    new fun.bm.mili.lmili.api.entity.player.PostPlayerRespawnEvent(ServerPlayer.this.getBukkitEntity()).callEvent();
+                     // Luminol end
+                 }
+             );
+diff --git a/net/minecraft/server/level/TicketType.java b/net/minecraft/server/level/TicketType.java
+index 083a82b..627d94d 100644
+--- a/net/minecraft/server/level/TicketType.java
++++ b/net/minecraft/server/level/TicketType.java
+@@ -60,7 +60,7 @@ public final class TicketType<T> implements ca.spottedleaf.moonrise.patches.chun
+     public static final TicketType PLAYER_LOADING = register("player_loading", NO_TIMEOUT, FLAG_LOADING);
+     public static final TicketType PLAYER_SIMULATION = register("player_simulation", NO_TIMEOUT, FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
+     public static final TicketType FORCED = register("forced", NO_TIMEOUT, FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
+-    public static final TicketType PORTAL = register("portal", 300L, me.earthme.luminol.config.modules.misc.SavePortalTicketsConfig.doSave ? FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE : FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
++    public static final TicketType PORTAL = register("portal", 300L, fun.bm.mili.lmili.config.modules.misc.SavePortalTicketsConfig.doSave ? FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE : FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
+     public static final TicketType ENDER_PEARL = register("ender_pearl", 40L, FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
+     public static final TicketType UNKNOWN = register("unknown", 1L, FLAG_CAN_EXPIRE_IF_UNLOADED | FLAG_LOADING);
+     public static final TicketType PLUGIN = register("plugin", NO_TIMEOUT, FLAG_LOADING | FLAG_SIMULATION); // CraftBukkit
+diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+index e8c02d1..9e6cf78 100644
+--- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+@@ -116,6 +116,7 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+             this.keepAlive.pingCalculator5s.update(response);
+ 
+             this.latency = this.keepAlive.pingCalculator5s.getAvgLatencyMS();
++            this.lastKeepAliveResponse = now; // Mili - async keepalive
+             return;
+         }
+ 
+@@ -205,7 +206,6 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+         final String channel = new String(data, from, length, java.nio.charset.StandardCharsets.US_ASCII);
+         if (register) {
+             bridge.addChannel(channel);
+-            org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleMinecraftRegister(channel, org.leavesmc.leaves.protocol.core.ProtocolUtils.createSelector(this)); // Leaves - protocol
+         } else {
+             bridge.removeChannel(channel);
+         }
+@@ -283,6 +283,29 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+         Profiler.get().pop();
+     }
+ 
++    // Mili start - async keepalive
++    public void keepConnectionAliveAsync(long currentTimeNs, long currentTimeMs) {
++        if (this.closed || !this.connection.isConnected()) {
++            return;
++        }
++
++        long timeoutNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(fun.bm.mili.config.modules.function.AsyncKeepaliveConfig.asyncKeepaliveTimeoutSeconds * 1000L);
++        if ((currentTimeNs - this.keepAlive.lastKeepAliveTx) >= java.util.concurrent.TimeUnit.SECONDS.toNanos(1L)) {
++            this.keepAlive.lastKeepAliveTx = currentTimeNs;
++            io.papermc.paper.util.KeepAlive.PendingKeepAlive pending = new io.papermc.paper.util.KeepAlive.PendingKeepAlive(currentTimeNs, currentTimeMs);
++            this.keepAlive.pendingKeepAlives.add(pending);
++            this.send(new ClientboundKeepAlivePacket(pending.challengeId()));
++        }
++        while (this.keepAlive.pendingKeepAlives.pollIf((pending) -> (currentTimeNs - pending.txTimeNS()) > timeoutNanos) != null) {
++        }
++
++        if ((currentTimeNs - this.lastKeepAliveResponse) > timeoutNanos) {
++            LOGGER.info("{} was kicked due to keepalive timeout!", this.playerProfile().name());
++            this.disconnectAsync(TIMEOUT_DISCONNECTION_MESSAGE, io.papermc.paper.connection.DisconnectionReason.TIMEOUT);
++        }
++    }
++    // Mili end - async keepalive
++
+     private boolean checkIfClosed(final long now) {
+         if (this.closed) {
+             if (now - this.closedListenerTime >= 15000L) {
+diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+index b2289f5..f93720b 100644
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -247,7 +247,7 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
+         }
+         // Luminol start - Async protocol switch
+         };
+-        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
+             this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
+             afterSwitch.run(); // directly run callback as we won't process any packet this time
+         } else {
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index a87e40c..5aa0839 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -644,7 +644,7 @@ public class ServerGamePacketListenerImpl
+                     return;
+                 }
+                 // Paper end - Prevent moving into unloaded chunks
+-                if (!me.earthme.luminol.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(100.0, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) i * speed)) && !this.isSingleplayerOwner()) { // Leaves - disable can
++                if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(100.0, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) i * speed)) && !this.isSingleplayerOwner()) { // Leaves - disable can
+                     // CraftBukkit end
+                     LOGGER.warn(
+                         "{} (vehicle of {}) moved too quickly! {},{},{}", vehicle.getPlainTextName(), this.player.getPlainTextName(), xDist, yDist, zDist
+@@ -674,7 +674,7 @@ public class ServerGamePacketListenerImpl
+                 zDist = targetZ - vehicle.getZ();
+                 movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
+                 boolean fail = false;
+-                if (!me.earthme.luminol.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist > org.spigotmc.SpigotConfig.movedWronglyThreshold) { // Spigot // Leaves - disable can
++                if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist > org.spigotmc.SpigotConfig.movedWronglyThreshold) { // Spigot // Leaves - disable can
+                     fail = true;
+                     LOGGER.warn("{} (vehicle of {}) moved wrongly! {}", vehicle.getPlainTextName(), this.player.getPlainTextName(), Math.sqrt(movedDist));
+                 }
+@@ -892,7 +892,7 @@ public class ServerGamePacketListenerImpl
+     public void handleCustomCommandSuggestions(final ServerboundCommandSuggestionPacket packet) {
+         // PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level()); // Paper - AsyncTabCompleteEvent; run this async
+         // CraftBukkit start
+-        if (!me.earthme.luminol.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !this.tabSpamThrottler.isIncrementAndUnderThreshold() && !this.server.getPlayerList().isOp(this.player.nameAndId()) && !this.server.isSingleplayerOwner(this.player.nameAndId())) { // Paper - configurable tab spam limits // Leaves - can disable
++        if (!fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !this.tabSpamThrottler.isIncrementAndUnderThreshold() && !this.server.getPlayerList().isOp(this.player.nameAndId()) && !this.server.isSingleplayerOwner(this.player.nameAndId())) { // Paper - configurable tab spam limits // Leaves - can disable
+             this.disconnectAsync(Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - Kick event cause // Paper - add proper async disconnect
+             return;
+         }
+@@ -1615,7 +1615,7 @@ public class ServerGamePacketListenerImpl
+ 
+                                     if (this.shouldCheckPlayerMovement(isFallFlying)) {
+                                         float metersPerTick = isFallFlying ? 300.0F : 100.0F;
+-                                        if (!me.earthme.luminol.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(metersPerTick, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) deltaPackets * speed))) { // Leaves - disable can
++                                        if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(metersPerTick, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) deltaPackets * speed))) { // Leaves - disable can
+                                             // CraftBukkit end
+                                             // Paper start - Add fail move event
+                                             io.papermc.paper.event.player.PlayerFailMoveEvent event = fireFailMove(io.papermc.paper.event.player.PlayerFailMoveEvent.FailReason.MOVED_TOO_QUICKLY,
+@@ -1676,7 +1676,7 @@ public class ServerGamePacketListenerImpl
+                                 zDist = targetZ - this.player.getZ();
+                                 movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
+                                 boolean movedWrongly = false; // Paper - Add fail move event; rename
+-                                if (!me.earthme.luminol.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning // Leaves - disable can
++                                if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning // Leaves - disable can
+                                             && !this.player.isChangingDimension()
+                                     && movedDist > org.spigotmc.SpigotConfig.movedWronglyThreshold // Spigot
+                                     && !this.player.isSleeping()
+@@ -2130,7 +2130,7 @@ public class ServerGamePacketListenerImpl
+     private long lastLimitedPacket = -1;
+ 
+     private boolean checkLimit(long timestamp) {
+-        if (me.earthme.luminol.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return true; // Leaves - disable
++        if (fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return true; // Leaves - disable
+         if (!io.papermc.paper.configuration.GlobalConfiguration.get().spamLimiter.incomingPacketThreshold.enabled()) {
+             return true;
+         }
+@@ -2691,7 +2691,7 @@ public class ServerGamePacketListenerImpl
+ 
+     // Spigot start - spam exclusions
+     private void detectRateSpam(final TickThrottler throttler, final String message) {
+-        if (me.earthme.luminol.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return; // Leaves - disable
++        if (fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return; // Leaves - disable
+         if (org.spigotmc.SpigotConfig.enableSpamExclusions) {
+             for (String exclude : org.spigotmc.SpigotConfig.spamExclusions) {
+                 if (exclude != null && message.startsWith(exclude)) {
+@@ -2905,7 +2905,7 @@ public class ServerGamePacketListenerImpl
+         } // Folia end - rewrite login process - move connection ownership to global region
+         this.waitingForSwitchToConfig = true; // Folia - rewrite login process - fix bad ordering of this field write - moved down
+         this.send(ClientboundStartConfigurationPacket.INSTANCE);
+-        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
+         this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
+         // Luminol start - Async protcol switch
+         } else {
+@@ -3490,7 +3490,7 @@ public class ServerGamePacketListenerImpl
+     @Override
+     public void handlePlaceRecipe(final ServerboundPlaceRecipePacket packet) {
+         // Paper start - auto recipe limit
+-        if (!me.earthme.luminol.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !org.bukkit.Bukkit.isPrimaryThread()) { // Leaves - can disable
++        if (!fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !org.bukkit.Bukkit.isPrimaryThread()) { // Leaves - can disable
+             if (!this.recipeSpamPackets.isIncrementAndUnderThreshold()) {
+                 this.disconnectAsync(net.minecraft.network.chat.Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - kick event cause // Paper - add proper async disconnect
+                 return;
+@@ -3796,7 +3796,7 @@ public class ServerGamePacketListenerImpl
+         }
+ 
+         final ServerConfigurationPacketListenerImpl listener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, this.createCookie(this.player.clientInformation())); // Paper
+-        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
+         this.connection
+             .setupInboundProtocol(
+                 ConfigurationProtocols.SERVERBOUND,
+diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+index 9d32429..ff031a6 100644
+--- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+@@ -167,7 +167,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+     public void handleHello(final ServerboundHelloPacket packet) {
+         Validate.validState(this.state == ServerLoginPacketListenerImpl.State.HELLO, "Unexpected hello packet");
+         // Paper start - Validate usernames
+-        if (me.earthme.luminol.config.modules.misc.UsernameCheckConfig.enabled // Luminol - Add config for username check
++        if (fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled // Luminol - Add config for username check
+             && io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
+             && io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.performUsernameValidation
+             && !this.iKnowThisMayNotBeTheBestIdeaButPleaseDisableUsernameValidation) {
+@@ -449,7 +449,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+ 
+         Runnable afterSwitch = () -> io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(configPacketListener::startConfiguration); // push back to main thread
+ 
+-        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
+             this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
+             this.connection.setupInboundProtocol(ConfigurationProtocols.SERVERBOUND, configPacketListener);
+             afterSwitch.run();
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index 2167ddf..63186be 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -341,7 +341,7 @@ public abstract class PlayerList {
+         // only after setting the connection listener to game type, add the connection to this regions list
+         level.getCurrentWorldData().addConnection(player);
+         // Folia end - rewrite login process
+-        if (!me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch // we will run async switch once these main thread logics became done
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch // we will run async switch once these main thread logics became done
+         connection.setupInboundProtocol(
+             GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection), playerConnection
+         );
+@@ -511,7 +511,7 @@ public abstract class PlayerList {
+         }
+         // Paper end - Send empty chunk
+         // Luminol start - Async protocol switch
+-        if (me.earthme.luminol.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
+             // auto read will be enabled once the async switch is done
+             connection.setupInboundProtocolAsync(
+                     GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection),
+@@ -1507,6 +1507,12 @@ public abstract class PlayerList {
+         return this.players;
+     }
+ 
++    // Leaves start - replay api
++    public List<ServerPlayer> realPlayers() {
++        return this.realPlayers;
++    }
++    // Leaves end - replay api
++
+     public Map<UUID, ServerPlayer> getPlayersByUUID() {
+         return this.playersByUUID;
+     }
+@@ -1534,7 +1540,6 @@ public abstract class PlayerList {
+         this.reloadAdvancementData();
+         this.reloadTagData();
+         this.reloadRecipes();
+-        org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleDataPackReload(); // Leaves - protocol
+     }
+     public void reloadAdvancementData() {
+         // Paper end - API for updating recipes on clients
+diff --git a/net/minecraft/util/StringUtil.java b/net/minecraft/util/StringUtil.java
+index 7ba42c6..c9e2ccf 100644
+--- a/net/minecraft/util/StringUtil.java
++++ b/net/minecraft/util/StringUtil.java
+@@ -65,7 +65,7 @@ public class StringUtil {
+ 
+     // Luminol start - Add config for username checks
+     public static boolean isValidPlayerName(final String username){
+-        return isValidPlayerName(username, !me.earthme.luminol.config.modules.misc.UsernameCheckConfig.enabled);
++        return isValidPlayerName(username, !fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled);
+     }
+     // Luminol end
+ 
+diff --git a/net/minecraft/util/debug/ServerDebugSubscribers.java b/net/minecraft/util/debug/ServerDebugSubscribers.java
+index 19caac6..97ac74f 100644
+--- a/net/minecraft/util/debug/ServerDebugSubscribers.java
++++ b/net/minecraft/util/debug/ServerDebugSubscribers.java
+@@ -13,7 +13,7 @@ import net.minecraft.server.players.NameAndId;
+ 
+ public class ServerDebugSubscribers {
+     private final MinecraftServer server;
+-    private final Map<DebugSubscription<?>, List<ServerPlayer>> enabledSubscriptions = new HashMap<>();
++    private final Map<DebugSubscription<?>, List<ServerPlayer>> enabledSubscriptions = new ConcurrentHashMap<>(); // Mili fix - #472: thread-safe map
+ 
+     public ServerDebugSubscribers(final MinecraftServer server) {
+         this.server = server;
+@@ -28,11 +28,11 @@ public class ServerDebugSubscribers {
+ 
+         for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
+             for (DebugSubscription<?> subscription : player.debugSubscriptions()) {
+-                this.enabledSubscriptions.computeIfAbsent(subscription, s -> new ArrayList<>()).add(player);
++                this.enabledSubscriptions.computeIfAbsent(subscription, s -> new CopyOnWriteArrayList<>()).add(player);
+             }
+         }
+ 
+-        this.enabledSubscriptions.values().removeIf(List::isEmpty);
++        this.enabledSubscriptions.entrySet().removeIf(entry -> entry.getValue().isEmpty()); // Mili fix - #472: safe removal
+     }
+ 
+     public void broadcastToAll(final DebugSubscription<?> subscription, final Packet<?> packet) {
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 568bf4d..8fc6df4 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -298,7 +298,7 @@ public abstract class Entity
+     public double yOld;
+     public double zOld;
+     public boolean noPhysics;
+-    protected final RandomSource random = me.earthme.luminol.config.modules.fixes.VanillaRandomSourceConfig.useLegacyRandomSourceForPlayers ? RandomSource.create() : SHARED_RANDOM; // Paper - Share random for entities to make them more random // Luminol - Add config for vanilla random SHARED_RANDOM
++    protected final RandomSource random = fun.bm.mili.lmili.config.modules.fixes.VanillaRandomSourceConfig.useLegacyRandomSourceForPlayers ? RandomSource.create() : SHARED_RANDOM; // Paper - Share random for entities to make them more random // Luminol - Add config for vanilla random SHARED_RANDOM
+     public int tickCount;
+     private int remainingFireTicks;
+     private final EntityFluidInteraction fluidInteraction = new EntityFluidInteraction(Set.of(FluidTags.WATER, FluidTags.LAVA));
+@@ -356,6 +356,7 @@ public abstract class Entity
+     private final LongSet visitedBlocks = new LongOpenHashSet();
+     private final InsideBlockEffectApplier.StepBasedCollector insideEffectCollector = new InsideBlockEffectApplier.StepBasedCollector();
+     private CustomData customData = CustomData.EMPTY;
++    private net.minecraft.nbt.CompoundTag leavesData = new net.minecraft.nbt.CompoundTag(); // Leaves - Leaves ex data
+     // CraftBukkit start
+     public boolean persist = true;
+     public boolean visibleByDefault = true;
+@@ -1171,13 +1172,13 @@ public abstract class Entity
+         }
+         //Luminol start - Fix high position moving
+         // Filter the threads as it may be called by the chunk system worker thread
+-        if (me.earthme.luminol.config.modules.fixes.FoliaEntityMovingFixConfig.enabled && ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()){
++        if (fun.bm.mili.lmili.config.modules.fixes.FoliaEntityMovingFixConfig.enabled && ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()){
+             var finalPosition = delta.add(this.position);
+             // not NaN (Prevent incorrect checks under NaN minecarts)
+             if (!Double.isNaN(finalPosition.x) && !Double.isNaN(finalPosition.y) && !Double.isNaN(finalPosition.z)) {
+                 // kill tick passively if it's moving out of region and we'll catch this exception
+                 if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level,finalPosition)) {
+-                    throw new me.earthme.luminol.utils.EntityMoveOutOfRegionException(this, delta, moverType);
++                    throw new fun.bm.mili.lmili.utils.EntityMoveOutOfRegionException(this, delta, moverType);
+                 }
+             }
+         }
+@@ -2778,6 +2779,8 @@ public abstract class Entity
+                 output.store("data", CustomData.CODEC, this.customData);
+             }
+ 
++            output.store("Leaves.Data", net.minecraft.nbt.CompoundTag.CODEC, leavesData); // Leaves - leaves ex data
++
+             this.addAdditionalSaveData(output, includeAll); // CraftBukkit - pass on includeAll
+             if (this.isVehicle()) {
+                 ValueOutput.ValueOutputList passengersList = output.childrenList("Passengers");
+@@ -2882,6 +2885,7 @@ public abstract class Entity
+                 );
+                 // Paper end
+                 this.customData = input.read("data", CustomData.CODEC).orElse(CustomData.EMPTY);
++                leavesData = input.read("Leaves.Data", net.minecraft.nbt.CompoundTag.CODEC).orElse(new net.minecraft.nbt.CompoundTag()); // Leaves - leaves ex data
+                 this.tags.clear();
+                 input.read("Tags", TAG_LIST_CODEC).ifPresent(this.tags::addAll);
+                 this.readAdditionalSaveData(input);
+@@ -4512,8 +4516,8 @@ public abstract class Entity
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
+ 
+         // Luminol start - Prevent teleprotAsync calls in move events
+-        if (this.blockTeleportAsync && me.earthme.luminol.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.enabled) {
+-            if (me.earthme.luminol.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.throwWhenCaught) {
++        if (this.blockTeleportAsync && fun.bm.mili.lmili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.enabled) {
++            if (fun.bm.mili.lmili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.throwWhenCaught) {
+                 throw new IllegalStateException("Call teleportAsync during move events!");
+             }
+ 
+@@ -4568,7 +4572,7 @@ public abstract class Entity
+             }
+         }
+ 
+-        final me.earthme.luminol.api.entity.EntityTeleportAsyncEvent wrapped = new me.earthme.luminol.api.entity.EntityTeleportAsyncEvent(
++        final fun.bm.mili.lmili.api.entity.EntityTeleportAsyncEvent wrapped = new fun.bm.mili.lmili.api.entity.EntityTeleportAsyncEvent(
+                 this.getBukkitEntity(),
+                 cause,
+                 destinationLoc
+@@ -4690,7 +4694,7 @@ public abstract class Entity
+                     final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
+                     final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
+ 
+-                    final me.earthme.luminol.api.portal.PortalLocateEvent portalLocateEvent = new me.earthme.luminol.api.portal.PortalLocateEvent(
++                    final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
+                             orginalPortalLocation,
+                             targetPortalLocation
+                     );
+@@ -4728,7 +4732,7 @@ public abstract class Entity
+                     final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
+                     final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, spawnPos);
+ 
+-                    final me.earthme.luminol.api.portal.PortalLocateEvent portalLocateEvent = new me.earthme.luminol.api.portal.PortalLocateEvent(
++                    final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
+                             orginalPortalLocation,
+                             targetPortalLocation
+                     );
+@@ -4796,7 +4800,7 @@ public abstract class Entity
+                 final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
+                 final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
+ 
+-                final me.earthme.luminol.api.portal.PortalLocateEvent portalLocateEvent = new me.earthme.luminol.api.portal.PortalLocateEvent(
++                final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
+                         orginalPortalLocation,
+                         targetPortalLocation
+                 );
+@@ -4940,7 +4944,7 @@ public abstract class Entity
+             return false;
+         }
+         // Luminol start - Add missing teleportation events
+-        if (!new me.earthme.luminol.api.entity.PreEntityPortalEvent(
++        if (!new fun.bm.mili.lmili.api.entity.PreEntityPortalEvent(
+                 this.getBukkitEntity(),
+                 io.papermc.paper.util.MCUtil.toLocation(this.level, portalPos),
+                 destination.getWorld()
+@@ -6531,4 +6535,10 @@ public abstract class Entity
+     // Paper end
+ 
+     public boolean shouldTickHot() { return this.tickCount > 20 * 10 && this.isAlive(); } // KioCG
++
++    // Leaves start - leaves ex data
++    public net.minecraft.nbt.CompoundTag getLeavesData() {
++        return leavesData;
++    }
++    // Leaves end - leaves ex data
+ }
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index 1bf2cc3..bd3c89e 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -221,7 +221,7 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+     public void inactiveTick() {
+         super.inactiveTick();
+         if (!this.aware) return; // Paper - Do not tick AI for inactive unaware mobs
+-        boolean isThrottled = me.earthme.luminol.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig.enabled && _pufferfish_inactiveTickDisableCounter++ % 20 != 0; // Pufferfish - throttle inactive goal selector ticking
++        boolean isThrottled = fun.bm.mili.lmili.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig.enabled && _pufferfish_inactiveTickDisableCounter++ % 20 != 0; // Pufferfish - throttle inactive goal selector ticking
+         if (this.goalSelector.inactiveTick() && !isThrottled) { // Pufferfish
+             this.goalSelector.tick();
+         }
+@@ -883,7 +883,7 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+         int idBasedTickCount = this.tickCount + this.getId(); // Luminol - Petal - Move up
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("sensing");
+-        if (idBasedTickCount % me.earthme.luminol.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !me.earthme.luminol.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Luminol - Petal - Reduce sensor work
++        if (idBasedTickCount % fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Luminol - Petal - Reduce sensor work
+         profiler.pop();
+         //int idBasedTickCount = this.tickCount + this.getId(); // Luminol - Petal - Move up
+         if (idBasedTickCount % 2 != 0 && this.tickCount > 1) {
+diff --git a/net/minecraft/world/entity/ai/Brain.java b/net/minecraft/world/entity/ai/Brain.java
+index f60f4c0..1b62179 100644
+--- a/net/minecraft/world/entity/ai/Brain.java
++++ b/net/minecraft/world/entity/ai/Brain.java
+@@ -404,7 +404,7 @@ public class Brain<E extends LivingEntity> {
+                 final net.minecraft.world.level.Level ownerLevel = owner.level();
+ 
+                 // type: entity
+-                if (me.earthme.luminol.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForEntity && value instanceof LivingEntity entity) {
++                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForEntity && value instanceof LivingEntity entity) {
+                     if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
+                         this.eraseMemory(entry.getKey());
+                         continue;
+@@ -412,7 +412,7 @@ public class Brain<E extends LivingEntity> {
+                 }
+ 
+                 // type: block_pos
+-                if (me.earthme.luminol.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForBlockPos && value instanceof net.minecraft.core.BlockPos blockPos) {
++                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForBlockPos && value instanceof net.minecraft.core.BlockPos blockPos) {
+                     if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(ownerLevel, blockPos)) {
+                         this.eraseMemory(entry.getKey());
+                         continue;
+@@ -420,7 +420,7 @@ public class Brain<E extends LivingEntity> {
+                 }
+ 
+                 //type: position_tracker and walk_target
+-                if (me.earthme.luminol.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForPositionTracker) {
++                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForPositionTracker) {
+                     net.minecraft.world.entity.ai.behavior.PositionTracker tracker = null;
+ 
+                     if (value instanceof net.minecraft.world.entity.ai.behavior.PositionTracker positionTracker) {
+diff --git a/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java b/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
+index 0e9c19a..93448ce 100644
+--- a/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
++++ b/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
+@@ -31,7 +31,7 @@ public class PoiCompetitorScan {
+                         // we don't care if we should clear the memory of JOB_SITE
+                         // as it will be automatically removed in SetWalkTargetFromBlockMemory
+                         // so simply break down if it's not loaded
+-                        var poiChunk = me.earthme.luminol.config.modules.fixes.POIRangeFixes.doNotCompetePOIIfUnloaded ? poiManager.get(sectionPosOfJobSite) : poiManager.getOrLoad(sectionPosOfJobSite);
++                        var poiChunk = fun.bm.mili.lmili.config.modules.fixes.POIRangeFixes.doNotCompetePOIIfUnloaded ? poiManager.get(sectionPosOfJobSite) : poiManager.getOrLoad(sectionPosOfJobSite);
+                         poiChunk.flatMap(poiSection -> poiSection.getType(blockPosOfJobSite))
+                         // Luminol end - POI fixes
+                         /*level.getPoiManager() // Luminol - POI fixes
+diff --git a/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java b/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java
+index c18e207..cad7b6a 100644
+--- a/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java
+@@ -61,7 +61,7 @@ public class FlyingPathNavigation extends PathNavigation {
+             if (!this.isDone()) {
+                 Vec3 target = this.path.getNextEntityPos(this.mob);
+                 // Luminol - Recompute path when path finding out of current tick region
+-                if (me.earthme.luminol.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
++                if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
+                     // we assume that:
+                     // 1. The code above doesn't touch the 'main thread context' with the position from 'this.path'
+                     // 2. The pathfinder could correctly recompute or discard the incorrect target position and this situation is happening rarely
+diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+index 9d5d3ee..ac838cf 100644
+--- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+@@ -104,7 +104,7 @@ public abstract class PathNavigation {
+             this.hasDelayedRecomputation = true;
+         } else if (this.targetPos != null) {
+             // Luminol - Recompute path when path finding out of current tick region
+-            if (me.earthme.luminol.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
++            if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
+                 // The target seems to be pointed to a position out of current region, so reset if it is
+                 // also it will interrupt the pathfinding
+                 if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.mob.level(), this.targetPos)) {
+@@ -203,7 +203,7 @@ public abstract class PathNavigation {
+         }
+         // Paper end - EntityPathfindEvent
+         // Luminol - Do not path find for targets out of current region
+-        if (me.earthme.luminol.config.modules.fixes.PathfindingFixesConfig.doNotPathfindToNotOwnedTargets) {
++        if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.doNotPathfindToNotOwnedTargets) {
+             // filter the targets not owned by current region
+             targets = new HashSet<>(targets); // well no idea about how to determine if this should be copied to a modifiable one
+             targets.removeIf(pos -> !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.mob.level(), pos));
+@@ -313,7 +313,7 @@ public abstract class PathNavigation {
+             if (!this.isDone()) {
+                 Vec3 target = this.path.getNextEntityPos(this.mob);
+                 // Luminol - Recompute path when path finding out of current tick region
+-                if (me.earthme.luminol.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
++                if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
+                     // we assume that:
+                     // 1. The code above doesn't touch the 'main thread context' with the position from 'this.path'
+                     // 2. The pathfinder could correctly recompute or discard the incorrect target position and this situation is happening rarely
+diff --git a/net/minecraft/world/entity/item/FallingBlockEntity.java b/net/minecraft/world/entity/item/FallingBlockEntity.java
+index 137389f..e8fcd2f 100644
+--- a/net/minecraft/world/entity/item/FallingBlockEntity.java
++++ b/net/minecraft/world/entity/item/FallingBlockEntity.java
+@@ -70,7 +70,7 @@ public class FallingBlockEntity extends Entity {
+     public int fallDamageMax = 40;
+     public float fallDamagePerDistance = 0.0F;
+     public @Nullable CompoundTag blockData;
+-    public boolean forceTickAfterTeleportToDuplicate = me.earthme.luminol.config.modules.fixes.UnsafeTeleportationConfig.enabled; // Luminol - Unsafe teleportation
++    public boolean forceTickAfterTeleportToDuplicate = fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled; // Luminol - Unsafe teleportation
+     protected static final EntityDataAccessor<BlockPos> DATA_START_POS = SynchedEntityData.defineId(FallingBlockEntity.class, EntityDataSerializers.BLOCK_POS);
+     public boolean autoExpire = true; // Paper - Expand FallingBlock API
+ 
+@@ -384,7 +384,7 @@ public class FallingBlockEntity extends Entity {
+         ResourceKey<Level> oldDimension = this.level().dimension();
+         boolean fromOrToEnd = (oldDimension == Level.END || newDimension == Level.END) && oldDimension != newDimension;
+         Entity newEntity = super.teleport(transition);
+-        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation || me.earthme.luminol.config.modules.fixes.UnsafeTeleportationConfig.enabled); // Paper // Luminol - Unsafe teleportation
++        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation || fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled); // Paper // Luminol - Unsafe teleportation
+         return newEntity;
+     }
+ }
+diff --git a/net/minecraft/world/entity/monster/cubemob/Slime.java b/net/minecraft/world/entity/monster/cubemob/Slime.java
+index da3bbf3..e64c3d3 100644
+--- a/net/minecraft/world/entity/monster/cubemob/Slime.java
++++ b/net/minecraft/world/entity/monster/cubemob/Slime.java
+@@ -95,7 +95,7 @@ public class Slime extends AbstractCubeMob implements Enemy {
+ 
+             ChunkPos chunkPos = ChunkPos.containing(pos);
+             // Leaf start - Matter - Secure Seed
+-            boolean isSlimeChunk = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++            boolean isSlimeChunk = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+                     ? level.getChunk(chunkPos.x(), chunkPos.z()).isSlimeChunk()
+                     : WorldgenRandom.seedSlimeChunk(chunkPos.x(), chunkPos.z(), worldGenLevel.getSeed(), level.getMinecraftWorld().spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
+             boolean slimeChunk = level.getMinecraftWorld().paperConfig().entities.spawning.allChunksAreSlimeChunks || isSlimeChunk;
+diff --git a/net/minecraft/world/entity/npc/villager/Villager.java b/net/minecraft/world/entity/npc/villager/Villager.java
+index b2776ba..4209674 100644
+--- a/net/minecraft/world/entity/npc/villager/Villager.java
++++ b/net/minecraft/world/entity/npc/villager/Villager.java
+@@ -195,8 +195,8 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
+     private int notLobotomizedCount = 0; // Purpur
+ 
+     private boolean checkLobotomized() {
+-        int interval = me.earthme.luminol.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeCheckInterval;
+-        boolean shouldCheckForTradeLocked = me.earthme.luminol.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeWaitUntilTradeLocked;
++        int interval = fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeCheckInterval;
++        boolean shouldCheckForTradeLocked = fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeWaitUntilTradeLocked;
+         if (this.notLobotomizedCount > 3) {
+             // check half as often if not lobotomized for the last 3+ consecutive checks
+             interval *= 2;
+@@ -311,7 +311,7 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("villagerBrain");
+         // Purpur start
+-        if (me.earthme.luminol.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeEnabled) {
++        if (fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeEnabled) {
+             // treat as inactive if lobotomized
+             inactive = inactive || checkLobotomized();
+         } else {
+diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world/entity/player/Player.java
+index a26025e..504e984 100644
+--- a/net/minecraft/world/entity/player/Player.java
++++ b/net/minecraft/world/entity/player/Player.java
+@@ -170,7 +170,7 @@ public abstract class Player extends Avatar implements ContainerUser {
+     private ItemStack lastItemInMainHand = ItemStack.EMPTY;
+     private final ItemCooldowns cooldowns = this.createItemCooldowns();
+     private Optional<GlobalPos> lastDeathLocation = Optional.empty();
+-    public me.earthme.luminol.functions.bars.TickableStatusBarList statusBarList = new me.earthme.luminol.functions.bars.TickableStatusBarList(this); // Luminol status bars
++    public fun.bm.mili.lmili.functions.bars.TickableStatusBarList statusBarList = new fun.bm.mili.lmili.functions.bars.TickableStatusBarList(this); // Luminol status bars
+     public @Nullable FishingHook fishing;
+     public float hurtDir;
+     public boolean affectsSpawning = true; // Paper - Affects Spawning API
+diff --git a/net/minecraft/world/entity/player/ProfilePublicKey.java b/net/minecraft/world/entity/player/ProfilePublicKey.java
+index 2de1886..5bbcde7 100644
+--- a/net/minecraft/world/entity/player/ProfilePublicKey.java
++++ b/net/minecraft/world/entity/player/ProfilePublicKey.java
+@@ -23,7 +23,7 @@ public record ProfilePublicKey(ProfilePublicKey.Data data) {
+     public static final Codec<ProfilePublicKey> TRUSTED_CODEC = ProfilePublicKey.Data.CODEC.xmap(ProfilePublicKey::new, ProfilePublicKey::data);
+ 
+     public static ProfilePublicKey createValidated(final SignatureValidator validator, final UUID profileId, final ProfilePublicKey.Data data) throws ProfilePublicKey.ValidationException {
+-        if (!data.validateSignature(validator, profileId) && (org.bukkit.Bukkit.getServer().getOnlineMode() && me.earthme.luminol.config.modules.misc.PublickeyVerifyConfig.enabled)) { // Luminol - Verify signature only in online-mode
++        if (!data.validateSignature(validator, profileId) && (org.bukkit.Bukkit.getServer().getOnlineMode() && fun.bm.mili.lmili.config.modules.misc.PublickeyVerifyConfig.enabled)) { // Luminol - Verify signature only in online-mode
+             throw new ProfilePublicKey.ValidationException(INVALID_SIGNATURE, org.bukkit.event.player.PlayerKickEvent.Cause.INVALID_PUBLIC_KEY_SIGNATURE); // Paper - kick event causes
+         } else {
+             return new ProfilePublicKey(data);
+diff --git a/net/minecraft/world/entity/projectile/Projectile.java b/net/minecraft/world/entity/projectile/Projectile.java
+index 81aafd6..420bfdb 100644
+--- a/net/minecraft/world/entity/projectile/Projectile.java
++++ b/net/minecraft/world/entity/projectile/Projectile.java
+@@ -77,8 +77,8 @@ public abstract class Projectile extends Entity implements TraceableEntity {
+         if (previousX != newX || previousZ != newZ) {
+             boolean isLoaded = ((net.minecraft.server.level.ServerChunkCache) this.level().getChunkSource()).getChunkAtIfLoadedImmediately(newX, newZ) != null;
+             if (!isLoaded) {
+-                if (currRegionData.pufferfish$loadedThisTick > me.earthme.luminol.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerTick) {
+-                    if (++this.loadedLifetime > me.earthme.luminol.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile) {
++                if (currRegionData.pufferfish$loadedThisTick > fun.bm.mili.lmili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerTick) {
++                    if (++this.loadedLifetime > fun.bm.mili.lmili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile) {
+                         this.discard();
+                     }
+                     return;
+diff --git a/net/minecraft/world/item/ShearsItem.java b/net/minecraft/world/item/ShearsItem.java
+index b7f8b52..fc0a630 100644
+--- a/net/minecraft/world/item/ShearsItem.java
++++ b/net/minecraft/world/item/ShearsItem.java
+@@ -81,7 +81,7 @@ public class ShearsItem extends Item {
+             return InteractionResult.SUCCESS;
+         } else {
+             // Mili start - shears wrench
+-            InteractionResult result = org.leavesmc.leaves.util.ShearsWrenchUtil.tryApplyRotate(context, blockState);
++            InteractionResult result = org.leavesmc.leaves.util.ShearsWrenchUtil.tryApplyRotate(context, state);
+             return result == null ? super.useOn(context) : result;
+             // Mili end - shears wrench
+         }
+diff --git a/net/minecraft/world/level/BaseCommandBlock.java b/net/minecraft/world/level/BaseCommandBlock.java
+index 47fe63e..a1ce66e 100644
+--- a/net/minecraft/world/level/BaseCommandBlock.java
++++ b/net/minecraft/world/level/BaseCommandBlock.java
+@@ -91,7 +91,7 @@ public abstract class BaseCommandBlock {
+     }
+ 
+     public boolean performCommand(final ServerLevel level) {
+-        if (!me.earthme.luminol.config.modules.experiment.CommandConfig.commandBlock) return false; // Folia - region threading // Luminol - Add experimental config for command block command execution
++        if (!fun.bm.mili.lmili.config.modules.experiment.CommandConfig.commandBlock) return false; // Folia - region threading // Luminol - Add experimental config for command block command execution
+         if (level.getGameTime() == this.lastExecution) {
+             return false;
+         }
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index b59ca7b..1d2602e 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -143,7 +143,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+     private final RegistryAccess registryAccess;
+     private final DamageSources damageSources;
+     private final PalettedContainerFactory palettedContainerFactory;
+-    public final me.earthme.luminol.utils.thread.RegionizedBlockableEventLoop regionizedBlockableEventLoop = new me.earthme.luminol.utils.thread.RegionizedBlockableEventLoop(this); // Luminol - Threading utilies
++    public final fun.bm.mili.lmili.utils.thread.RegionizedBlockableEventLoop regionizedBlockableEventLoop = new fun.bm.mili.lmili.utils.thread.RegionizedBlockableEventLoop(this); // Luminol - Threading utilies
+     private final java.util.concurrent.atomic.AtomicLong subTickCount = new java.util.concurrent.atomic.AtomicLong(); //private long subTickCount; // Folia - region threading
+ 
+     // CraftBukkit start
+@@ -1572,13 +1572,13 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+     public <T extends Entity> void guardEntityTick(final Consumer<T> tick, final T entity) {
+         try {
+             tick.accept(entity);
+-        } catch (me.earthme.luminol.utils.EntityMoveOutOfRegionException moveOutOfRegionException) {  // Luminol - Teleport async if entity was moving to another region at once
++        } catch (fun.bm.mili.lmili.utils.EntityMoveOutOfRegionException moveOutOfRegionException) {  // Luminol - Teleport async if entity was moving to another region at once
+             // Luminol start - Teleport async if entity was moving to another region at once
+             final Entity ent = moveOutOfRegionException.getEntity();
+             var currPosition = ent.position();
+             var toPosition = moveOutOfRegionException.getMovement().add(currPosition);
+ 
+-            if (me.earthme.luminol.config.modules.fixes.FoliaEntityMovingFixConfig.warnOnDetected) {
++            if (fun.bm.mili.lmili.config.modules.fixes.FoliaEntityMovingFixConfig.warnOnDetected) {
+                 MinecraftServer.LOGGER.warn("Entity {} with entityId {} has tried moving to another region!",ent, ent.getId());
+             }
+ 
+@@ -1592,7 +1592,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+             ), null, 1L);
+             // Luminol end
+         } catch (Throwable t) {
+-            if (me.earthme.luminol.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Luminol
++            if (fun.bm.mili.lmili.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Luminol
+             // Paper start - Prevent block entity and entity crashes
+             final String msg = String.format("Entity threw exception at %s:%s,%s,%s", io.papermc.paper.util.MCUtil.getLevelName(entity.level()), entity.getX(), entity.getY(), entity.getZ());
+             MinecraftServer.LOGGER.error(msg, t);
+diff --git a/net/minecraft/world/level/block/Block.java b/net/minecraft/world/level/block/Block.java
+index 423c45d..095f6d5 100644
+--- a/net/minecraft/world/level/block/Block.java
++++ b/net/minecraft/world/level/block/Block.java
+@@ -696,6 +696,13 @@ public class Block extends BlockBehaviour implements ItemLike {
+     }
+     // CraftBukkit end
+ 
++    // Mili start - reset push reaction
++    @org.jetbrains.annotations.Nullable
++    public net.minecraft.world.level.material.PushReaction getResetPushReaction() {
++        return null;
++    }
++    // Mili end - reset push reaction
++
+     private record ShapePairKey(VoxelShape first, VoxelShape second) {
+         @Override
+         public boolean equals(final Object o) {
+diff --git a/net/minecraft/world/level/block/EndPortalBlock.java b/net/minecraft/world/level/block/EndPortalBlock.java
+index fbcf926..9d61ecc 100644
+--- a/net/minecraft/world/level/block/EndPortalBlock.java
++++ b/net/minecraft/world/level/block/EndPortalBlock.java
+@@ -77,7 +77,7 @@ public class EndPortalBlock extends BaseEntityBlock implements Portal {
+                 player.showEndCredits();
+             } else {
+                 // Luminol start - unsafe teleportation
+-                if (me.earthme.luminol.config.modules.fixes.UnsafeTeleportationConfig.enabled && !(entity instanceof net.minecraft.world.entity.player.Player)) {
++                if (fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled && !(entity instanceof net.minecraft.world.entity.player.Player)) {
+                     entity.endPortalLogicAsync(pos);
+                 }
+                 // Luminol end
+diff --git a/net/minecraft/world/level/block/TripWireHookBlock.java b/net/minecraft/world/level/block/TripWireHookBlock.java
+index e9fee83..c3971a9 100644
+--- a/net/minecraft/world/level/block/TripWireHookBlock.java
++++ b/net/minecraft/world/level/block/TripWireHookBlock.java
+@@ -202,7 +202,7 @@ public class TripWireHookBlock extends Block {
+                     BlockState wireData = wireStates[i];
+                     if (wireData != null) {
+                         // Luminol start - tripwire and tripwireHook dupe
+-                        if (me.earthme.luminol.config.modules.function.TripwireBehaviorConfig.enabled) {
++                        if (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
+                             level.setBlock(testPos, wireData.trySetValue(ATTACHED, attached), 3);
+                             level.getBlockState(testPos);
+                         } else {
+diff --git a/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java b/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
+index 91976d9..0bbce88 100644
+--- a/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
+@@ -99,11 +99,6 @@ public class BeehiveBlockEntity extends BlockEntity {
+         }
+ 
+         super.setChanged();
+-        // Leaves start - pca
+-        if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
+-            org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
+-        }
+-        // Leaves end - pca
+     }
+ 
+     public boolean isFireNearby() {
+@@ -356,11 +351,6 @@ public class BeehiveBlockEntity extends BlockEntity {
+         input.read("bees", BeehiveBlockEntity.Occupant.LIST_CODEC).orElse(List.of()).forEach(this::storeBee);
+         this.savedFlowerPos = input.read("flower_pos", BlockPos.CODEC).orElse(null);
+         this.maxBees = input.getIntOr("Bukkit.MaxEntities", MAX_OCCUPANTS); // Paper - persist max bukkit occupants
+-        // Leaves start - pca
+-        if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
+-            org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
+-        }
+-        // Leaves end - pca
+     }
+ 
+     @Override
+diff --git a/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java b/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
+index fdf2204..a857d4c 100644
+--- a/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
+@@ -196,7 +196,7 @@ public class TheEndGatewayBlockEntity extends TheEndPortalBlockEntity {
+         final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(toTeleport.level(), portalPos);
+         final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(portalWorld, teleportPos);
+ 
+-        final me.earthme.luminol.api.portal.PortalLocateEvent portalLocateEvent = new me.earthme.luminol.api.portal.PortalLocateEvent(
++        final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
+                 orginalPortalLocation,
+                 targetPortalLocation
+         );
+diff --git a/net/minecraft/world/level/chunk/ChunkGenerator.java b/net/minecraft/world/level/chunk/ChunkGenerator.java
+index bac2047..472df93 100644
+--- a/net/minecraft/world/level/chunk/ChunkGenerator.java
++++ b/net/minecraft/world/level/chunk/ChunkGenerator.java
+@@ -348,7 +348,7 @@ public abstract class ChunkGenerator {
+                 .collect(Collectors.groupingBy(structure -> structure.step().ordinal()));
+             List<FeatureSorter.StepFeatureData> featureList = this.featuresPerStep.get();
+             // Leaf start - Matter - Secure Seed
+-            WorldgenRandom random = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++            WorldgenRandom random = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+                     ? new su.plo.matter.WorldgenCryptoRandom(origin.getX(), origin.getZ(), su.plo.matter.Globals.Salt.UNDEFINED, 0)
+                     : new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
+             // Leaf end - Matter - Secure Seed
+@@ -577,7 +577,7 @@ public abstract class ChunkGenerator {
+                                 options.addAll(structures);
+                                 // Leaf start - Matter - Secure Seed
+                                 WorldgenRandom random;
+-                                if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++                                if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+                                     random = new su.plo.matter.WorldgenCryptoRandom(sourceChunkPos.x(), sourceChunkPos.z(), su.plo.matter.Globals.Salt.GENERATE_FEATURE, 0);
+                                 } else {
+                                     random = new WorldgenRandom(new LegacyRandomSource(0L));
+diff --git a/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java b/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java
+index 9d91679..7d1f645 100644
+--- a/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java
++++ b/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java
+@@ -204,11 +204,11 @@ public class ChunkGeneratorStructureState {
+         int spread = placement.spread();
+         HolderSet<Biome> preferredBiomes = placement.preferredBiomes();
+         // Leaf start - Matter - Secure Seed
+-        RandomSource random = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++        RandomSource random = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+                 ? new su.plo.matter.WorldgenCryptoRandom(0, 0, su.plo.matter.Globals.Salt.STRONGHOLDS, 0)
+                 :RandomSource.create();
+         // Leaf end - Matter - Secure Seed
+-        if (!me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++        if (!fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+         //Paper start - Add missing structure set seed configs
+         if (this.conf.strongholdSeed != null && structureSet.is(net.minecraft.world.level.levelgen.structure.BuiltinStructureSets.STRONGHOLDS)) {
+             random.setSeed(this.conf.strongholdSeed);
+diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+index 49fb948..a1ae73f 100644
+--- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
++++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+@@ -59,21 +59,21 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+     }
+     // Luminol start - Configurable region file format
+     public static abomination.IRegionFile createNew(RegionStorageInfo info, Path filePath, Path folder, boolean sync) throws IOException{
+-        final me.earthme.luminol.enums.EnumRegionFormat regionFormat = me.earthme.luminol.config.modules.function.RegionFormatConfig.regionFormat;
++        final fun.bm.mili.lmili.enums.EnumRegionFormat regionFormat = fun.bm.mili.lmili.config.modules.function.RegionFormatConfig.regionFormat;
+         final String fullFileName = filePath.getFileName().toString();
+         final String[] fullNameSplit = fullFileName.split("\\.");
+         final String extensionName = fullNameSplit[fullNameSplit.length - 1];
+ 
+         if (!regionFormat.getArgument().equalsIgnoreCase(extensionName)) {
+-            net.minecraft.server.MinecraftServer.setFatalException(new RuntimeException("Invalid region file format: " + extensionName + " expected " + regionFormat.getArgument()));
++            LOGGER.error("Invalid region file format: {} expected {}", extensionName, regionFormat.getArgument()); // Mili - setFatalException removed in 26.2
+             throw new IOException("Invalid region file format: " + extensionName + " expected " + regionFormat.getArgument());
+         }
+ 
+-        return regionFormat.getCreator().create(new me.earthme.luminol.utils.RegionCreatorInfo(info, filePath, folder, sync));
++        return regionFormat.getCreator().create(new fun.bm.mili.lmili.utils.RegionCreatorInfo(info, filePath, folder, sync));
+     }
+ 
+     public static String getExtensionName() {
+-        return "." + me.earthme.luminol.config.modules.function.RegionFormatConfig.regionFormat.getArgument();
++        return "." + fun.bm.mili.lmili.config.modules.function.RegionFormatConfig.regionFormat.getArgument();
+     }
+     // Luminol end
+ 
+diff --git a/net/minecraft/world/level/levelgen/Heightmap.java b/net/minecraft/world/level/levelgen/Heightmap.java
+index 7eed6c1..cbbe819 100644
+--- a/net/minecraft/world/level/levelgen/Heightmap.java
++++ b/net/minecraft/world/level/levelgen/Heightmap.java
+@@ -128,7 +128,7 @@ public class Heightmap {
+         if (rawData.length == data.length) {
+             System.arraycopy(data, 0, rawData, 0, data.length);
+         } else {
+-            if (!me.earthme.luminol.config.modules.misc.DisableWarningConfig.disableHeightmapWarning)
++            if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableHeightmapWarning)
+                 LOGGER.warn("Ignoring heightmap data for chunk {}, size does not match; expected: {}, got: {}", chunk.getPos(), rawData.length, data.length);
+             primeHeightmaps(chunk, EnumSet.of(type));
+         }
+diff --git a/net/minecraft/world/level/levelgen/RandomState.java b/net/minecraft/world/level/levelgen/RandomState.java
+index 3f19144..7167ecc 100644
+--- a/net/minecraft/world/level/levelgen/RandomState.java
++++ b/net/minecraft/world/level/levelgen/RandomState.java
+@@ -35,17 +35,17 @@ public final class RandomState {
+     private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, final long seed) {
+         // this.random = settings.getRandomSource().newInstance(seed).forkPositional(); // Luminol - Add secure seed V2 with Blake3
+         // Luminol start - Add secure seed V2 with Blake3
+-        final long[] secureWorldSeed = (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled && me.earthme.luminol.config.modules.function.SecureSeedConfig.version == 2)
++        final long[] secureWorldSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+             ? su.plo.matter.HashingV2.expandLevelSeedTo1024Bits(seed)
+             : null;
+ 
+-        long terrainSeed = (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled && me.earthme.luminol.config.modules.function.SecureSeedConfig.version == 2)
++        long terrainSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+             ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.BASE_TERRAIN)
+             : seed;
+-        long aquiferSeed = (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled && me.earthme.luminol.config.modules.function.SecureSeedConfig.version == 2)
++        long aquiferSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+             ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.AQUIFER)
+             : seed;
+-        long oreSeed = (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled && me.earthme.luminol.config.modules.function.SecureSeedConfig.version == 2)
++        long oreSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+             ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.ORE)
+             : seed;
+         // Luminol end
+@@ -65,7 +65,7 @@ public final class RandomState {
+ 
+             private RandomSource newLegacyInstance(final long seedOffset) {
+                 // Luminol start - Add secure seed V2 with Blake3
+-                if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled && me.earthme.luminol.config.modules.function.SecureSeedConfig.version == 2) {
++                if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2) {
+                     long climateSeed = su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.CLIMATE);
+                     return new su.plo.matter.WorldgenCryptoRandom(0, 0, su.plo.matter.Globals.Salt.UNDEFINED, climateSeed + seedOffset);
+                 }
+@@ -98,7 +98,7 @@ public final class RandomState {
+                     return function instanceof DensityFunctions.EndIslandDensityFunction
+                         //? new DensityFunctions.EndIslandDensityFunction(seed) // Luminol - Add secure seed V2 with Blake3
+                         // Luminol start - Add secure seed V2 with Blake3
+-                        ? new DensityFunctions.EndIslandDensityFunction((me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled && me.earthme.luminol.config.modules.function.SecureSeedConfig.version == 2)
++                        ? new DensityFunctions.EndIslandDensityFunction((fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+                             ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.SURFACE)
+                             : seed)
+                        // Luminol end
+diff --git a/net/minecraft/world/level/levelgen/WorldOptions.java b/net/minecraft/world/level/levelgen/WorldOptions.java
+index 3849553..0d9762b 100644
+--- a/net/minecraft/world/level/levelgen/WorldOptions.java
++++ b/net/minecraft/world/level/levelgen/WorldOptions.java
+@@ -12,7 +12,7 @@ import org.apache.commons.lang3.StringUtils;
+ public class WorldOptions {
+     // Leaf start - Matter - Secure Seed
+     private static final com.google.gson.Gson gson = new com.google.gson.Gson();
+-    private static final boolean isSecureSeedEnabled = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled;
++    private static final boolean isSecureSeedEnabled = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled;
+     public static final MapCodec<WorldOptions> CODEC = RecordCodecBuilder.mapCodec(
+             // Leaf start - Matter - Secure Seed
+             i -> isSecureSeedEnabled
+diff --git a/net/minecraft/world/level/levelgen/feature/CoralFeature.java b/net/minecraft/world/level/levelgen/feature/CoralFeature.java
+index 0ab324d..6165bb3 100644
+--- a/net/minecraft/world/level/levelgen/feature/CoralFeature.java
++++ b/net/minecraft/world/level/levelgen/feature/CoralFeature.java
+@@ -33,6 +33,12 @@ public abstract class CoralFeature extends Feature<NoneFeatureConfiguration> {
+ 
+     protected abstract boolean placeFeature(final LevelAccessor level, final RandomSource random, final BlockPos origin, final BlockState state);
+ 
++    // Mili start - FertilizableCoral support (public bridge for protected placeFeature)
++    public boolean placeFeaturePublic(final LevelAccessor level, final RandomSource random, final BlockPos origin, final BlockState state) {
++        return this.placeFeature(level, random, origin, state);
++    }
++    // Mili end - FertilizableCoral support
++
+     protected boolean placeCoralBlock(final LevelAccessor level, final RandomSource random, final BlockPos pos, final BlockState state) {
+         BlockPos above = pos.above();
+         BlockState targetBlockState = level.getBlockState(pos);
+diff --git a/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java b/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java
+index 2293d61..7c29a52 100644
+--- a/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java
++++ b/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java
+@@ -31,7 +31,7 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
+         // Luminol start - tripwire behavior modifier
+         java.util.List<BlockPos> blockList1 = new java.util.ArrayList<>();
+         java.util.List<BlockPos> blockList2 = new java.util.ArrayList<>();
+-        boolean flag21 = me.earthme.luminol.config.modules.function.TripwireBehaviorConfig.behaviorMode == me.earthme.luminol.enums.EnumTripwireBehavior.VANILLA21;
++        boolean flag21 = fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.behaviorMode == fun.bm.mili.lmili.enums.EnumTripwireBehavior.VANILLA21;
+         for (int dz = -2; dz <= 2; dz++) {
+             for (int dx = -2; dx <= 2; dx++) {
+                 for (int dy = -1; dy < 3; dy++) {
+@@ -40,12 +40,12 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
+                     if (!blockList.getBlockState(blockPos).is(block)) { // CraftBukkit
+                         if (dropResources) {
+                             boolean flag = false;
+-                            if (me.earthme.luminol.config.modules.function.TripwireBehaviorConfig.enabled) {
+-                                switch (me.earthme.luminol.config.modules.function.TripwireBehaviorConfig.behaviorMode) {
+-                                    case me.earthme.luminol.enums.EnumTripwireBehavior.VANILLA20: {
++                            if (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
++                                switch (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.behaviorMode) {
++                                    case fun.bm.mili.lmili.enums.EnumTripwireBehavior.VANILLA20: {
+                                         flag = true;
+                                     }
+-                                    case me.earthme.luminol.enums.EnumTripwireBehavior.MIXED: {
++                                    case fun.bm.mili.lmili.enums.EnumTripwireBehavior.MIXED: {
+                                         net.minecraft.world.level.block.state.BlockState state = newLevel.getBlockState(blockPos);
+                                         if (state.is(Blocks.TRIPWIRE)) {
+                                             if (state.getValue(net.minecraft.world.level.block.TripWireBlock.DISARMED)) {
+@@ -79,7 +79,7 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
+             if (portalEvent.isCancelled()) return;
+         }
+ 
+-        if (flag21 || !me.earthme.luminol.config.modules.function.TripwireBehaviorConfig.enabled) {
++        if (flag21 || !fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
+             if (dropResources) {
+                 blockList.placeBlocks(state -> newLevel.destroyBlock(state.getPosition(), true, null));
+             } else {
+diff --git a/net/minecraft/world/level/levelgen/feature/GeodeFeature.java b/net/minecraft/world/level/levelgen/feature/GeodeFeature.java
+index 55abc8e..0af6e72 100644
+--- a/net/minecraft/world/level/levelgen/feature/GeodeFeature.java
++++ b/net/minecraft/world/level/levelgen/feature/GeodeFeature.java
+@@ -44,7 +44,7 @@ public class GeodeFeature extends Feature<GeodeConfiguration> {
+         List<Pair<BlockPos, Integer>> points = Lists.newLinkedList();
+         int numPoints = config.distributionPoints().sample(random);
+         // Leaf start - Matter - Secure Seed
+-        WorldgenRandom random1 = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++        WorldgenRandom random1 = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+                 ? new su.plo.matter.WorldgenCryptoRandom(0, 0, su.plo.matter.Globals.Salt.GEODE_FEATURE, 0)
+                 : new WorldgenRandom(new LegacyRandomSource(level.getSeed()));
+         // Leaf end - Matter - Secure Seed
+diff --git a/net/minecraft/world/level/levelgen/structure/Structure.java b/net/minecraft/world/level/levelgen/structure/Structure.java
+index a3a1ab1..0e55193 100644
+--- a/net/minecraft/world/level/levelgen/structure/Structure.java
++++ b/net/minecraft/world/level/levelgen/structure/Structure.java
+@@ -249,7 +249,7 @@ public abstract class Structure {
+ 
+         private static WorldgenRandom makeRandom(final long seed, final ChunkPos chunkPos) {
+             // Leaf start - Matter - Secure Seed
+-            if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++            if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+                 return new su.plo.matter.WorldgenCryptoRandom(chunkPos.x(), chunkPos.z(), su.plo.matter.Globals.Salt.GENERATE_FEATURE, seed);
+             }
+             // Leaf end - Matter - Secure Seed
+diff --git a/net/minecraft/world/level/levelgen/structure/placement/RandomSpreadStructurePlacement.java b/net/minecraft/world/level/levelgen/structure/placement/RandomSpreadStructurePlacement.java
+index 8fcb08d..b354c67 100644
+--- a/net/minecraft/world/level/levelgen/structure/placement/RandomSpreadStructurePlacement.java
++++ b/net/minecraft/world/level/levelgen/structure/placement/RandomSpreadStructurePlacement.java
+@@ -69,7 +69,7 @@ public class RandomSpreadStructurePlacement extends StructurePlacement {
+         int spacedGridZ = Math.floorDiv(sourceZ, this.spacing);
+         // Leaf start - Matter - Secure Seed
+         WorldgenRandom random;
+-        if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+             random = new su.plo.matter.WorldgenCryptoRandom(spacedGridX, spacedGridZ, su.plo.matter.Globals.Salt.POTENTIONAL_FEATURE, this.salt);
+         } else {
+             random = new WorldgenRandom(new LegacyRandomSource(0L));
+diff --git a/net/minecraft/world/level/levelgen/structure/placement/StructurePlacement.java b/net/minecraft/world/level/levelgen/structure/placement/StructurePlacement.java
+index 1a5690b..673ac81 100644
+--- a/net/minecraft/world/level/levelgen/structure/placement/StructurePlacement.java
++++ b/net/minecraft/world/level/levelgen/structure/placement/StructurePlacement.java
+@@ -139,7 +139,7 @@ public abstract class StructurePlacement {
+     private static boolean legacyArbitrarySaltProbabilityReducer(final long seed, final int salt, final int sourceX, final int sourceZ, final float probability, final @org.jspecify.annotations.Nullable Integer saltOverride) { // Paper - Add missing structure set seed configs
+         // Leaf start - Matter - Secure Seed
+         WorldgenRandom random;
+-        if (me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled) {
++        if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+             random = new su.plo.matter.WorldgenCryptoRandom(sourceX, sourceZ, su.plo.matter.Globals.Salt.UNDEFINED, saltOverride != null ? saltOverride : HIGHLY_ARBITRARY_RANDOM_SALT);
+         } else {
+             random = new WorldgenRandom(new LegacyRandomSource(0L));
+diff --git a/net/minecraft/world/level/levelgen/structure/pools/JigsawPlacement.java b/net/minecraft/world/level/levelgen/structure/pools/JigsawPlacement.java
+index 484977e..94266df 100644
+--- a/net/minecraft/world/level/levelgen/structure/pools/JigsawPlacement.java
++++ b/net/minecraft/world/level/levelgen/structure/pools/JigsawPlacement.java
+@@ -65,7 +65,7 @@ public class JigsawPlacement {
+         StructureTemplateManager structureTemplateManager = context.structureTemplateManager();
+         LevelHeightAccessor heightAccessor = context.heightAccessor();
+         // Leaf start - Matter - Secure Seed
+-        WorldgenRandom random = me.earthme.luminol.config.modules.function.SecureSeedConfig.enabled
++        WorldgenRandom random = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+                 ? new su.plo.matter.WorldgenCryptoRandom(context.chunkPos().x(), context.chunkPos().z(), su.plo.matter.Globals.Salt.JIGSAW_PLACEMENT, 0)
+                 : context.random();
+         // Leaf end - Matter - Secure Seed

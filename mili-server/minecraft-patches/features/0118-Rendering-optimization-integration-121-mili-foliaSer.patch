@@ -1,0 +1,311 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mili <mili@bm.fun>
+Date: Tue, 11 Aug 2026 22:08:19 +0800
+Subject: [PATCH] Rendering optimization integration 121 mili foliaServer File
+ Patches
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 07f99b7..fda77b6 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1765,6 +1765,15 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         }
+         //KioCG end
+         this.tickChildren(haveTime, region); // Folia - region threading
++        // Mili start - dynamic view distance manager tick
++        if (region != null && io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() % 20 == 0) {
++            try {
++                fun.bm.mili.utils.DynamicViewDistanceManager.tick();
++            } catch (Exception e) {
++                LOGGER.warn("Dynamic view distance manager tick failed", e);
++            }
++        }
++        // Mili end - dynamic view distance manager tick
+         // KioCG start - ChunkHot
+         if (region != null && io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() % 20 == 0){
+             final java.util.Iterator<net.minecraft.world.level.chunk.LevelChunk> chunkIterator = chunks.unsafeIterator();
+diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+index 0101808..e8c02d1 100644
+--- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+@@ -46,6 +46,7 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+     private boolean closed = false;
+     private volatile int latency; // Paper - improve keepalives - make volatile
+     private final io.papermc.paper.util.KeepAlive keepAlive; // Paper - improve keepalives
++    private volatile long lastKeepAliveResponse; // Mili - async keepalive
+     private volatile boolean suspendFlushingOnServerThread = false;
+     // CraftBukkit start
+     public final org.bukkit.craftbukkit.CraftServer cserver;
+@@ -70,6 +71,8 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+         this.pluginMessagerChannels = cookie.channels();
+         this.keepAlive = cookie.keepAlive();
+         // Paper end
++        this.lastKeepAliveResponse = this.keepAlive.lastKeepAliveTx; // Mili - async keepalive
++        fun.bm.mili.utils.AsyncKeepaliveManager.register(this); // Mili - async keepalive
+     }
+ 
+     // Paper start - configuration phase API
+@@ -202,6 +205,7 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+         final String channel = new String(data, from, length, java.nio.charset.StandardCharsets.US_ASCII);
+         if (register) {
+             bridge.addChannel(channel);
++            org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleMinecraftRegister(channel, org.leavesmc.leaves.protocol.core.ProtocolUtils.createSelector(this)); // Leaves - protocol
+         } else {
+             bridge.removeChannel(channel);
+         }
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index f9c9861..2167ddf 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -750,7 +750,14 @@ public abstract class PlayerList {
+             if (otherPlayer.getBukkitEntity().canSee(player.getBukkitEntity())) {
+                 otherPlayer.connection.send(packet);
+             } else {
+-                otherPlayer.getBukkitEntity().onEntityRemove(player);
++                // Mili fix - #406: schedule onEntityRemove on the player's region thread to avoid
++                // concurrent modification of invertedVisibilityEntities (non-thread-safe HashMap)
++                final ServerPlayer targetPlayer = otherPlayer;
++                final ServerPlayer removedPlayer = player;
++                targetPlayer.getBukkitEntity().taskScheduler.schedule(
++                    (Entity p) -> targetPlayer.getBukkitEntity().onEntityRemove(removedPlayer),
++                    null, 1L
++                );
+             }
+         }
+         // This removes the scoreboard (and player reference) for the specific player in the manager
+@@ -1527,6 +1534,7 @@ public abstract class PlayerList {
+         this.reloadAdvancementData();
+         this.reloadTagData();
+         this.reloadRecipes();
++        org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handleDataPackReload(); // Leaves - protocol
+     }
+     public void reloadAdvancementData() {
+         // Paper end - API for updating recipes on clients
+diff --git a/net/minecraft/util/debug/ServerDebugSubscribers.java b/net/minecraft/util/debug/ServerDebugSubscribers.java
+index ffbc6e6..19caac6 100644
+--- a/net/minecraft/util/debug/ServerDebugSubscribers.java
++++ b/net/minecraft/util/debug/ServerDebugSubscribers.java
+@@ -1,10 +1,10 @@
+ package net.minecraft.util.debug;
+ 
+-import java.util.ArrayList;
+-import java.util.HashMap;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.CopyOnWriteArrayList;
+ import net.minecraft.SharedConstants;
+ import net.minecraft.network.protocol.Packet;
+ import net.minecraft.server.MinecraftServer;
+diff --git a/net/minecraft/world/entity/EntityType.java b/net/minecraft/world/entity/EntityType.java
+index cfabd7f..3161989 100644
+--- a/net/minecraft/world/entity/EntityType.java
++++ b/net/minecraft/world/entity/EntityType.java
+@@ -57,7 +57,6 @@ public class EntityType<T extends Entity> implements EntityTypeTest<Entity, T>,
+     private final Holder.Reference<EntityType<?>> builtInRegistryHolder = BuiltInRegistries.ENTITY_TYPE.createIntrusiveHolder(this);
+     public static final Codec<EntityType<?>> CODEC = BuiltInRegistries.ENTITY_TYPE.byNameCodec();
+     public static final StreamCodec<RegistryFriendlyByteBuf, EntityType<?>> STREAM_CODEC = ByteBufCodecs.registry(Registries.ENTITY_TYPE);
+-    public boolean skipRaytracningCheck = false; // Leaves - entityculling skip raytrace check
+     private final EntityType.EntityFactory<T> factory;
+     private final MobCategory category;
+     private final TagKey<Block> immuneTo;
+diff --git a/net/minecraft/world/entity/ai/gossip/GossipType.java b/net/minecraft/world/entity/ai/gossip/GossipType.java
+index f5e0281..fe1b14d 100644
+--- a/net/minecraft/world/entity/ai/gossip/GossipType.java
++++ b/net/minecraft/world/entity/ai/gossip/GossipType.java
+@@ -15,9 +15,9 @@ public enum GossipType implements StringRepresentable {
+     public static final int REPUTATION_CHANGE_PER_TRADE = 2;
+     public final String id;
+     public final int weight;
+-    public final int max;
++    public int max; // Mili - villager infinite discounts (not final)
+     public final int decayPerDay;
+-    public final int decayPerTransfer;
++    public int decayPerTransfer; // Mili - villager infinite discounts (not final)
+     public static final Codec<GossipType> CODEC = StringRepresentable.fromEnum(GossipType::values);
+ 
+     GossipType(final String id, final int weight, final int max, final int decayPerDay, final int decayPerTransfer) {
+diff --git a/net/minecraft/world/item/ShearsItem.java b/net/minecraft/world/item/ShearsItem.java
+index 9750a2a..b7f8b52 100644
+--- a/net/minecraft/world/item/ShearsItem.java
++++ b/net/minecraft/world/item/ShearsItem.java
+@@ -80,7 +80,10 @@ public class ShearsItem extends Item {
+ 
+             return InteractionResult.SUCCESS;
+         } else {
+-            return super.useOn(context);
++            // Mili start - shears wrench
++            InteractionResult result = org.leavesmc.leaves.util.ShearsWrenchUtil.tryApplyRotate(context, blockState);
++            return result == null ? super.useOn(context) : result;
++            // Mili end - shears wrench
+         }
+     }
+ }
+diff --git a/net/minecraft/world/item/ShovelItem.java b/net/minecraft/world/item/ShovelItem.java
+index e1cc616..011d116 100644
+--- a/net/minecraft/world/item/ShovelItem.java
++++ b/net/minecraft/world/item/ShovelItem.java
+@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.CampfireBlock;
+ import net.minecraft.world.level.block.LevelEvent;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.minecraft.world.item.ItemStack;
+ 
+ public class ShovelItem extends Item {
+     protected static final Map<Block, BlockState> FLATTENABLES = Maps.newHashMap(
+diff --git a/net/minecraft/world/item/trading/MerchantOffer.java b/net/minecraft/world/item/trading/MerchantOffer.java
+index b7766e7..a57c055 100644
+--- a/net/minecraft/world/item/trading/MerchantOffer.java
++++ b/net/minecraft/world/item/trading/MerchantOffer.java
+@@ -39,6 +39,7 @@ public class MerchantOffer {
+     public float priceMultiplier;
+     public int xp;
+     public boolean ignoreDiscounts; // Paper - Add ignore discounts API
++    public int voidTradeUses; // Mili - force void trade
+ 
+     // CraftBukkit start
+     private org.bukkit.craftbukkit.inventory.@org.jspecify.annotations.Nullable CraftMerchantRecipe bukkitHandle;
+@@ -78,6 +79,7 @@ public class MerchantOffer {
+         this.priceMultiplier = priceMultiplier;
+         this.xp = xp;
+         this.ignoreDiscounts = ignoreDiscounts; // Paper
++        this.voidTradeUses = 0; // Mili - force void trade
+     }
+ 
+     public MerchantOffer(final ItemCost buy, final ItemStack result, final int maxUses, final int xp, final float priceMultiplier) {
+@@ -215,7 +217,7 @@ public class MerchantOffer {
+     }
+ 
+     public boolean isOutOfStock() {
+-        return this.uses >= this.maxUses;
++        return this.uses + this.voidTradeUses >= this.maxUses; // Mili - force void trade
+     }
+ 
+     public void setToOutOfStock() {
+diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
+index e6488a0..200b168 100644
+--- a/net/minecraft/world/level/NaturalSpawner.java
++++ b/net/minecraft/world/level/NaturalSpawner.java
+@@ -90,7 +90,7 @@ public final class NaturalSpawner {
+                 MobCategory category = entity.getType().getCategory();
+                 if (category != MobCategory.MISC) {
+                     // Paper start - Only count natural spawns
+-                    if (!entity.level().paperConfig().entities.spawning.countAllMobsForSpawning &&
++                    if (!fun.bm.mili.config.modules.function.TechnicalSurvivalModeConfig.enabled && !entity.level().paperConfig().entities.spawning.countAllMobsForSpawning && // Mili - mc technical survival mode
+                         !(entity.spawnReason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL ||
+                             entity.spawnReason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CHUNK_GEN)) {
+                         continue;
+diff --git a/net/minecraft/world/level/block/BuddingAmethystBlock.java b/net/minecraft/world/level/block/BuddingAmethystBlock.java
+index eccc42d..1304b89 100644
+--- a/net/minecraft/world/level/block/BuddingAmethystBlock.java
++++ b/net/minecraft/world/level/block/BuddingAmethystBlock.java
+@@ -58,4 +58,5 @@ public class BuddingAmethystBlock extends AmethystBlock {
+     public static boolean canClusterGrowAtState(final BlockState state) {
+         return state.isAir() || state.is(Blocks.WATER) && state.getFluidState().isFull();
+     }
++
+ }
+diff --git a/net/minecraft/world/level/block/GrowingPlantHeadBlock.java b/net/minecraft/world/level/block/GrowingPlantHeadBlock.java
+index 2152435..194c0fc 100644
+--- a/net/minecraft/world/level/block/GrowingPlantHeadBlock.java
++++ b/net/minecraft/world/level/block/GrowingPlantHeadBlock.java
+@@ -160,4 +160,5 @@ public abstract class GrowingPlantHeadBlock extends GrowingPlantBlock implements
+     protected GrowingPlantHeadBlock getHeadBlock() {
+         return this;
+     }
++
+ }
+diff --git a/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java b/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
+index 78dbdf4..6620b24 100644
+--- a/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
+@@ -393,7 +393,7 @@ public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntit
+         ItemStack oldStack = this.items.get(slot);
+         boolean same = !itemStack.isEmpty() && ItemStack.isSameItemSameComponents(oldStack, itemStack);
+         this.items.set(slot, itemStack);
+-        itemStack.limitSize(this.getMaxStackSize(itemStack));
++        itemStack.limitSize(itemStack.getMaxStackSize());
+         if (slot == 0 && !same && this.level instanceof ServerLevel serverLevel) {
+             this.cookingTotalTime = getTotalCookTime(serverLevel, this, this.recipeType, this.cookSpeedMultiplier); // Paper - cook speed multiplier API
+             this.cookingTimer = 0;
+diff --git a/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java b/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
+index 0bbce88..91976d9 100644
+--- a/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
+@@ -99,6 +99,11 @@ public class BeehiveBlockEntity extends BlockEntity {
+         }
+ 
+         super.setChanged();
++        // Leaves start - pca
++        if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
++            org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
++        }
++        // Leaves end - pca
+     }
+ 
+     public boolean isFireNearby() {
+@@ -351,6 +356,11 @@ public class BeehiveBlockEntity extends BlockEntity {
+         input.read("bees", BeehiveBlockEntity.Occupant.LIST_CODEC).orElse(List.of()).forEach(this::storeBee);
+         this.savedFlowerPos = input.read("flower_pos", BlockPos.CODEC).orElse(null);
+         this.maxBees = input.getIntOr("Bukkit.MaxEntities", MAX_OCCUPANTS); // Paper - persist max bukkit occupants
++        // Leaves start - pca
++        if (fun.bm.mili.config.modules.function.protocol.PcaSyncProtocolConfig.enable) {
++            org.leavesmc.leaves.protocol.PcaSyncProtocol.syncBlockEntityToClient(this);
++        }
++        // Leaves end - pca
+     }
+ 
+     @Override
+diff --git a/net/minecraft/world/level/block/entity/HopperBlockEntity.java b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
+index a858cb6..1aaac29 100644
+--- a/net/minecraft/world/level/block/entity/HopperBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
+@@ -270,7 +270,7 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+                 origItemStack.setCount(originalItemCount);
+             }
+         }
+-        if (foundItem && level.paperConfig().hopper.cooldownWhenFull) { // Inventory was full - cooldown
++        if (foundItem && level.paperConfig().hopper.cooldownWhenFull && !fun.bm.mili.config.modules.function.TechnicalSurvivalModeConfig.enabled) { // Inventory was full - cooldown // Mili - mc technical survival mode
+             hopper.setCooldown(level.spigotConfig.hopperTransfer);
+         }
+         return false;
+diff --git a/net/minecraft/world/level/block/entity/vault/VaultServerData.java b/net/minecraft/world/level/block/entity/vault/VaultServerData.java
+index fe482c2..4cc5f6e 100644
+--- a/net/minecraft/world/level/block/entity/vault/VaultServerData.java
++++ b/net/minecraft/world/level/block/entity/vault/VaultServerData.java
+@@ -68,6 +68,7 @@ public class VaultServerData {
+         addToRewardedPlayers(player.getUUID());
+     }
+     public boolean addToRewardedPlayers(final java.util.UUID player) {
++        if (fun.bm.mili.config.modules.misc.OldMCConfig.disableVaultBlacklist) return false; // Mili - disable vault blacklist
+         final boolean removed = this.rewardedPlayers.add(player);
+     // Paper end - Vault API
+         if (this.rewardedPlayers.size() > 128) {
+diff --git a/net/minecraft/world/level/block/state/BlockBehaviour.java b/net/minecraft/world/level/block/state/BlockBehaviour.java
+index 9ee150a..f573f57 100644
+--- a/net/minecraft/world/level/block/state/BlockBehaviour.java
++++ b/net/minecraft/world/level/block/state/BlockBehaviour.java
+@@ -792,7 +792,7 @@ public abstract class BlockBehaviour implements FeatureElement {
+         }
+ 
+         public PushReaction getPistonPushReaction() {
+-            return !this.isDestroyable() ? PushReaction.BLOCK : this.pushReaction; // Paper - Protect Bedrock and End Portal/Frames from being destroyed
++            return !this.isDestroyable() ? PushReaction.BLOCK : this.getBlock().getResetPushReaction() == null ? this.pushReaction : this.getBlock().getResetPushReaction(); // Paper - Protect Bedrock and End Portal/Frames from being destroyed // Mili - reset push reaction
+         }
+ 
+         public boolean isSolidRender() {
+diff --git a/net/minecraft/world/level/dimension/end/EnderDragonFight.java b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+index 7c68eff..83953a9 100644
+--- a/net/minecraft/world/level/dimension/end/EnderDragonFight.java
++++ b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+@@ -323,7 +323,7 @@ public class EnderDragonFight extends SavedData {
+     private int cachePortalOriginIteratorY = -1;
+ 
+     public BlockPattern.@Nullable BlockPatternMatch findExitPortal() {
+-        if (fun.bm.lophine.carpet.config.modules.GeneralCompatConfig.optimizedDragonRespawn) { // Lophine - redirect
++        if (true) { // Lophine - optimized dragon respawn (always on)
+             int i, j;
+             for (i = cachePortalChunkIteratorX; i <= 8; ++i) {
+                 for (j = cachePortalChunkIteratorZ; j <= 8; ++j) {

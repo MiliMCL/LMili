@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MrHua269 <wangxyper@163.com>
+Date: Tue, 11 Aug 2026 19:02:59 +0800
+Subject: [PATCH] Add config for username check
+
+
+diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+index f2329d1a9d9d4bf4c9d771e25e54f2f9ef65a76c..780f52973976bc97bddccfeefd54e187371eecc9 100644
+--- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+@@ -167,7 +167,8 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+     public void handleHello(final ServerboundHelloPacket packet) {
+         Validate.validState(this.state == ServerLoginPacketListenerImpl.State.HELLO, "Unexpected hello packet");
+         // Paper start - Validate usernames
+-        if (io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
++        if (me.earthme.luminol.config.modules.misc.UsernameCheckConfig.enabled // Luminol - Add config for username check
++            && io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
+             && io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.performUsernameValidation
+             && !this.iKnowThisMayNotBeTheBestIdeaButPleaseDisableUsernameValidation) {
+             Validate.validState(StringUtil.isReasonablePlayerName(packet.name()), "Invalid characters in username");
+diff --git a/net/minecraft/server/players/CachedUserNameToIdResolver.java b/net/minecraft/server/players/CachedUserNameToIdResolver.java
+index 7443744e3f256983e52a1cefcaf66082e4a46a7b..ab6ae4c023d949cd88d4059c4575e4ab739bfc99 100644
+--- a/net/minecraft/server/players/CachedUserNameToIdResolver.java
++++ b/net/minecraft/server/players/CachedUserNameToIdResolver.java
+@@ -67,7 +67,7 @@ public class CachedUserNameToIdResolver implements UserNameToIdResolver {
+     }
+ 
+     private Optional<NameAndId> lookupGameProfile(final GameProfileRepository profileRepository, final String name) {
+-        if (!StringUtil.isValidPlayerName(name)) {
++        if (!StringUtil.isValidPlayerName(name, false)) {
+             return this.createUnknownProfile(name);
+         }
+ 
+diff --git a/net/minecraft/util/StringUtil.java b/net/minecraft/util/StringUtil.java
+index 7957e0cfc43909c5268698a11c4933d20b4d9155..7ba42c6a020b996419988256b8638f6db6982436 100644
+--- a/net/minecraft/util/StringUtil.java
++++ b/net/minecraft/util/StringUtil.java
+@@ -63,7 +63,14 @@ public class StringUtil {
+         return ch != 167 && ch >= 32 && ch != 127;
+     }
+ 
+-    public static boolean isValidPlayerName(final String name) {
++    // Luminol start - Add config for username checks
++    public static boolean isValidPlayerName(final String username){
++        return isValidPlayerName(username, !me.earthme.luminol.config.modules.misc.UsernameCheckConfig.enabled);
++    }
++    // Luminol end
++
++    public static boolean isValidPlayerName(final String name, final boolean byPass) { // Luminol - Add config for username checks
++        if (byPass) return name.length() <= 16; // Luminol - Add config for username checks
+         return name.length() <= 16 && name.chars().filter(c -> c <= 32 || c >= 127).findAny().isEmpty();
+     }
+ 

@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Helvetica Volubi <suisuroru@blue-millennium.fun>
+Date: Sun, 16 Nov 2025 15:50:28 +0800
+Subject: [PATCH] Leaves: Replay Mod API
+
+Co-authored by: violetc <58360096+s-yh-china@users.noreply.github.com>
+As a part of : Leaves (https://github.com/LeavesMC/Leaves)
+Licensed under: GPL-3.0 (https://www.gnu.org/licenses/gpl-3.0.html)
+
+diff --git a/src/main/java/org/bukkit/Bukkit.java b/src/main/java/org/bukkit/Bukkit.java
+index 325d79776..855aec917 100644
+--- a/src/main/java/org/bukkit/Bukkit.java
++++ b/src/main/java/org/bukkit/Bukkit.java
+@@ -3045,4 +3045,10 @@ public final class Bukkit {
+     public static void restart() {
+         server.restart();
+     }
++
++    // Leaves start - Photographer API
++    public static @NotNull org.leavesmc.leaves.entity.photographer.PhotographerManager getPhotographerManager() {
++        return server.getPhotographerManager();
++    }
++    // Leaves end - Photographer API
+ }
+diff --git a/src/main/java/org/bukkit/Server.java b/src/main/java/org/bukkit/Server.java
+index 067d901c6..c1706dfd6 100644
+--- a/src/main/java/org/bukkit/Server.java
++++ b/src/main/java/org/bukkit/Server.java
+@@ -2804,4 +2804,8 @@ public interface Server extends PluginMessageRecipient, net.kyori.adventure.audi
+      */
+     double @Nullable [] getRegionTPS(@NotNull World world, int chunkX, int chunkZ);
+     // Folia end - region TPS API
++
++    // Leaves start - Photographer API
++    @NotNull org.leavesmc.leaves.entity.photographer.PhotographerManager getPhotographerManager();
++    // Leaves end - Photographer API
+ }
