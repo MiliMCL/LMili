@@ -205,7 +205,7 @@ signing {
     val signingKey = System.getenv("PGP_PRIVATE_KEY")
     val signingPassword = System.getenv("PGP_PASSPHRASE")
     useInMemoryPgpKeys(signingKey, signingPassword)
-    sign(publications["maven"])
+    sign(publishing.publications["maven"])
 }
 
 abstract class GenerateApiVersioningFile : DefaultTask() {
