@@ -81,9 +81,6 @@ public class MiliPerfCommand extends RootNode {
     private static void sendFeatureStats(CommandSender sender) {
         sender.sendMessage(Component.text("-- Features --", NamedTextColor.YELLOW));
         printStats(sender, "Player Heatmap", PlayerHeatmap.getStats());
-        printStats(sender, "Auto Backup", Map.of(
-                "Running", AutoBackupManager.isRunning(),
-                "Last Backup", AutoBackupManager.getLastBackupResult()));
     }
 
     private static void printStats(CommandSender sender, String prefix, Map<String, Object> stats) {
