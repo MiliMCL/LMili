@@ -71,7 +71,7 @@ jobs:
         run: |
           set -eux
           # Only clean build outputs — keep committed lmili-server/src/minecraft/ intact
-          rm -rf lmili-server/build leaves-api/build
+          rm -rf lmili-server/build lmili-api/build
           rm -rf .gradle/configuration-cache
 
       - name: Setup Gradle

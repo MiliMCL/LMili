@@ -18,13 +18,13 @@ paperweight {
         }
         patchFile {
             path = "folia-api/build.gradle.kts"
-            outputFile = file("leaves-api/build.gradle.kts.base")
-            patchFile = file("leaves-api/build.gradle.kts.patch")
+            outputFile = file("lmili-api/build.gradle.kts.base")
+            patchFile = file("lmili-api/build.gradle.kts.patch")
         }
 
         patchRepo("paperApi") {
             upstreamPath = "paper-api"
-            patchesDir = file("leaves-api/paper-patches")
+            patchesDir = file("lmili-api/paper-patches")
             outputDir = file("paper-api")
         }
     }
@@ -101,9 +101,11 @@ subprojects {
     tasks.withType<Javadoc>().configureEach {
         options {
             (this as StandardJavadocDocletOptions).apply {
-                addStringOption("-add-modules", "jdk.incubator.vector")
+                addBooleanOption("Xdoclint:none", true)
                 addStringOption("Xdoclint:none", "-quiet")
+                addBooleanOption("linkTODO", false)
             }
         }
+        isFailOnError = false
     }
 }

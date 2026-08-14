@@ -1,0 +1,81 @@
+name: Publish to Maven Central
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: 25
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Configure Git User Details
+        run: |
+          git config --global user.email "282142033+xucy10@users.noreply.github.com"
+          git config --global user.name "Mili CI"
+
+      - name: Apply All Patches
+        run: ./gradlew applyAllPatches --no-configuration-cache
+
+      - name: Restore Committed lmili-server/src/minecraft/
+        run: |
+          git checkout HEAD -- lmili-server/src/minecraft/
+
+      - name: Publish to Sonatype (Maven Central)
+        run: ./gradlew :lmili-api:publish --no-configuration-cache
+        env:
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          PGP_PRIVATE_KEY: ${{ secrets.PGP_PRIVATE_KEY }}
+          PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
+
+      - name: Close & Release Staging Repository
+        if: success()
+        run: |
+          # Find the staging repository ID
+          STAGING_REPO_ID=$(curl -s -u "${{ secrets.SONATYPE_USERNAME }}:${{ secrets.SONATYPE_PASSWORD }}" \
+            "https://s01.oss.sonatype.org/service/local/staging/repository" \
+            | grep -oP '(?<=<repositoryId>)[^<]+' | head -1)
+          
+          if [ -n "$STAGING_REPO_ID" ]; then
+            echo "Closing staging repository: $STAGING_REPO_ID"
+            curl -s -u "${{ secrets.SONATYPE_USERNAME }}:${{ secrets.SONATYPE_PASSWORD }}" \
+              -X POST "https://s01.oss.sonatype.org/service/local/staging/profiles/close" \
+              -H "Content-Type: application/json" \
+              -d "{\"data\":{\"stagingRepositoryId\":\"$STAGING_REPO_ID\"}}"
+            
+            echo "Releasing staging repository: $STAGING_REPO_ID"
+            curl -s -u "${{ secrets.SONATYPE_USERNAME }}:${{ secrets.SONATYPE_PASSWORD }}" \
+              -X POST "https://s01.oss.sonatype.org/service/local/staging/profiles/release" \
+              -H "Content-Type: application/json" \
+              -d "{\"data\":{\"stagingRepositoryId\":\"$STAGING_REPO_ID\"}}"
+          else
+            echo "No staging repository found. Please close and release manually at:"
+            echo "https://s01.oss.sonatype.org/#stagingRepositories"
+          fi
+        env:
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}

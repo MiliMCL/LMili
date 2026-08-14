@@ -161,7 +161,7 @@ abstract class MockitoAgentProvider : CommandLineArgumentProvider {
 }
 
 dependencies {
-    implementation(project(":leaves-api")) // Mili
+    implementation(project(":lmili-api")) // Mili
     // LMili start - Dependenices insert
     implementation("net.objecthunter:exp4j:0.4.8")
     implementation("io.netty:netty-all:4.2.15.Final") // used for io_uring

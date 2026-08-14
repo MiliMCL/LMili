@@ -71,7 +71,7 @@
  
  dependencies {
 -    implementation(project(":folia-api"))
-+    implementation(project(":leaves-api")) // Mili
++    implementation(project(":lmili-api")) // Mili
 +    // LMili start - Dependenices insert
 +    implementation("net.objecthunter:exp4j:0.4.8")
 +    implementation("io.netty:netty-all:4.2.9.Final") // used for io_uring
