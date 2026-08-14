@@ -130,7 +130,7 @@ sourceSets {
     }
 }
 
-val outgoingVariants = arrayOf("runtimeElements", "apiElements", "sourcesElements", "javadocElements")
+val outgoingVariants = arrayOf("runtimeElements", "apiElements", "sourcesElements")
 val mainCapability = "${project.group}:${project.name}:${project.version}"
 configurations {
     val outgoing = outgoingVariants.map { named(it) }
