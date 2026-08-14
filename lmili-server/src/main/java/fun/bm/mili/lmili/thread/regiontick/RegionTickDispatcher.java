@@ -126,28 +126,24 @@ public final class RegionTickDispatcher {
         var chunks = context.getOwnedChunks();
         int chunkCount = chunks.size();
 
-        // 计算期望 worker 数，并确保不低于最小保留数
-        int desiredWorkers = context.computeDesiredWorkers(maxWorkersPerRegion, parallelismThreshold);
-        int guaranteedWorkers = Math.max(desiredWorkers, this.minWorkersPerRegion);
-
-        if (chunkCount < parallelismThreshold || guaranteedWorkers <= 1) {
-            dispatchSingleThread(context, tickCount);
-            return;
+        // Mili start - fix: Execute synchronously on the Folia scheduler thread.
+        // Previously we blocked the scheduler thread waiting on a Phaser for worker threads
+        // to complete, which caused Folia's watchdog to detect a hang. The Mili worker pool
+        // model is not fully compatible with Folia's non-blocking scheduler contract.
+        // Executing directly on the scheduler thread is the safest approach.
+        context.beginTick(1);
+        RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
+        if (executor != null) {
+            try {
+                executor.executeSlice(null, new RegionTickSlice(context, chunks.toLongArray(), 0), context);
+            } catch (Throwable throwable) {
+                LOGGER.error("[RegionTickPool] Tick failed for region #{}", context.regionId, throwable);
+            }
         }
-
-        RegionTickSlice[] slices = RegionTickSlice.fromChunkList(context, chunks, sliceSize);
-        // 实际分配的 worker 数：不超过总 worker 数，也不低于最小保留数（除非总 worker 数不足）
-        int actualWorkers = Math.min(guaranteedWorkers, this.workers.length);
-        actualWorkers = Math.max(actualWorkers, 1); // 至少 1 个 worker
-        // slice 数不能少于 worker 数，否则会有 worker 空转
-        if (slices.length < actualWorkers) {
-            slices = RegionTickSlice.fromChunkList(context, chunks, Math.max(1, chunkCount / actualWorkers));
-        }
-        context.beginTick(slices.length);
-        distributeSlices(slices, actualWorkers);
-        context.awaitTickCompletion();
+        context.arriveSlice();
         context.endTick();
         this.totalTicksDispatched++;
+        // Mili end
     }
 
     private void dispatchSingleThread(final RegionTickContext context, final long tickCount) {
