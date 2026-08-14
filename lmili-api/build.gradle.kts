@@ -10,7 +10,7 @@ plugins {
 
 java {
     withSourcesJar()
-    withJavadocJar()
+    // Note: withJavadocJar() is omitted because vanniktech maven-publish plugin creates its own javadoc jar (mavenPlainJavadocJar)
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
     }
