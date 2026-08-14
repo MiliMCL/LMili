@@ -1,9 +1,8 @@
-import com.vanniktech.maven.publish.SonatypeHost
 import paper.libs.com.google.gson.Gson
 
 plugins {
     `java-library`
-    id("com.vanniktech.maven.publish") version "0.36.0"
+    id("com.vanniktech.maven.publish") version "0.30.0"
     signing
     idea
 }
@@ -155,7 +154,7 @@ configurations {
 
 mavenPublishing {
     // Publish to the new Central Publishing Portal (OSSRH was retired on 2025-06-30)
-    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = true)
+    publishToMavenCentral(automaticRelease = true)
     signAllPublications()
 
     // Central Portal (and Maven Central) does not support -SNAPSHOT versions, use release version
