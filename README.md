@@ -158,44 +158,6 @@ dependencies {
 </dependency>
 ```
 
-### MenthaMC（快照版本）
-
-快照版本可通过 MenthaMC 仓库获取。
-
-#### Gradle
-
-```kotlin
-repositories {
-    maven {
-        url = "https://repo.menthamc.org/repository/maven-public/"
-    }
-}
-
-dependencies {
-    compileOnly("fun.bm.mili:mili-api:26.2-R0.1-SNAPSHOT")
-}
-```
-
-#### Maven
-
-```xml
-<repositories>
-  <repository>
-    <id>menthamc</id>
-    <url>https://repo.menthamc.org/repository/maven-public/</url>
-  </repository>
-</repositories>
-
-<dependencies>
-  <dependency>
-    <groupId>fun.bm.mili</groupId>
-    <artifactId>mili-api</artifactId>
-    <version>26.2-R0.1-SNAPSHOT</version>
-    <scope>provided</scope>
-  </dependency>
-</dependencies>
-```
-
 ---
 
 ## 项目结构
