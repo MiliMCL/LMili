@@ -405,7 +405,7 @@ public class LinearFormatMigrator {
 
                             // Mark bucket as loaded and dirty so it gets synced to new master format
                             final int blinearBucketIndex = chunkIndex >> BUCKET_SHIFT;
-                            final Bucket bucket = this.file.getBuckets()[blinearBucketIndex];
+                            final BufferedLinearRegionFile.Bucket bucket = this.file.getBuckets()[blinearBucketIndex];
 
                             bucket.dirty = true;
 
@@ -458,7 +458,7 @@ public class LinearFormatMigrator {
                     final ByteBuffer sectorDataNioBuffer = ByteBuffer.wrap(sectorData);
 
                     final int bucketIndex = index >> BUCKET_SHIFT;
-                    final Bucket bucket = this.file.getBuckets()[bucketIndex];
+                    final BufferedLinearRegionFile.Bucket bucket = this.file.getBuckets()[bucketIndex];
 
                     synchronized (bucket.lock) {
                         bucket.loaded = true;
@@ -515,7 +515,7 @@ public class LinearFormatMigrator {
 
 
                     final int bucketIndex = i >> BUCKET_SHIFT;
-                    final Bucket bucket = this.file.getBuckets()[bucketIndex];
+                    final BufferedLinearRegionFile.Bucket bucket = this.file.getBuckets()[bucketIndex];
 
                     bucket.dirty = true;
 

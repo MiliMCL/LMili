@@ -101,6 +101,8 @@
      implementation("io.netty:netty-codec-haproxy:4.2.15.Final") // Add support for proxy protocol
 @@ -184,26 +_,43 @@
      implementation("me.lucko:spark-paper:1.10.152")
++    // bStats
++    implementation("org.bstats:bstats-base:3.1.0")
  }
  
 +// Pufferfish Start

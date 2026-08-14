@@ -104,7 +104,10 @@ public final class AsyncKeepaliveManager {
         for (ServerCommonPacketListenerImpl listener : ACTIVE_LISTENERS.values()) {
             try {
                 // Mili start - actually send keepalive packet instead of just checking isConnected()
-                io.papermc.paper.util.KeepAlive keepAlive = listener.keepAlive;
+                // Use reflection to access Paper's private keepAlive field
+                java.lang.reflect.Field keepAliveField = ServerCommonPacketListenerImpl.class.getDeclaredField("keepAlive");
+                keepAliveField.setAccessible(true);
+                io.papermc.paper.util.KeepAlive keepAlive = (io.papermc.paper.util.KeepAlive) keepAliveField.get(listener);
                 if ((currentTimeNs - keepAlive.lastKeepAliveTx) >= java.util.concurrent.TimeUnit.SECONDS.toNanos(1L)) {
                     keepAlive.lastKeepAliveTx = currentTimeNs;
                     io.papermc.paper.util.KeepAlive.PendingKeepAlive pka =

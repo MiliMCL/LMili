@@ -49,17 +49,22 @@ public final class RegionTickContext {
 
     // Mili start - fix: Phaser with timeout to prevent permanent block if a worker thread crashes.
     // Previously arriveAndAwaitAdvance() would block forever, freezing the region tick thread.
+    // Note: Phaser.arriveAndAwaitAdvance() does NOT support timeout, so we use arrive() +
+    // awaitAdvanceInterruptibly() to achieve the same effect with timeout support.
     public void awaitTickCompletion() {
         Phaser barrier = this.tickBarrier;
         if (barrier == null) return;
+        int phase = barrier.arrive();
         try {
-            barrier.arriveAndAwaitAdvance(AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            barrier.awaitAdvanceInterruptibly(phase, AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             LOGGER.error("[RegionTickContext] Region #{} tick timed out after {}s — forcing advance. " +
                             "Possible worker thread crash. Registered={}, Arrived={}, Unarrived={}",
                     regionId, AWAIT_TIMEOUT_SECONDS,
                     barrier.getRegisteredParties(), barrier.getArrivedParties(), barrier.getUnarrivedParties());
             barrier.forceTermination();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
     // Mili end

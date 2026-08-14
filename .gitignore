@@ -1,6 +1,9 @@
 # Ignore Gradle project-specific cache directory
 .gradle
 
+# Ignore local configuration files (contains sensitive/local-only settings)
+local.properties
+
 # Ignore Gradle build output directory
 build
 /run

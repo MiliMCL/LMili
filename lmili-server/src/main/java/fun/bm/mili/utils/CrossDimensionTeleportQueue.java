@@ -114,7 +114,7 @@ public class CrossDimensionTeleportQueue {
                     req.entity.getDeltaMovement(),
                     org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN, 0L,
                     // Mili start - fix: log teleport failures instead of ignoring them
-                    e -> { if (!e) failed.incrementAndGet(); }
+                    (java.util.function.Consumer<Boolean>) success -> { if (!success) failed.incrementAndGet(); }
                     // Mili end
             );
             processed.incrementAndGet();

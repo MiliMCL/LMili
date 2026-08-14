@@ -2,14 +2,19 @@ package fun.bm.mili.metrics;
 
 import fun.bm.mili.config.modules.misc.BStatsConfig;
 import org.bstats.MetricsBase;
+import org.bstats.charts.AdvancedPie;
 import org.bstats.charts.CustomChart;
 import org.bstats.charts.SimplePie;
+import org.bstats.charts.SingleLineChart;
 import org.bstats.json.JsonObjectBuilder;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -71,6 +76,12 @@ public class MiliMetrics {
         metricsBase.addCustomChart(new SimplePie("os_arch", () -> System.getProperty("os.arch")));
         metricsBase.addCustomChart(new SimplePie("mc_version", () -> Bukkit.getBukkitVersion().split("-")[0]));
 
+        // Online players count (single line chart)
+        metricsBase.addCustomChart(new SingleLineChart("online_players", () -> Bukkit.getOnlinePlayers().size()));
+
+        // Player countries distribution (advanced pie chart)
+        metricsBase.addCustomChart(new AdvancedPie("player_countries", () -> getPlayerCountries()));
+
         LOGGER.info("[MiliMetrics] Started bStats metrics (pluginId={})", pluginId);
     }
 
@@ -116,6 +127,28 @@ public class MiliMetrics {
         } catch (Throwable ignored) {
         }
         return "unknown";
+    }
+
+    /**
+     * Get player countries distribution based on client locale.
+     * Returns a map of country code to player count.
+     */
+    private static Map<String, Integer> getPlayerCountries() {
+        Map<String, Integer> countryCount = new HashMap<>();
+        try {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                String locale = player.getLocale();
+                // Locale format: en_US, zh_CN, etc. Extract country code (after underscore)
+                String country = locale.contains("_") ? locale.split("_")[1] : locale;
+                if (country.isEmpty()) {
+                    country = "Unknown";
+                }
+                countryCount.merge(country.toUpperCase(), 1, Integer::sum);
+            }
+        } catch (Throwable e) {
+            LOGGER.debug("[MiliMetrics] Failed to get player countries", e);
+        }
+        return countryCount;
     }
 
     /**

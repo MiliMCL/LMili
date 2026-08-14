@@ -278,7 +278,7 @@ public class BufferedLinearRegionFile extends AbstractRegionFile {
         return result;
     }
 
-    private void flushInternal() throws IOException {
+    void flushInternal() throws IOException {
         boolean initiallySyncRequired;
 
         this.regionObjectLock.writeLock().lock();
