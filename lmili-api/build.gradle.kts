@@ -1,9 +1,10 @@
+import com.vanniktech.maven.publish.SonatypeHost
 import paper.libs.com.google.gson.Gson
 
 plugins {
     `java-library`
-    `maven-publish`
-    `signing`
+    id("com.vanniktech.maven.publish") version "0.30.0"
+    signing
     idea
 }
 
@@ -152,60 +153,46 @@ configurations {
     }
 }
 
-configure<PublishingExtension> {
-    publications.create<MavenPublication>("maven") {
-        // For Brigadier API
-        outgoingVariants.forEach {
-            suppressPomMetadataWarningsFor(it)
-        }
-        from(components["java"])
+mavenPublishing {
+    // Publish to the new Central Publishing Portal (OSSRH was retired on 2025-06-30)
+    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = true)
+    signAllPublications()
 
-        // Maven Central required POM metadata
-        pom {
-            name.set("LMili API")
-            description.set("Mili Minecraft Server API - A Folia/Paper fork with parallel tick scheduling")
+    coordinates("fun.bm.mili", "lmili-api", project.version.toString())
+
+    // Maven Central required POM metadata
+    pom {
+        name.set("LMili API")
+        description.set("Mili Minecraft Server API - A Folia/Paper fork with parallel tick scheduling")
+        url.set("https://github.com/MiliMCL/LMili")
+
+        licenses {
+            license {
+                name.set("GNU Lesser General Public License v3.0")
+                url.set("https://www.gnu.org/licenses/lgpl-3.0.html")
+            }
+        }
+
+        developers {
+            developer {
+                id.set("mili")
+                name.set("MiliMC")
+                url.set("https://github.com/MiliMCL")
+            }
+        }
+
+        scm {
+            connection.set("scm:git:git://github.com/MiliMCL/LMili.git")
+            developerConnection.set("scm:git:ssh://github.com:MiliMCL/LMili.git")
             url.set("https://github.com/MiliMCL/LMili")
-
-            licenses {
-                license {
-                    name.set("GNU Lesser General Public License v3.0")
-                    url.set("https://www.gnu.org/licenses/lgpl-3.0.html")
-                }
-            }
-
-            developers {
-                developer {
-                    id.set("mili")
-                    name.set("MiliMC")
-                    url.set("https://github.com/MiliMCL")
-                }
-            }
-
-            scm {
-                connection.set("scm:git:git://github.com/MiliMCL/LMili.git")
-                developerConnection.set("scm:git:ssh://github.com:MiliMCL/LMili.git")
-                url.set("https://github.com/MiliMCL/LMili")
-            }
-        }
-    }
-
-    repositories {
-        maven {
-            name = "Sonatype"
-            url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-            credentials {
-                username = System.getenv("SONATYPE_USERNAME")
-                password = System.getenv("SONATYPE_PASSWORD")
-            }
         }
     }
 }
 
 signing {
-    val signingKey = System.getenv("PGP_PRIVATE_KEY")
-    val signingPassword = System.getenv("PGP_PASSPHRASE")
+    val signingKey = System.getenv("ORG_GRADLE_PROJECT_signingKey")
+    val signingPassword = System.getenv("ORG_GRADLE_PROJECT_signingPassword")
     useInMemoryPgpKeys(signingKey, signingPassword)
-    sign(publishing.publications["maven"])
 }
 
 abstract class GenerateApiVersioningFile : DefaultTask() {
@@ -280,7 +267,7 @@ tasks.withType<Javadoc>().configureEach {
     }
 
     // Add jdk.incubator.vector module for SIMD classes (Pufferfish)
-    options.addStringOption("add-modules", "jdk.incubator.vector")
+    options.addStringOption("--add-modules", "jdk.incubator.vector")
 
     // workaround for https://github.com/gradle/gradle/issues/4046
     inputs.dir("../paper-api/src/main/javadoc").withPropertyName("javadoc-sourceset")

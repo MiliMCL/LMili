@@ -44,38 +44,10 @@ jobs:
         run: |
           git checkout HEAD -- lmili-server/src/minecraft/
 
-      - name: Publish to Sonatype (Maven Central)
+      - name: Publish to Maven Central
         run: ./gradlew :lmili-api:publish --no-configuration-cache
         env:
-          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
-          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-          PGP_PRIVATE_KEY: ${{ secrets.PGP_PRIVATE_KEY }}
-          PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
-
-      - name: Close & Release Staging Repository
-        if: success()
-        run: |
-          # Find the staging repository ID
-          STAGING_REPO_ID=$(curl -s -u "${{ secrets.SONATYPE_USERNAME }}:${{ secrets.SONATYPE_PASSWORD }}" \
-            "https://s01.oss.sonatype.org/service/local/staging/repository" \
-            | grep -oP '(?<=<repositoryId>)[^<]+' | head -1)
-          
-          if [ -n "$STAGING_REPO_ID" ]; then
-            echo "Closing staging repository: $STAGING_REPO_ID"
-            curl -s -u "${{ secrets.SONATYPE_USERNAME }}:${{ secrets.SONATYPE_PASSWORD }}" \
-              -X POST "https://s01.oss.sonatype.org/service/local/staging/profiles/close" \
-              -H "Content-Type: application/json" \
-              -d "{\"data\":{\"stagingRepositoryId\":\"$STAGING_REPO_ID\"}}"
-            
-            echo "Releasing staging repository: $STAGING_REPO_ID"
-            curl -s -u "${{ secrets.SONATYPE_USERNAME }}:${{ secrets.SONATYPE_PASSWORD }}" \
-              -X POST "https://s01.oss.sonatype.org/service/local/staging/profiles/release" \
-              -H "Content-Type: application/json" \
-              -d "{\"data\":{\"stagingRepositoryId\":\"$STAGING_REPO_ID\"}}"
-          else
-            echo "No staging repository found. Please close and release manually at:"
-            echo "https://s01.oss.sonatype.org/#stagingRepositories"
-          fi
-        env:
+          ORG_GRADLE_PROJECT_signingKey: ${{ secrets.PGP_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.PGP_PASSPHRASE }}
           SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
           SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
