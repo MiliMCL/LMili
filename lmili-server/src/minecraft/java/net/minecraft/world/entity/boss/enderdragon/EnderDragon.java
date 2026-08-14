@@ -1012,11 +1012,11 @@ public class EnderDragon extends Mob implements Enemy {
     }
     // Paper end - init expToDrop for already dying spawned dragon
 
-    // Luminol start - Sync dragon part when teleportation or firstly created
+    // Lmili start - Sync dragon part when teleportation or firstly created
     public void syncDragonPartsAfterTeleportTransform() {
         for (EnderDragonPart part : this.subEntities) {
             this.tickPart(part, 0.0, 0.0, 0.0); // offset -> 0.0
         }
     }
-    // Luminol end
+    // Lmili end
 }

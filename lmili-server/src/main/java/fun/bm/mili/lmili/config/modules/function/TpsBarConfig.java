@@ -69,6 +69,6 @@ public class TpsBarConfig implements IConfigModule {
         AbstractGlobalServerBar tpsbar = GlobalServerBarManager.get(EnumBarType.TPS);
         tpsbar.cancelBarUpdateTask();
         tpsbar.runUnloadTask();
-        Bukkit.getCommandMap().getKnownCommands().remove("luminol:tpsbar");
+        Bukkit.getCommandMap().getKnownCommands().remove("lmili:tpsbar");
     }
 }

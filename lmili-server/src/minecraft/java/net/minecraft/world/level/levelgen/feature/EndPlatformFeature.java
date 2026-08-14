@@ -28,7 +28,7 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
         // CraftBukkit end
         BlockPos.MutableBlockPos pos = origin.mutable();
 
-        // Luminol start - tripwire behavior modifier
+        // Lmili start - tripwire behavior modifier
         java.util.List<BlockPos> blockList1 = new java.util.ArrayList<>();
         java.util.List<BlockPos> blockList2 = new java.util.ArrayList<>();
         boolean flag21 = fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.behaviorMode == fun.bm.mili.lmili.enums.EnumTripwireBehavior.VANILLA21;
@@ -57,7 +57,7 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
                                             }
                                         }
                                     }
-                                    default: {} // Luminol - 1.21 & default Logic - default empty
+                                    default: {} // Lmili - 1.21 & default Logic - default empty
                                 }
                             }
                             if (flag) blockList1.add(blockPos.immutable());
@@ -90,7 +90,7 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
                 blockList.getSnapshotBlocks().forEach((state) -> {
                                         newLevel.destroyBlock(state.getPosition(), !blockList1.contains(state.getPosition()), null);
                 });
-                // Luminol - prevent tripwire dupe in end platform generate
+                // Lmili - prevent tripwire dupe in end platform generate
             }
             blockList.placeBlocks();
         }
@@ -104,5 +104,5 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
         }
         return false;
     }
-    // Luminol end - tripwire behavior modifier
+    // Lmili end - tripwire behavior modifier
 }

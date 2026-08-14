@@ -93,7 +93,7 @@ public final class ServerEntityLookup extends EntityLookup {
         if (entity instanceof ThrownEnderpearl enderpearl) {
             this.addEnderPearl(CoordinateUtils.getChunkKey(enderpearl.chunkPosition()), enderpearl.getId()); // Folia - region threading
         }
-        if (entity instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon dragon) dragon.syncDragonPartsAfterTeleportTransform(); // Luminol - Sync dragon part when teleportation or firstly created
+        if (entity instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon dragon) dragon.syncDragonPartsAfterTeleportTransform(); // Lmili - Sync dragon part when teleportation or firstly created
         entity.registerScheduler(); // Paper - optimise Folia entity scheduler
     }
 

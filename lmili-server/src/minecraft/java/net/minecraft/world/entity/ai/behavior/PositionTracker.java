@@ -11,5 +11,5 @@ public interface PositionTracker {
 
     boolean isVisibleBy(final LivingEntity body);
 
-    boolean checkThread(net.minecraft.world.level.Level currOwnedByLevel); // Luminol - Fix a series issue around entity memory typed GlobalPos and WalkTarget
+    boolean checkThread(net.minecraft.world.level.Level currOwnedByLevel); // Lmili - Fix a series issue around entity memory typed GlobalPos and WalkTarget
 }

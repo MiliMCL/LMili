@@ -441,9 +441,9 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
     public boolean isRealPlayer; // Paper
     public com.destroystokyo.paper.event.entity.@Nullable PlayerNaturallySpawnCreaturesEvent playerNaturallySpawnedEvent; // Paper - PlayerNaturallySpawnCreaturesEvent
     public org.bukkit.event.player.PlayerQuitEvent.@Nullable QuitReason quitReason = null; // Paper - Add API for quit reason; there are a lot of changes to do if we change all methods leading to the event
-    public volatile boolean isTpsBarVisible = false; //Luminol - Tps bar
-    public volatile boolean isMemBarVisible = false; //Luminol - Memory bar
-    public volatile boolean isRegionBarVisible = false; //Luminol - Region bar
+    public volatile boolean isTpsBarVisible = false; //Lmili - Tps bar
+    public volatile boolean isMemBarVisible = false; //Lmili - Memory bar
+    public volatile boolean isRegionBarVisible = false; //Lmili - Region bar
     // Paper start - rewrite chunk system
     private ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.PlayerChunkLoaderData chunkLoader;
     private final ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.ViewDistanceHolder viewDistanceHolder = new ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.ViewDistanceHolder();
@@ -513,10 +513,10 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
         double amountX = selectMaxX - selectMinX;
         double amountZ = selectMaxZ - selectMinZ;
 
-        // Luminol start - Correct player respawn place
+        // Lmili start - Correct player respawn place
         int selectX = amountX < 0.0 ? Mth.floor(worldBorder.getCenterX()) : (int)Mth.floor(amountX * random.nextDouble() + selectMinX);
         int selectZ = amountZ < 0.0 ? Mth.floor(worldBorder.getCenterZ()) : (int)Mth.floor(amountZ * random.nextDouble() + selectMinZ);
-        // Luminol end - Correct player respawn place
+        // Lmili end - Correct player respawn place
 
         return new BlockPos(selectX, 0, selectZ);
     }
@@ -527,7 +527,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
     }
 
     private static BlockPos findSpawnAround(ServerLevel world, BlockPos selected) {
-        // Luminol start - Correct player respawn place
+        // Lmili start - Correct player respawn place
         BlockPos inChunk = PlayerSpawnFinder.getLevelRespawnPos(world, selected.getX(), selected.getZ());
         if (inChunk != null) {
             AABB checkVolume = PlayerSpawnFinder.PLAYER_DIMENSIONS.makeBoundingBox((double)inChunk.getX() + 0.5, (double)inChunk.getY(), (double)inChunk.getZ() + 0.5);
@@ -536,11 +536,11 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
                 return inChunk;
             }
         }
-        // Luminol end - Correct player respawn place
+        // Lmili end - Correct player respawn place
         // try hard to find, so that we don't attempt another chunk load
         for (int dz = -SPAWN_RADIUS_SELECTION_SEARCH; dz <= SPAWN_RADIUS_SELECTION_SEARCH; ++dz) {
             for (int dx = -SPAWN_RADIUS_SELECTION_SEARCH; dx <= SPAWN_RADIUS_SELECTION_SEARCH; ++dx) {
-                inChunk = PlayerSpawnFinder.getLevelRespawnPos(world, selected.getX() + dx, selected.getZ() + dz); // Luminol - Correct player respawn place
+                inChunk = PlayerSpawnFinder.getLevelRespawnPos(world, selected.getX() + dx, selected.getZ() + dz); // Lmili - Correct player respawn place
                 if (inChunk == null) {
                     continue;
                 }
@@ -891,9 +891,9 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
 
     @Override
     public void tick() {
-        // Luminol start - Status bars
+        // Lmili start - Status bars
         this.statusBarList.tick();
-        // Luminol end - Status bars
+        // Lmili end - Status bars
         // CraftBukkit start
         if (this.joining) {
             this.joining = false;
@@ -1789,9 +1789,9 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
                     if (respawnComplete != null) {
                         respawnComplete.accept(ServerPlayer.this);
                     }
-                    // Luminol - Add missing teleportation apis
+                    // Lmili - Add missing teleportation apis
                     new fun.bm.mili.lmili.api.entity.player.PostPlayerRespawnEvent(ServerPlayer.this.getBukkitEntity()).callEvent();
-                    // Luminol end
+                    // Lmili end
                 }
             );
         });
@@ -2560,7 +2560,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
         }
     }
 
-    public void checkRidingStatistics(final double dx, final double dy, final double dz) { // Luminol - Fix riding statics desync (make public)
+    public void checkRidingStatistics(final double dx, final double dy, final double dz) { // Lmili - Fix riding statics desync (make public)
         if (this.isPassenger() && !didNotMove(dx, dy, dz)) {
             int distance = Math.round((float)Math.sqrt(dx * dx + dy * dy + dz * dz) * 100.0F);
             Entity vehicle = this.getVehicle();
@@ -3527,8 +3527,8 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
     }
 
     public Set<DebugSubscription<?>> debugSubscriptions() {
-        // return !this.server.debugSubscribers().hasRequiredPermissions(this) ? Set.of() : this.requestedDebugSubscriptions; // Luminol - Do not enable any debug subscriptions
-        return Set.of(); // Luminol - Do not enable any debug subscriptions
+        // return !this.server.debugSubscribers().hasRequiredPermissions(this) ? Set.of() : this.requestedDebugSubscriptions; // Lmili - Do not enable any debug subscriptions
+        return Set.of(); // Lmili - Do not enable any debug subscriptions
     }
 
     public record RespawnConfig(LevelData.RespawnData respawnData, boolean forced) {

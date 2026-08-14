@@ -383,7 +383,7 @@ public class Brain<E extends LivingEntity> {
     }
 
     public void tick(final ServerLevel level, final E body) {
-        this.forgetOutdatedMemories(body); // Luminol - Add config to force clean entity memory that don't belong to current tick region
+        this.forgetOutdatedMemories(body); // Lmili - Add config to force clean entity memory that don't belong to current tick region
         this.tickSensors(level, body);
         this.startEachNonRunningBehavior(level, body);
         this.tickEachRunningBehavior(level, body);
@@ -395,11 +395,11 @@ public class Brain<E extends LivingEntity> {
         }
     }
 
-    private void forgetOutdatedMemories(final E owner) { // Luminol - Add config to force clean entity memory that don't belong to current tick region
+    private void forgetOutdatedMemories(final E owner) { // Lmili - Add config to force clean entity memory that don't belong to current tick region
         for (Entry<MemoryModuleType<?>, MemorySlot<?>> entry : this.memories.entrySet()) {
             MemorySlot<?> slot = entry.getValue();
             if (slot.hasValue()) {
-                // Luminol start - Add config to force clean entity memory that don't belong to current tick region
+                // Lmili start - Add config to force clean entity memory that don't belong to current tick region
                 final Object value = slot.value();
                 final net.minecraft.world.level.Level ownerLevel = owner.level();
 
@@ -436,7 +436,7 @@ public class Brain<E extends LivingEntity> {
                         continue;
                     }
                 }
-                // Luminol end
+                // Lmili end
             }
             slot.tick();
         }

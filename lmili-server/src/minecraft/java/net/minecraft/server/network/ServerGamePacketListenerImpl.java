@@ -730,9 +730,9 @@ public class ServerGamePacketListenerImpl
 
                     Location oldTo = to.clone();
                     PlayerMoveEvent event = new PlayerMoveEvent(player, from, to);
-                    this.player.blockTeleportAsync = true; // Luminol - Prevent teleprotAsync calls during move events
+                    this.player.blockTeleportAsync = true; // Lmili - Prevent teleprotAsync calls during move events
                     this.cserver.getPluginManager().callEvent(event);
-                    this.player.blockTeleportAsync = false; // Luminol - Prevent teleprotAsync calls during move events
+                    this.player.blockTeleportAsync = false; // Lmili - Prevent teleprotAsync calls during move events
 
                     // If the event is cancelled we move the player back to their old location.
                     if (event.isCancelled()) {
@@ -1744,9 +1744,9 @@ public class ServerGamePacketListenerImpl
 
                                         Location oldTo = to.clone();
                                         PlayerMoveEvent event = new PlayerMoveEvent(player, from, to);
-                                        this.player.blockTeleportAsync = true; // Luminol - Prevent teleprotAsync calls during move events
+                                        this.player.blockTeleportAsync = true; // Lmili - Prevent teleprotAsync calls during move events
                                         this.cserver.getPluginManager().callEvent(event);
-                                        this.player.blockTeleportAsync = false; // Luminol - Prevent teleprotAsync calls during move events
+                                        this.player.blockTeleportAsync = false; // Lmili - Prevent teleprotAsync calls during move events
 
                                         // If the event is cancelled we move the player back to their old location.
                                         if (event.isCancelled()) {
@@ -2905,13 +2905,13 @@ public class ServerGamePacketListenerImpl
         } // Folia end - rewrite login process - move connection ownership to global region
         this.waitingForSwitchToConfig = true; // Folia - rewrite login process - fix bad ordering of this field write - moved down
         this.send(ClientboundStartConfigurationPacket.INSTANCE);
-        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
+        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Lmili - Async protocol switch
         this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
-        // Luminol start - Async protcol switch
+        // Lmili start - Async protcol switch
         } else {
             this.connection.setupOutboundProtocolAsync(ConfigurationProtocols.CLIENTBOUND, null, true);
         }
-        // Luminol end
+        // Lmili end
     }
 
     @Override
@@ -3796,15 +3796,15 @@ public class ServerGamePacketListenerImpl
         }
 
         final ServerConfigurationPacketListenerImpl listener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, this.createCookie(this.player.clientInformation())); // Paper
-        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
+        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Lmili - Async protocol switch
         this.connection
             .setupInboundProtocol(
                 ConfigurationProtocols.SERVERBOUND,
                 listener // Paper
             );
         new io.papermc.paper.event.connection.configuration.PlayerConnectionReconfigureEvent(listener.paperConnection).callEvent(); // Paper
-        } // Luminol - Async protocol switch - add "{"
-        // Luminol start - Async protocol switch - move up
+        } // Lmili - Async protocol switch - add "{"
+        // Lmili start - Async protocol switch - move up
         else
             this.connection.setupInboundProtocolAsync(
                     ConfigurationProtocols.SERVERBOUND,
@@ -3814,8 +3814,8 @@ public class ServerGamePacketListenerImpl
                     },
                     true
             );
-        // Luminol end
-        // new io.papermc.paper.event.connection.configuration.PlayerConnectionReconfigureEvent(listener.paperConnection).callEvent(); // Paper // Luminol - Async protocol switch - move up
+        // Lmili end
+        // new io.papermc.paper.event.connection.configuration.PlayerConnectionReconfigureEvent(listener.paperConnection).callEvent(); // Paper // Lmili - Async protocol switch - move up
     }
 
     @Override

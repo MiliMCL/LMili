@@ -8,9 +8,9 @@ public interface ChunkSystemRegionFileStorage {
 
     public boolean moonrise$doesRegionFileNotExistNoIO(final int chunkX, final int chunkZ);
 
-    public abomination.IRegionFile moonrise$getRegionFileIfLoaded(final int chunkX, final int chunkZ); // Luminol - Configurable region file format
+    public abomination.IRegionFile moonrise$getRegionFileIfLoaded(final int chunkX, final int chunkZ); // Lmili - Configurable region file format
 
-    public abomination.IRegionFile moonrise$getRegionFileIfExists(final int chunkX, final int chunkZ) throws IOException; // Luminol - Configurable region file format
+    public abomination.IRegionFile moonrise$getRegionFileIfExists(final int chunkX, final int chunkZ) throws IOException; // Lmili - Configurable region file format
 
     public MoonriseRegionFileIO.RegionDataController.WriteData moonrise$startWrite(
             final int chunkX, final int chunkZ, final CompoundTag compound

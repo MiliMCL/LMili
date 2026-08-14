@@ -24,7 +24,7 @@ public class PoiCompetitorScan {
                             return true;
                         }
                         // Folia end - region threading
-                        // Luminol start - POI fixes
+                        // Lmili start - POI fixes
                         var blockPosOfJobSite = pos.pos();
                         var sectionPosOfJobSite = net.minecraft.core.SectionPos.asLong(blockPosOfJobSite);
                         var poiManager = level.getPoiManager();
@@ -33,9 +33,9 @@ public class PoiCompetitorScan {
                         // so simply break down if it's not loaded
                         var poiChunk = fun.bm.mili.lmili.config.modules.fixes.POIRangeFixes.doNotCompetePOIIfUnloaded ? poiManager.get(sectionPosOfJobSite) : poiManager.getOrLoad(sectionPosOfJobSite);
                         poiChunk.flatMap(poiSection -> poiSection.getType(blockPosOfJobSite))
-                        // Luminol end - POI fixes
-                        /*level.getPoiManager() // Luminol - POI fixes
-                            .getType(pos.pos())*/ // Luminol - POI fixes
+                        // Lmili end - POI fixes
+                        /*level.getPoiManager() // Lmili - POI fixes
+                            .getType(pos.pos())*/ // Lmili - POI fixes
                             .ifPresent(
                                 // Paper start - Improve performance of PoiCompetitorScan by unrolling stream
                                 // The previous logic used Stream#reduce to simulate a form of single-iteration bubble sort

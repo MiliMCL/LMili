@@ -318,9 +318,9 @@ public abstract class AbstractMinecart extends VehicleEntity {
         new org.bukkit.event.vehicle.VehicleUpdateEvent(vehicle).callEvent();
 
         if (!from.equals(to)) {
-            this.blockTeleportAsync = true; // Luminol - Prevent teleprotAsync calls during move events
+            this.blockTeleportAsync = true; // Lmili - Prevent teleprotAsync calls during move events
             new org.bukkit.event.vehicle.VehicleMoveEvent(vehicle, from, to).callEvent();
-            this.blockTeleportAsync = false; // Luminol - Prevent teleprotAsync calls during move events
+            this.blockTeleportAsync = false; // Lmili - Prevent teleprotAsync calls during move events
         }
         // CraftBukkit end
         this.updateFluidInteraction();

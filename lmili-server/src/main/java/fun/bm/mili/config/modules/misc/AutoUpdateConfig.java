@@ -7,8 +7,8 @@ import fun.bm.mili.lmili.enums.EnumConfigCategory;
 
 /*
  * This file is only for showing auto update config.
- * The function is implemented in luminol-server and not provide any function.
- * Please use luminol-server's auto update config.
+ * The function is implemented in lmili-server and not provide any function.
+ * Please use lmili-server's auto update config.
  */
 @ConfigClassInfo(
         category = EnumConfigCategory.MISC,
@@ -18,7 +18,7 @@ import fun.bm.mili.lmili.enums.EnumConfigCategory;
                 下载文件暂存于 auto_update/mili 并写入 auto_update/core.path，
                 Hyacinthusclip 可在下次重启时使用。
                 
-                注意：完整配置选项应在 luminol 配置系统 >> misc >> auto_update 中编辑"""
+                注意：完整配置选项应在 lmili 配置系统 >> misc >> auto_update 中编辑"""
 )
 public class AutoUpdateConfig implements IConfigModule {
     @ConfigInfo(name = "enabled", comments = """

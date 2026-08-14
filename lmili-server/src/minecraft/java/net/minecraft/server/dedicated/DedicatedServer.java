@@ -238,8 +238,8 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface 
         this.paperConfigurations.initializeGlobalConfiguration(this.registryAccess());
         this.paperConfigurations.initializeWorldDefaultsConfiguration(this.registryAccess());
         // Paper end - initialize global and world-defaults configuration
-        fun.bm.mili.lmili.config.ConfigManager.loadConfigFiles(); // Luminol - load config file
-        if (false) this.server.spark.enableEarlyIfRequested(); // Paper - spark // Luminol - Force disable builtin spark
+        fun.bm.mili.lmili.config.ConfigManager.loadConfigFiles(); // Lmili - load config file
+        if (false) this.server.spark.enableEarlyIfRequested(); // Paper - spark // Lmili - Force disable builtin spark
         // Paper start - fix converting txt to json file; convert old users earlier after PlayerList creation but before file load/save
         if (this.convertOldUsers()) {
             this.services().nameToIdCache().save(false); // Paper
@@ -249,7 +249,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface 
         org.spigotmc.WatchdogThread.doStart(org.spigotmc.SpigotConfig.timeoutTime, org.spigotmc.SpigotConfig.restartOnCrash); // Paper - start watchdog thread
         consoleThread.start(); // Paper - Enhance console tab completions for brigadier commands; start console thread after MinecraftServer.console & PaperConfig are initialized
         io.papermc.paper.command.PaperCommands.registerCommands(this); // Paper - setup /paper command
-        if (false) this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark // Luminol - Force disable builtin spark
+        if (false) this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark // Lmili - Force disable builtin spark
         com.destroystokyo.paper.Metrics.PaperMetrics.startMetrics(); // Paper - start metrics
         com.destroystokyo.paper.VersionHistoryManager.INSTANCE.getClass(); // Paper - load version history now
 
@@ -304,7 +304,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface 
         String proxyFlavor = (io.papermc.paper.configuration.GlobalConfiguration.get().proxies.velocity.enabled) ? "Velocity" : "BungeeCord";
         String proxyLink = (io.papermc.paper.configuration.GlobalConfiguration.get().proxies.velocity.enabled) ? "https://docs.papermc.io/velocity/security" : "http://www.spigotmc.org/wiki/firewall-guide/";
         // Paper end - Add Velocity IP Forwarding Support
-        if (!this.usesAuthentication() && !fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableOfflineModeWarning) { //Luminol - Add config for offline mod warning
+        if (!this.usesAuthentication() && !fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableOfflineModeWarning) { //Lmili - Add config for offline mod warning
             LOGGER.warn("**** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!");
             LOGGER.warn("The server will make no attempt to authenticate usernames. Beware.");
             // Spigot start

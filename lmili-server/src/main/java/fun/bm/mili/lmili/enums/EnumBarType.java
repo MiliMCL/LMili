@@ -40,7 +40,7 @@ public enum EnumBarType {
     }
 
     EnumBarType(Class<? extends AbstractGlobalServerBar> clazz, String name, String commandName, String configPath) {
-        this(clazz, name, commandName, new Pair<>("luminol", configPath));
+        this(clazz, name, commandName, new Pair<>("lmili", configPath));
     }
 
     EnumBarType(Class<? extends AbstractGlobalServerBar> clazz, String name, String commandName, Pair<String, String> configPath) {

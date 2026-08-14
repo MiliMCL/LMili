@@ -112,7 +112,7 @@ public class AllayAi {
         Optional<GlobalPos> likedNoteblockPos = brain.getMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION);
         if (likedNoteblockPos.isPresent()) {
             GlobalPos position = likedNoteblockPos.get();
-            // Luminol start - Do not like item if they were out of current tickregion
+            // Lmili start - Do not like item if they were out of current tickregion
             final net.minecraft.world.level.Level targetLevel = net.minecraft.server.MinecraftServer.getServer().getLevel(position.dimension());
             final BlockPos targetPos = position.pos();
 
@@ -121,7 +121,7 @@ public class AllayAi {
                 brain.eraseMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION); // The memory value is not being belong to current tick region anymore
                 return Optional.empty();
             }
-            // Luminol end
+            // Lmili end
 
             if (shouldDepositItemsAtLikedNoteblock(allay, brain, position)) {
                 return Optional.of(new BlockPosTracker(position.pos().above()));

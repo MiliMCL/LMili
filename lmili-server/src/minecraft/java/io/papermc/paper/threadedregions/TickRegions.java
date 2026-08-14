@@ -173,7 +173,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
         private final AtomicInteger entityCount = new AtomicInteger();
         private final AtomicInteger playerCount = new AtomicInteger();
         private final AtomicInteger chunkCount = new AtomicInteger();
-        public final fun.bm.mili.lmili.api.RegionStats regionStatsAPI = new fun.bm.mili.lmili.api.impl.RegionStatsImpl(this); // Luminol - Tickregion API
+        public final fun.bm.mili.lmili.api.RegionStats regionStatsAPI = new fun.bm.mili.lmili.api.impl.RegionStatsImpl(this); // Lmili - Tickregion API
 
         public int getEntityCount() {
             return this.entityCount.get();
@@ -226,7 +226,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
         public long lastSavedTime = 0L; // Leaves - last saved time
 
         public volatile ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler; // Folia - profiler
-        public final fun.bm.mili.lmili.api.TickRegionData tickRegionDataAPI = new fun.bm.mili.lmili.api.impl.TickRegionDataImpl(this); // Luminol - Tickregion API
+        public final fun.bm.mili.lmili.api.TickRegionData tickRegionDataAPI = new fun.bm.mili.lmili.api.impl.TickRegionDataImpl(this); // Lmili - Tickregion API
 
         private TickRegionData(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
             this.region = region;

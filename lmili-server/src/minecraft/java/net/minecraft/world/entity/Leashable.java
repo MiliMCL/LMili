@@ -95,24 +95,24 @@ public interface Leashable {
             if (leashUuid.isPresent()) {
                 Entity leasher = serverLevel.getEntity(leashUuid.get());
                 if (leasher != null) {
-                    // Luminol start - Fix off region leashing
+                    // Lmili start - Fix off region leashing
                     if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(leasher)) {
                         entity.spawnAtLocation(serverLevel, Items.LEAD);
                         entity.setLeashData(null);
                         return;
                     }
-                    // Luminol end
+                    // Lmili end
                     setLeashedTo(entity, leasher, true);
                     return;
                 }
             } else if (pos.isPresent()) {
-                // Luminol start - Fix off region leashing
+                // Lmili start - Fix off region leashing
                 if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, pos.get())) {
                     entity.spawnAtLocation(serverLevel, Items.LEAD);
                     entity.setLeashData(null);
                     return;
                 }
-                // Luminol end
+                // Lmili end
                 setLeashedTo(entity, LeashFenceKnotEntity.getOrCreateKnot(serverLevel, pos.get()), true);
                 return;
             }

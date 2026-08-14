@@ -318,8 +318,8 @@ public abstract class TamableAnimal extends Animal implements OwnableEntity {
             return false;
         }
 
-        BlockState blockStateBelow = this.level().getBlockStateIfLoaded(pos.below()); // Luminol - Prevent tamable animals check can teleport in an unloaded chunk
-        if (blockStateBelow == null) return false;  // Luminol - Prevent tamable animals check can teleport in an unloaded chunk
+        BlockState blockStateBelow = this.level().getBlockStateIfLoaded(pos.below()); // Lmili - Prevent tamable animals check can teleport in an unloaded chunk
+        if (blockStateBelow == null) return false;  // Lmili - Prevent tamable animals check can teleport in an unloaded chunk
         if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {
             return false;
         }

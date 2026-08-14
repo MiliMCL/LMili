@@ -167,7 +167,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
     public void handleHello(final ServerboundHelloPacket packet) {
         Validate.validState(this.state == ServerLoginPacketListenerImpl.State.HELLO, "Unexpected hello packet");
         // Paper start - Validate usernames
-        if (fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled // Luminol - Add config for username check
+        if (fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled // Lmili - Add config for username check
             && io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
             && io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.performUsernameValidation
             && !this.iKnowThisMayNotBeTheBestIdeaButPleaseDisableUsernameValidation) {
@@ -436,14 +436,14 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
     public void handleLoginAcknowledgement(final ServerboundLoginAcknowledgedPacket packet) {
         net.minecraft.network.protocol.PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor()); // CraftBukkit
         Validate.validState(this.state == ServerLoginPacketListenerImpl.State.PROTOCOL_SWITCHING, "Unexpected login acknowledgement packet");
-        /*this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND); // Luminol - Async protocol switch - Rewrite
+        /*this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND); // Lmili - Async protocol switch - Rewrite
         CommonListenerCookie cookie = CommonListenerCookie.createInitial(Objects.requireNonNull(this.authenticatedProfile), this.transferred);
         ServerConfigurationPacketListenerImpl configPacketListener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, cookie);
         this.connection.setupInboundProtocol(ConfigurationProtocols.SERVERBOUND, configPacketListener);
         configPacketListener.startConfiguration();
-        this.state = ServerLoginPacketListenerImpl.State.ACCEPTED;*/ // Luminol - Async protocol switch - Rewrite
+        this.state = ServerLoginPacketListenerImpl.State.ACCEPTED;*/ // Lmili - Async protocol switch - Rewrite
 
-        // Luminol start - Async protocol switch
+        // Lmili start - Async protocol switch
         CommonListenerCookie cookie = CommonListenerCookie.createInitial(Objects.requireNonNull(this.authenticatedProfile), this.transferred);
         ServerConfigurationPacketListenerImpl configPacketListener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, cookie);
 
@@ -459,7 +459,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
         this.connection.setupInboundProtocolAsync(ConfigurationProtocols.SERVERBOUND, configPacketListener, () -> {
             this.connection.setupOutboundProtocolAsync(ConfigurationProtocols.CLIENTBOUND, afterSwitch, true); // start auto read when everything is ready
         }, false); // we will resume auto reading once the outbound protocol is also setup
-        // Luminol end
+        // Lmili end
     }
 
     @Override

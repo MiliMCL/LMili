@@ -99,7 +99,7 @@ public class DataPackCommand {
         dispatcher.register(
             Commands.literal("datapack")
                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                /*.then( // Luminol - Add back read-only datapack command
+                /*.then( // Lmili - Add back read-only datapack command
                     Commands.literal("enable")
                         .then(
                             Commands.argument("name", StringArgumentType.string())
@@ -146,11 +146,11 @@ public class DataPackCommand {
                                 .suggests(SELECTED_PACKS)
                                 .executes(c -> disablePack(c.getSource(), getPack(c, "name", false)))
                         )
-                )*/ // Luminol - Add back read-only datapack command
+                )*/ // Lmili - Add back read-only datapack command
                 .then(
                     Commands.literal("list")
                         .executes(c -> listPacks(c.getSource()))
-                        // .then(Commands.literal("available").executes(c -> listAvailablePacks(c.getSource()))) // Luminol - Add back read-only datapack command
+                        // .then(Commands.literal("available").executes(c -> listAvailablePacks(c.getSource()))) // Lmili - Add back read-only datapack command
                         .then(Commands.literal("enabled").executes(c -> listEnabledPacks(c.getSource())))
                 )
                 .then(
@@ -238,7 +238,7 @@ public class DataPackCommand {
     }
 
     private static int listPacks(final CommandSourceStack source) {
-        return listEnabledPacks(source) ;// + listAvailablePacks(source); // Luminol - Add back read-only datapack command
+        return listEnabledPacks(source) ;// + listAvailablePacks(source); // Lmili - Add back read-only datapack command
     }
 
     private static int listAvailablePacks(final CommandSourceStack source) {
@@ -266,7 +266,7 @@ public class DataPackCommand {
 
     private static int listEnabledPacks(final CommandSourceStack source) {
         PackRepository repository = source.getServer().getPackRepository();
-        // repository.reload(); // Luminol - Add back read-only datapack command
+        // repository.reload(); // Lmili - Add back read-only datapack command
         Collection<? extends Pack> selectedPacks = repository.getSelectedPacks();
         if (selectedPacks.isEmpty()) {
             source.sendSuccess(() -> Component.translatable("commands.datapack.list.enabled.none"), false);

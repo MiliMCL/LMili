@@ -103,7 +103,7 @@ public abstract class PathNavigation {
         if (this.tick - this.timeLastRecompute <= 20L || !this.canUpdatePath()) { // Folia - region threading
             this.hasDelayedRecomputation = true;
         } else if (this.targetPos != null) {
-            // Luminol - Recompute path when path finding out of current tick region
+            // Lmili - Recompute path when path finding out of current tick region
             if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
                 // The target seems to be pointed to a position out of current region, so reset if it is
                 // also it will interrupt the pathfinding
@@ -115,7 +115,7 @@ public abstract class PathNavigation {
                     return;
                 }
             }
-            // Luminol end
+            // Lmili end
             this.path = null;
             this.path = this.createPath(this.targetPos, this.reachRange);
             this.timeLastRecompute = this.tick; // Folia - region threading
@@ -202,7 +202,7 @@ public abstract class PathNavigation {
             }
         }
         // Paper end - EntityPathfindEvent
-        // Luminol - Do not path find for targets out of current region
+        // Lmili - Do not path find for targets out of current region
         if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.doNotPathfindToNotOwnedTargets) {
             // filter the targets not owned by current region
             targets = new HashSet<>(targets); // well no idea about how to determine if this should be copied to a modifiable one
@@ -213,7 +213,7 @@ public abstract class PathNavigation {
                 return null;
             }
         }
-        // Luminol end
+        // Lmili end
         ProfilerFiller profiler = Profiler.get();
         profiler.push("pathfind");
         BlockPos fromPos = above ? this.mob.blockPosition().above() : this.mob.blockPosition();
@@ -312,7 +312,7 @@ public abstract class PathNavigation {
 
             if (!this.isDone()) {
                 Vec3 target = this.path.getNextEntityPos(this.mob);
-                // Luminol - Recompute path when path finding out of current tick region
+                // Lmili - Recompute path when path finding out of current tick region
                 if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
                     // we assume that:
                     // 1. The code above doesn't touch the 'main thread context' with the position from 'this.path'
@@ -322,7 +322,7 @@ public abstract class PathNavigation {
                         return;
                     }
                 }
-                // Luminol end
+                // Lmili end
                 this.mob.getMoveControl().setWantedPosition(target.x, this.getGroundY(target), target.z, this.speedModifier);
             }
         }

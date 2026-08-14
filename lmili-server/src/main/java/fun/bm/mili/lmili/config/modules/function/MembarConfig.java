@@ -56,6 +56,6 @@ public class MembarConfig implements IConfigModule {
         AbstractGlobalServerBar membar = GlobalServerBarManager.get(EnumBarType.MEMORY);
         membar.cancelBarUpdateTask();
         membar.runUnloadTask();
-        Bukkit.getCommandMap().getKnownCommands().remove("luminol:membar");
+        Bukkit.getCommandMap().getKnownCommands().remove("lmili:membar");
     }
 }

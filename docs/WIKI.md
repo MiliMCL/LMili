@@ -67,8 +67,8 @@ Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理多层
 | 改动 | 说明 | 位置 |
 |------|------|------|
 | 重命名为 Mili | 服务端 Mod 名、自动更新指向 `MiliMC/Mili` | `0001-Rebrand-to-Mili.patch` |
-| 新增 Mili 全局配置 | 注册 `mili_config.toml`，命名空间 `fun.bm.mili.config.modules` | 品牌补丁 |
-| 新增 Mili Carpet 配置 | 注册 `mili_carpet_config.toml`，命名空间 `fun.bm.mili.carpet.config.modules` | 品牌补丁 |
+| 新增 Mili 全局配置 | 注册 `lmili_config.toml`，命名空间 `fun.bm.mili.config.modules` | 品牌补丁 |
+| 新增 Mili Carpet 配置 | 注册 `lmili_carpet_config.toml`，命名空间 `fun.bm.mili.carpet.config.modules` | 品牌补丁 |
 
 ### 4.2 关键依赖
 
@@ -212,7 +212,7 @@ overflow-checks = true     # 防止算术溢出 UB
 
 Mili 提供两套 TOML 配置文件：
 
-- **`mili_config.toml`** → 包路径 `fun.bm.mili.config.modules`
+- **`lmili_config.toml`** → 包路径 `fun.bm.mili.config.modules`
 - **`mili_carpet_config.toml`** → 包路径 `fun.bm.mili.carpet.config.modules`
 
 | 类别 | 代表模块 | 说明 |
@@ -281,7 +281,7 @@ API 事件（`org.leavesmc.leaves.event.bot`）：
 
 ## 12. 配置速查表
 
-### 12.1 主配置（`mili_config.toml`）
+### 12.1 主配置（`lmili_config.toml`）
 
 | 配置键 | 类型 | 说明 |
 |--------|------|------|
@@ -303,7 +303,7 @@ API 事件（`org.leavesmc.leaves.event.bot`）：
 | `fixes.update-suppression-crash-fix.enabled` | Boolean | 更新抑制崩溃修复 |
 | `misc.auto-update.enabled` | Boolean | 自动更新 |
 
-### 12.2 Carpet 兼容配置（`mili_carpet_config.toml`）
+### 12.2 Carpet 兼容配置（`lmili_carpet_config.toml`）
 
 | 配置键 | 说明 |
 |--------|------|

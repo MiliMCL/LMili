@@ -81,11 +81,11 @@ public class BehaviorUtils {
     public static void setWalkAndLookTargetMemories(
         final LivingEntity walker, final PositionTracker target, final float speedModifier, final int closeEnoughDistance
     ) {
-        // Luminol - Do not set walk target if target position is out of current tick region
+        // Lmili - Do not set walk target if target position is out of current tick region
         if (!target.checkThread(walker.level())) {
             return;
         }
-        // Luminol end
+        // Lmili end
         WalkTarget walkTarget = new WalkTarget(target, speedModifier, closeEnoughDistance);
         walker.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, target);
         walker.getBrain().setMemory(MemoryModuleType.WALK_TARGET, walkTarget);

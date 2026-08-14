@@ -730,8 +730,8 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
             this.brain.getMemory(memoryType).ifPresent(memory -> {
                 ServerLevel poiLevel = server.getLevel(memory.dimension());
                 if (poiLevel != null) {
-                    poiLevel.regionizedBlockableEventLoop.asExecutor(memory.pos(), false, true).execute(() -> { // Luminol - Fix possible delayed POI updates while block updating
-                    /*io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(poiLevel, memory.pos().getX() >> 4, memory.pos().getZ() >> 4, () -> { // Folia - region threading // Luminol - Fix possible delayed POI updates while block updating*/ // Luminol - Fix possible delayed POI updates while block updating
+                    poiLevel.regionizedBlockableEventLoop.asExecutor(memory.pos(), false, true).execute(() -> { // Lmili - Fix possible delayed POI updates while block updating
+                    /*io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(poiLevel, memory.pos().getX() >> 4, memory.pos().getZ() >> 4, () -> { // Folia - region threading // Lmili - Fix possible delayed POI updates while block updating*/ // Lmili - Fix possible delayed POI updates while block updating
                     PoiManager poiManager = poiLevel.getPoiManager();
                     Optional<Holder<PoiType>> type = poiManager.getType(memory.pos());
                     BiPredicate<Villager, Holder<PoiType>> poiTypePredicate = POI_MEMORIES.get(memoryType);
@@ -739,8 +739,8 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
                         poiManager.release(memory.pos());
                         poiLevel.debugSynchronizers().updatePoi(memory.pos());
                     }
-                    // }); // Folia - region threading // Luminol - Fix possible delayed POI updates while block updating
-                    }); // Luminol - Fix possible delayed POI updates while block updating
+                    // }); // Folia - region threading // Lmili - Fix possible delayed POI updates while block updating
+                    }); // Lmili - Fix possible delayed POI updates while block updating
                 }
             });
         }

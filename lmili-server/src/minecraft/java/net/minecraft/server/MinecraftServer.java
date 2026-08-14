@@ -672,8 +672,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
         }
         // Paper end - Configurable player collision; Handle collideRule team for player collision toggle
         this.server.enablePlugins(org.bukkit.plugin.PluginLoadOrder.POSTWORLD);
-        if (false) this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark // Luminol - Force disable builtin spark
-        if (false) this.server.spark.enableAfterPlugins(this.server); // Paper - spark // Luminol - Force disable builtin spark
+        if (false) this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark // Lmili - Force disable builtin spark
+        if (false) this.server.spark.enableAfterPlugins(this.server); // Paper - spark // Lmili - Force disable builtin spark
         io.papermc.paper.command.brigadier.PaperCommands.INSTANCE.setValid(); // Paper - reset invalid state for event fire below
         io.papermc.paper.plugin.lifecycle.event.LifecycleEventRunner.INSTANCE.callReloadableRegistrarEvent(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, io.papermc.paper.command.brigadier.PaperCommands.INSTANCE, org.bukkit.plugin.Plugin.class, io.papermc.paper.plugin.lifecycle.event.registrar.ReloadableRegistrarEvent.Cause.INITIAL); // Paper - call commands event for regular plugins
         this.server.getCommandMap().registerServerAliases(); // Paper - relocate initial CommandMap#registerServerAliases() call
@@ -986,10 +986,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
         if (flush) {
             for (ServerLevel level : this.getAllLevels()) {
                 String storageName = level.getChunkSource().chunkMap.getStorageName();
-                LOGGER.info("ThreadedChunkStorage ({}): All chunks are saved", LEGACY_WORLD_NAMES_FOR_REALMS_LOG.getOrDefault(storageName, storageName)); // Luminol - configurable region format
+                LOGGER.info("ThreadedChunkStorage ({}): All chunks are saved", LEGACY_WORLD_NAMES_FOR_REALMS_LOG.getOrDefault(storageName, storageName)); // Lmili - configurable region format
             }
 
-            LOGGER.info("ThreadedChunkStorage: All dimensions are saved"); // Luminol - configurable region format
+            LOGGER.info("ThreadedChunkStorage: All dimensions are saved"); // Lmili - configurable region format
         }
 
         return result;
@@ -1090,7 +1090,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
         Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
         // CraftBukkit start
         if (this.server != null) {
-            if (false) this.server.spark.disable(); // Paper - spark // Luminol - Force disable builtin spark
+            if (false) this.server.spark.disable(); // Paper - spark // Lmili - Force disable builtin spark
             this.server.disablePlugins();
             this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
         }
@@ -1351,7 +1351,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
             this.statusIcon = this.loadStatusIcon().orElse(null);
             this.status = this.buildServerStatus();
 
-            if (false) this.server.spark.enableBeforePlugins(); // Paper - spark // Luminol - Force disable builtin spark
+            if (false) this.server.spark.enableBeforePlugins(); // Paper - spark // Lmili - Force disable builtin spark
             // Folia start - region threading
             if (true) {
                 io.papermc.paper.threadedregions.RegionizedServer.getInstance().init(); // Folia - region threading - only after loading worlds
@@ -1665,7 +1665,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
             }
 
             if (this.emptyTicks >= emptyTickThreshold) {
-                if (false) this.server.spark.tickStart(); // Paper - spark // Luminol - Force disable builtin spark
+                if (false) this.server.spark.tickStart(); // Paper - spark // Lmili - Force disable builtin spark
                 if (this.emptyTicks == emptyTickThreshold) {
                     LOGGER.info("Server empty for {} seconds, pausing", this.pauseWhenEmptySeconds());
                     this.autoSave();
@@ -1684,7 +1684,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                 // Paper end - avoid issues with certain tasks not processing during sleep
                 //this.server.spark.executeMainThreadTasks(); // Paper - spark // Folia - region threading
                 this.tickConnection();
-                if (false) this.server.spark.tickEnd(((double)(System.nanoTime() - this.currentTickStart) / 1000000D)); // Paper - spark // Luminol - Force disable builtin spark
+                if (false) this.server.spark.tickEnd(((double)(System.nanoTime() - this.currentTickStart) / 1000000D)); // Paper - spark // Lmili - Force disable builtin spark
                 return;
             }
         }
@@ -1697,7 +1697,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
         };
         // Folia end - region threading
 
-        if (false) this.server.spark.tickStart(); // Paper - spark // Luminol - Force disable builtin spark
+        if (false) this.server.spark.tickStart(); // Paper - spark // Lmili - Force disable builtin spark
         new com.destroystokyo.paper.event.server.ServerTickStartEvent((int)region.getCurrentTick()).callEvent(); // Paper - Server Tick Events // Folia - region threading
         // Folia start - region threading
         if (region != null) {
@@ -1832,7 +1832,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
         long remaining = scheduledEnd - endTime; // Folia - region ticking
         new com.destroystokyo.paper.event.server.ServerTickEndEvent((int)io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick(), ((double)(endTime - startTime) / 1000000D), remaining).callEvent(); // Folia - region ticking
         // Paper end - Server Tick Events
-        if (false) this.server.spark.tickEnd(((double)(endTime - startTime) / 1000000D)); // Paper - spark // Folia - region threading // Luminol - Force disable builtin spark
+        if (false) this.server.spark.tickEnd(((double)(endTime - startTime) / 1000000D)); // Paper - spark // Folia - region threading // Lmili - Force disable builtin spark
         // Folia - region threading
     }
 
@@ -1987,9 +1987,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
             //net.minecraft.world.level.block.entity.HopperBlockEntity.skipHopperEvents = level.paperConfig().hopper.disableMoveEvent || org.bukkit.event.inventory.InventoryMoveItemEvent.getHandlerList().getRegisteredListeners().length == 0; // Paper - Perf: Optimize Hoppers // Folia - region threading
             profiler.push(() -> level + " " + level.dimension().identifier());
             profiler.push("tick");
-            // Luminol start - Portal rate limiter
+            // Lmili start - Portal rate limiter
             regionizedWorldData.portalRateThrottler.begin();
-            // Luminol end
+            // Lmili end
 
             try {
                 foliaProfiler.startTimer(level.tickTimerId); try { // Folia - profiler
@@ -2004,9 +2004,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
             profiler.pop();
             profiler.pop();
             regionizedWorldData.explosionDensityCache.clear(); // Paper - Optimize explosions // Folia - region threading
-            // Luminol start - Portal rate limiter
+            // Lmili start - Portal rate limiter
             regionizedWorldData.portalRateThrottler.done();
-            // Luminol end
+            // Lmili end
         }
         //this.isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked // Folia - region threading
 
@@ -2139,7 +2139,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
     }
 
     public String getServerModName() {
-        return fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.fakeVanilla ? "vanilla" : fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.serverModName; // Paper // Luminol - Add config for this
+        return fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.fakeVanilla ? "vanilla" : fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.serverModName; // Paper // Lmili - Add config for this
     }
 
     public ServerClockManager clockManager() {
@@ -3139,8 +3139,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
             level.players().forEach(playerx -> playerx.connection.send(packet)); // Paper - per-world game rules
         } else if (rule == GameRules.LOCATOR_BAR) {
             // this.getAllLevels().forEach(level -> { // Paper - per-world game rules
-                ServerWaypointManager waypointManager = level.getWaypointManager(); // Luminol - Restore waypoints
-                //waypointManager.locatorBarEnabled = (Boolean) value; // Paper - optimize ServerWaypointManager with locator bar disabled // Luminol - Restore waypoints
+                ServerWaypointManager waypointManager = level.getWaypointManager(); // Lmili - Restore waypoints
+                //waypointManager.locatorBarEnabled = (Boolean) value; // Paper - optimize ServerWaypointManager with locator bar disabled // Lmili - Restore waypoints
                 if ((Boolean)value) {
                     level.players().forEach(waypointManager::updatePlayer);
                 } else {

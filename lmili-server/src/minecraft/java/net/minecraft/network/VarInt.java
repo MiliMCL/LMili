@@ -60,8 +60,8 @@ public class VarInt {
             int s = (value & 0x7F | 0x80) << 8 | (value >>> 7);
             output.writeShort(s);
         } else {
-            // writeSlow(output, value); // Luminol - Krypton optimizations
-            writeVarIntFull(output, value); // Luminol - Krypton optimizations
+            // writeSlow(output, value); // Lmili - Krypton optimizations
+            writeVarIntFull(output, value); // Lmili - Krypton optimizations
         }
         return output;
     }
@@ -75,7 +75,7 @@ public class VarInt {
         output.writeByte(value);
         return output;
     }
-    // Luminol start - Krypton optimizations
+    // Lmili start - Krypton optimizations
     private static void writeVarIntFull(ByteBuf buf, int value) {
         // See https://steinborn.me/posts/performance/how-fast-can-you-write-a-varint/
         if ((value & (0xFFFFFFFF << 7)) == 0) {
@@ -97,5 +97,5 @@ public class VarInt {
             buf.writeByte(value >>> 28);
         }
     }
-    // Luminol end
+    // Lmili end
 }

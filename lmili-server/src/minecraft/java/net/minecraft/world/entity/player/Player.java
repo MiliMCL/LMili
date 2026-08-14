@@ -170,7 +170,7 @@ public abstract class Player extends Avatar implements ContainerUser {
     private ItemStack lastItemInMainHand = ItemStack.EMPTY;
     private final ItemCooldowns cooldowns = this.createItemCooldowns();
     private Optional<GlobalPos> lastDeathLocation = Optional.empty();
-    public fun.bm.mili.lmili.functions.bars.TickableStatusBarList statusBarList = new fun.bm.mili.lmili.functions.bars.TickableStatusBarList(this); // Luminol status bars
+    public fun.bm.mili.lmili.functions.bars.TickableStatusBarList statusBarList = new fun.bm.mili.lmili.functions.bars.TickableStatusBarList(this); // Lmili status bars
     public @Nullable FishingHook fishing;
     public float hurtDir;
     public boolean affectsSpawning = true; // Paper - Affects Spawning API
@@ -680,7 +680,7 @@ public abstract class Player extends Avatar implements ContainerUser {
         this.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(this.abilities.getWalkingSpeed());
         this.enderChestInventory.fromSlots(input.listOrEmpty("EnderItems", ItemStackWithSlot.CODEC));
         this.setLastDeathLocation(input.read("LastDeathLocation", GlobalPos.CODEC));
-        this.statusBarList.load(input); // Luminol - Status bars
+        this.statusBarList.load(input); // Lmili - Status bars
     }
 
     @Override
@@ -699,7 +699,7 @@ public abstract class Player extends Avatar implements ContainerUser {
         output.store("abilities", Abilities.Packed.CODEC, this.abilities.pack());
         this.enderChestInventory.storeAsSlots(output.list("EnderItems", ItemStackWithSlot.CODEC));
         this.lastDeathLocation.ifPresent(pos -> output.store("LastDeathLocation", GlobalPos.CODEC, pos));
-        this.statusBarList.save(output); // Luminol - Status bars
+        this.statusBarList.save(output); // Lmili - Status bars
     }
 
     @Override

@@ -391,7 +391,7 @@ public final class NaturalSpawner {
     ) {
         // Paper start - PreCreatureSpawnEvent
         EntityType<?> type = currentSpawnData.type();
-        // Luminol start - Do not fire pre creature spawn event unless some plugin is listening it
+        // Lmili start - Do not fire pre creature spawn event unless some plugin is listening it
         if (com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent.getHandlerList().getRegisteredListeners().length != 0) {
             com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent event = new com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent(
                     org.bukkit.craftbukkit.util.CraftLocation.toBukkit(pos, level),
@@ -404,7 +404,7 @@ public final class NaturalSpawner {
                 return PreSpawnStatus.CANCELLED;
             }
         }
-        // Luminol end - Do not fire pre creature spawn event unless some plugin is listening it
+        // Lmili end - Do not fire pre creature spawn event unless some plugin is listening it
         final boolean success = type.getCategory() != MobCategory.MISC
         // Paper end - PreCreatureSpawnEvent
             && (type.canSpawnFarFromPlayer() || !(nearestPlayerDistanceSqr > type.getCategory().getDespawnDistance() * type.getCategory().getDespawnDistance()))

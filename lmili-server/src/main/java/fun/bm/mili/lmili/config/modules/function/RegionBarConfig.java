@@ -56,6 +56,6 @@ public class RegionBarConfig implements IConfigModule {
         AbstractGlobalServerBar regionbar = GlobalServerBarManager.get(EnumBarType.REGION);
         regionbar.cancelBarUpdateTask();
         regionbar.runUnloadTask();
-        Bukkit.getCommandMap().getKnownCommands().remove("luminol:regionbar");
+        Bukkit.getCommandMap().getKnownCommands().remove("lmili:regionbar");
     }
 }

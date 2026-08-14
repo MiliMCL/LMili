@@ -63,6 +63,16 @@ public final class RegionTickContext {
         return Math.min(desired, maxWorkersPerRegion);
     }
 
+    /**
+     * 计算保证的最小 worker 数——与期望值取较大者。
+     * 确保即使 region 负载不高，也能获得最低限度的并行度。
+     */
+    public int computeGuaranteedWorkers(final int maxWorkersPerRegion,
+                                         final int minWorkersPerRegion,
+                                         final int parallelismThreshold) {
+        return Math.max(computeDesiredWorkers(maxWorkersPerRegion, parallelismThreshold), minWorkersPerRegion);
+    }
+
     @Override
     public String toString() {
         return "RegionTickContext{regionId=" + regionId + ", chunks=" + ownedChunks.get().size() + ", workers=" + workerCount.get() + "}";

@@ -248,8 +248,8 @@ public class TeleportCommand {
         // Folia start - region threading
         if (true) {
             Vec3 posFinal = new Vec3(x, y, z);
-            Float yawFinal = Float.valueOf(newYRot + victim.getYRot()); // Luminol - fix teleport yaw issue
-            Float pitchFinal = Float.valueOf(newXRot + victim.getXRot()); // Luminol - fix teleport pitch issue
+            Float yawFinal = Float.valueOf(newYRot + victim.getYRot()); // Lmili - fix teleport yaw issue
+            Float pitchFinal = Float.valueOf(newXRot + victim.getXRot()); // Lmili - fix teleport pitch issue
             victim.getBukkitEntity().taskScheduler.schedule((Entity nmsEntity) -> {
                 nmsEntity.stopRiding();
                 nmsEntity.teleportAsync(

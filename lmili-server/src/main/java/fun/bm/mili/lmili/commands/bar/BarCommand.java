@@ -7,7 +7,7 @@ import org.jetbrains.annotations.NotNull;
 import org.leavesmc.leaves.command.RootNode;
 
 public class BarCommand extends RootNode {
-    private static final String PERM_BASE = "luminol.commands.bar";
+    private static final String PERM_BASE = "lmili.commands.bar";
 
     public BarCommand() {
         super("bar", PERM_BASE);

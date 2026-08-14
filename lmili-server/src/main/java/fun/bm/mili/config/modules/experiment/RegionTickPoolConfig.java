@@ -40,6 +40,13 @@ public class RegionTickPoolConfig implements IConfigModule {
             较大值 → 更少调度开销但可能负载不均""")
     public static int sliceSize = 16;
 
+    @ConfigInfo(name = "min-workers-per-region", comments = """
+            每个 region 最少保留的 worker 线程数。
+            确保多 region 并发时，每个 region 都能获得足够的并行度，
+            不会因为贪心分配导致某些 region 被“饿死”。
+            默认为 2，最小为 1。""")
+    public static int minWorkersPerRegion = 2;
+
     @ConfigInfo(name = "use-virtual-threads", comments = """
             是否使用 virtual thread 作为 worker (JDK 24+)。
             启用后 worker-count 变为软上限，实际线程按需创建。""")
@@ -54,5 +61,9 @@ public class RegionTickPoolConfig implements IConfigModule {
     public static int getMaxWorkersPerRegion() {
         if (maxWorkersPerRegion > 0) return Math.max(1, maxWorkersPerRegion);
         return Math.max(1, getWorkerCount() / 2);
+    }
+
+    public static int getMinWorkersPerRegion() {
+        return Math.max(1, minWorkersPerRegion);
     }
 }

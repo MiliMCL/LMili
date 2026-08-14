@@ -279,7 +279,7 @@ public class Sniffer extends Animal {
 
     private boolean canDig(final BlockPos position) {
         return this.level().getBlockState(position).is(BlockTags.SNIFFER_DIGGABLE_BLOCK)
-            && this.getExploredPositions().noneMatch(explored -> { // Luminol start - Do not pathfind out of tickregion
+            && this.getExploredPositions().noneMatch(explored -> { // Lmili start - Do not pathfind out of tickregion
                 // thread checks
                 final net.minecraft.world.level.Level targetLevel = net.minecraft.server.MinecraftServer.getServer().getLevel(explored.dimension());
                 final BlockPos targetPos = explored.pos();
@@ -289,7 +289,7 @@ public class Sniffer extends Animal {
                 }
 
                 return GlobalPos.of(this.level().dimension(), position).equals(explored); // Original logic
-            }) // Luminol end
+            }) // Lmili end
             && Optional.ofNullable(this.getNavigation().createPath(position, 1)).map(Path::canReach).orElse(false);
     }
 

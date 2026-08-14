@@ -57,11 +57,11 @@ public class SleepInBed extends Behavior<LivingEntity> {
             }
         }
 
-        // Luminol - Prevent off-tick-region chunk operations
+        // Lmili - Prevent off-tick-region chunk operations
         if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, target.pos())) {
             return false;
         }
-        // Luminol -end
+        // Lmili -end
         BlockState blockState = level.getBlockStateIfLoaded(target.pos()); // Paper - Prevent sync chunk loads when villagers try to find beds
         if (blockState == null) return false; // Paper - Prevent sync chunk loads when villagers try to find beds
         return target.pos().closerToCenterThan(body.position(), 2.0) && blockState.is(BlockTags.BEDS) && !blockState.getValue(BedBlock.OCCUPIED);

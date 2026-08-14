@@ -197,9 +197,9 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
     public void handleConfigurationFinished(final ServerboundFinishConfigurationPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor());
         this.finishCurrentTask(JoinWorldTask.TYPE);
-        // this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()))); // Luminol - Async protocol switch - move down
+        // this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()))); // Lmili - Async protocol switch - move down
 
-        Runnable afterSwitch = () -> { // Luminol - Async protocol switch
+        Runnable afterSwitch = () -> { // Lmili - Async protocol switch
         try {
             PlayerList playerList = this.server.getPlayerList();
             if (playerList.getPlayer(this.gameProfile.id()) != null) {
@@ -245,7 +245,7 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
             LOGGER.error("Couldn't place player in world", e);
             this.disconnect(DISCONNECT_REASON_INVALID_DATA);
         }
-        // Luminol start - Async protocol switch
+        // Lmili start - Async protocol switch
         };
         if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
             this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
@@ -256,7 +256,7 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
                 io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(afterSwitch);
             }, false); // we will start auto read once we set up inbound handler at placeNewPlayer in PlayerList
         }
-        // Luminol end
+        // Lmili end
     }
 
     @Override
@@ -312,14 +312,14 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
     // Paper start
     @Override
     public void disconnectAsync(final net.minecraft.network.DisconnectionDetails disconnectionInfo) {
-        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) { // Luminol - Fix unpatched task returning of ServerConfigurationPacketListenerImpl#disconnectAsync
+        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) { // Lmili - Fix unpatched task returning of ServerConfigurationPacketListenerImpl#disconnectAsync
             this.disconnect(disconnectionInfo);
             return;
         }
 
         this.connection.setReadOnly();
-        // this.server.scheduleOnMain(() -> { // Luminol - Fix unpatched task returning of ServerConfigurationPacketListenerImpl#disconnectAsync
-        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> { // Luminol - Fix unpatched task returning of ServerConfigurationPacketListenerImpl#disconnectAsync
+        // this.server.scheduleOnMain(() -> { // Lmili - Fix unpatched task returning of ServerConfigurationPacketListenerImpl#disconnectAsync
+        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> { // Lmili - Fix unpatched task returning of ServerConfigurationPacketListenerImpl#disconnectAsync
             this.disconnect(disconnectionInfo); // Currently you cannot cancel disconnect during the config stage
         });
     }

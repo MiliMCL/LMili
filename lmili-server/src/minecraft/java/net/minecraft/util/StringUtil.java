@@ -63,14 +63,14 @@ public class StringUtil {
         return ch != 167 && ch >= 32 && ch != 127;
     }
 
-    // Luminol start - Add config for username checks
+    // Lmili start - Add config for username checks
     public static boolean isValidPlayerName(final String username){
         return isValidPlayerName(username, !fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled);
     }
-    // Luminol end
+    // Lmili end
 
-    public static boolean isValidPlayerName(final String name, final boolean byPass) { // Luminol - Add config for username checks
-        if (byPass) return name.length() <= 16; // Luminol - Add config for username checks
+    public static boolean isValidPlayerName(final String name, final boolean byPass) { // Lmili - Add config for username checks
+        if (byPass) return name.length() <= 16; // Lmili - Add config for username checks
         return name.length() <= 16 && name.chars().filter(c -> c <= 32 || c >= 127).findAny().isEmpty();
     }
 

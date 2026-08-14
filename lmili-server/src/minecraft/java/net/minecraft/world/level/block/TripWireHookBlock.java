@@ -201,7 +201,7 @@ public class TripWireHookBlock extends Block {
                     BlockPos testPos = pos.relative(direction, i);
                     BlockState wireData = wireStates[i];
                     if (wireData != null) {
-                        // Luminol start - tripwire and tripwireHook dupe
+                        // Lmili start - tripwire and tripwireHook dupe
                         if (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
                             level.setBlock(testPos, wireData.trySetValue(ATTACHED, attached), 3);
                             level.getBlockState(testPos);
@@ -211,7 +211,7 @@ public class TripWireHookBlock extends Block {
                                 if (!io.papermc.paper.configuration.GlobalConfiguration.get().blockUpdates.disableTripwireUpdates || !testPosState.is(Blocks.TRIPWIRE)) level.setBlock(testPos, wireData.trySetValue(ATTACHED, attached), 3); // Paper - prevent tripwire from updating
                             }
                         }
-                        // Luminol end - tripwire and tripwireHook dupe
+                        // Lmili end - tripwire and tripwireHook dupe
                     }
                 }
             }

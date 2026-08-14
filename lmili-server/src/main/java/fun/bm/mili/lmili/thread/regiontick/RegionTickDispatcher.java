@@ -37,6 +37,7 @@ public final class RegionTickDispatcher {
     private final ConcurrentHashMap<Long, RegionTickContext> activeContexts = new ConcurrentHashMap<>();
     private final AtomicInteger roundRobinIndex = new AtomicInteger(0);
     private final int maxWorkersPerRegion;
+    private final int minWorkersPerRegion;
     private final int parallelismThreshold;
     private final int sliceSize;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
@@ -46,8 +47,10 @@ public final class RegionTickDispatcher {
     private int migrationsCommitted;
 
     private RegionTickDispatcher(final int workerCount, final int maxWorkersPerRegion,
-                                  final int parallelismThreshold, final int sliceSize) {
+                                  final int minWorkersPerRegion, final int parallelismThreshold,
+                                  final int sliceSize) {
         this.maxWorkersPerRegion = maxWorkersPerRegion;
+        this.minWorkersPerRegion = minWorkersPerRegion;
         this.parallelismThreshold = parallelismThreshold;
         this.sliceSize = sliceSize;
         this.workers = new RegionTickWorker[workerCount];
@@ -80,7 +83,8 @@ public final class RegionTickDispatcher {
                 RegionTickPoolConfig config = new RegionTickPoolConfig();
                 instance = new RegionTickDispatcher(
                         config.getWorkerCount(), config.getMaxWorkersPerRegion(),
-                        config.parallelismThreshold, config.sliceSize);
+                        config.getMinWorkersPerRegion(), config.parallelismThreshold,
+                        config.sliceSize);
             }
             return instance;
         }
@@ -118,14 +122,25 @@ public final class RegionTickDispatcher {
         var chunks = context.getOwnedChunks();
         int chunkCount = chunks.size();
 
-        if (chunkCount < parallelismThreshold || context.computeDesiredWorkers(maxWorkersPerRegion, parallelismThreshold) <= 1) {
+        // 计算期望 worker 数，并确保不低于最小保留数
+        int desiredWorkers = context.computeDesiredWorkers(maxWorkersPerRegion, parallelismThreshold);
+        int guaranteedWorkers = Math.max(desiredWorkers, this.minWorkersPerRegion);
+
+        if (chunkCount < parallelismThreshold || guaranteedWorkers <= 1) {
             dispatchSingleThread(context, tickCount);
             return;
         }
 
         RegionTickSlice[] slices = RegionTickSlice.fromChunkList(context, chunks, sliceSize);
+        // 实际分配的 worker 数：不超过总 worker 数，也不低于最小保留数（除非总 worker 数不足）
+        int actualWorkers = Math.min(guaranteedWorkers, this.workers.length);
+        actualWorkers = Math.max(actualWorkers, 1); // 至少 1 个 worker
+        // slice 数不能少于 worker 数，否则会有 worker 空转
+        if (slices.length < actualWorkers) {
+            slices = RegionTickSlice.fromChunkList(context, chunks, Math.max(1, chunkCount / actualWorkers));
+        }
         context.beginTick(slices.length);
-        distributeSlices(slices, Math.min(context.computeDesiredWorkers(maxWorkersPerRegion, parallelismThreshold), this.workers.length));
+        distributeSlices(slices, actualWorkers);
         context.awaitTickCompletion();
         commitMigrations();
         context.endTick();

@@ -110,7 +110,7 @@ public class Main {
                 JvmProfiler.INSTANCE.start(Environment.SERVER);
             }
 
-            fun.bm.mili.lmili.config.ConfigManager.initConfigs(); // Luminol - Luminol config
+            fun.bm.mili.lmili.config.ConfigManager.initConfigs(); // Lmili - Lmili config
             io.papermc.paper.plugin.PluginInitializerManager.load(options); // Paper
             Bootstrap.bootStrap();
             Bootstrap.validate();

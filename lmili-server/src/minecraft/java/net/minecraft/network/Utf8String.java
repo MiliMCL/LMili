@@ -33,7 +33,7 @@ public class Utf8String {
     }
 
     public static void write(final ByteBuf output, final CharSequence value, final int maxLength) {
-        // Luminol start - Krypton optimizations
+        // Lmili start - Krypton optimizations
         if (true) {
             if (value.length() > maxLength) {
                 throw new EncoderException("String too big (was " + value.length() + " characters, max " + maxLength + ")");
@@ -48,7 +48,7 @@ public class Utf8String {
             }
             return;
         }
-        // Luminol end
+        // Lmili end
         if (value.length() > maxLength) {
             throw new EncoderException("String too big (was " + value.length() + " characters, max " + maxLength + ")");
         }

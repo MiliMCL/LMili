@@ -10,7 +10,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * Mili's status bars (tpsbar/membar/regionbar) were refactored into the global
  * {@link GlobalServerBarManager} system, which is driven by the config modules
  * (TpsBarConfig/MembarConfig/RegionBarConfig) instead of per-player instances.
- * This class only exists to satisfy the remaining Luminol hooks in Player/ServerPlayer.
+ * This class only exists to satisfy the remaining Lmili hooks in Player/ServerPlayer.
  */
 public class TickableStatusBarList {
     private final Player player;

@@ -60,7 +60,7 @@ public class FlyingPathNavigation extends PathNavigation {
 
             if (!this.isDone()) {
                 Vec3 target = this.path.getNextEntityPos(this.mob);
-                // Luminol - Recompute path when path finding out of current tick region
+                // Lmili - Recompute path when path finding out of current tick region
                 if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
                     // we assume that:
                     // 1. The code above doesn't touch the 'main thread context' with the position from 'this.path'
@@ -70,7 +70,7 @@ public class FlyingPathNavigation extends PathNavigation {
                         return;
                     }
                 }
-                // Luminol end
+                // Lmili end
                 this.mob.getMoveControl().setWantedPosition(target.x, target.y, target.z, this.speedModifier);
             }
         }

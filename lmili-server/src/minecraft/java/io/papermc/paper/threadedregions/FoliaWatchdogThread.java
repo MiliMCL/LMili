@@ -65,7 +65,7 @@ public final class FoliaWatchdogThread extends Thread {
 
             for (final RunningTick tick : ticks) {
                 final long elapsed = now - tick.lastPrint;
-                if (elapsed <= TimeUnit.MILLISECONDS.toNanos(fun.bm.mili.lmili.config.modules.misc.FoliaWatchogConfig.tickRegionTimeOutMs)) { // Luminol - Add config for watchdog timeout
+                if (elapsed <= TimeUnit.MILLISECONDS.toNanos(fun.bm.mili.lmili.config.modules.misc.FoliaWatchdogConfig.tickRegionTimeOutMs)) { // Lmili - Add config for watchdog timeout
                     continue;
                 }
                 tick.lastPrint = now;

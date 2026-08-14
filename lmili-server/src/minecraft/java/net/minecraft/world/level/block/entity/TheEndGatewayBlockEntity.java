@@ -192,7 +192,7 @@ public class TheEndGatewayBlockEntity extends TheEndPortalBlockEntity {
             portalTile.trySearchForExit(portalWorld, portalPos);
             return false;
         }
-        // Luminol start - Add missing teleportation apis
+        // Lmili start - Add missing teleportation apis
         final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(toTeleport.level(), portalPos);
         final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(portalWorld, teleportPos);
 
@@ -202,7 +202,7 @@ public class TheEndGatewayBlockEntity extends TheEndPortalBlockEntity {
         );
 
         portalLocateEvent.callEvent();
-        // Luminol end
+        // Lmili end
 
 
         // note: we handle the position from the TeleportTransition

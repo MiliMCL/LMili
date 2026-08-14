@@ -1062,7 +1062,7 @@ public abstract class BlockBehaviour implements FeatureElement {
             private static final Direction[] DIRECTIONS = Direction.values();
             private static final int SUPPORT_TYPE_COUNT = SupportType.values().length;
             public final VoxelShape collisionShape;
-            public boolean largeCollisionShape; // Luminol - make mutable
+            public boolean largeCollisionShape; // Lmili - make mutable
             private final boolean[] faceSturdy;
             public final boolean isCollisionShapeFullBlock;
 

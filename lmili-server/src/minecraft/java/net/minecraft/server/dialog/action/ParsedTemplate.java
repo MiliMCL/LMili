@@ -13,7 +13,7 @@ public class ParsedTemplate {
     private final String raw;
     private final StringTemplate parsed;
 
-    public ParsedTemplate(final String raw, final StringTemplate parsed) { // Luminol - private -> public
+    public ParsedTemplate(final String raw, final StringTemplate parsed) { // Lmili - private -> public
         this.raw = raw;
         this.parsed = parsed;
     }

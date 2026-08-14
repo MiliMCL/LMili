@@ -23,9 +23,13 @@ public class ConfigManager {
     // 3 -> target full path
 
     public static void initConfigs() {
-        configfiles.put("luminol", ConfigsInstance.of("luminol", "fun.bm.mili.lmili.config.modules"));
-        configfiles.put("mili", ConfigsInstance.of("mili", "fun.bm.mili.config.modules"));
-        configfiles.put("carpet", ConfigsInstance.of("carpet", "fun.bm.mili.carpet.config.modules"));
+        configfiles.put("lmili", ConfigsInstance.of(
+                new java.io.File("lmili_config"),
+                "lmili",
+                "lmili_config.toml",
+                "lmiliconfig",
+                "fun.bm.mili.config.modules"
+        ));
         preLoad();
     }
 

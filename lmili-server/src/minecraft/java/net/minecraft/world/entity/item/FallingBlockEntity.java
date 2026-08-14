@@ -70,7 +70,7 @@ public class FallingBlockEntity extends Entity {
     public int fallDamageMax = 40;
     public float fallDamagePerDistance = 0.0F;
     public @Nullable CompoundTag blockData;
-    public boolean forceTickAfterTeleportToDuplicate = fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled; // Luminol - Unsafe teleportation
+    public boolean forceTickAfterTeleportToDuplicate = fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled; // Lmili - Unsafe teleportation
     protected static final EntityDataAccessor<BlockPos> DATA_START_POS = SynchedEntityData.defineId(FallingBlockEntity.class, EntityDataSerializers.BLOCK_POS);
     public boolean autoExpire = true; // Paper - Expand FallingBlock API
 
@@ -384,7 +384,7 @@ public class FallingBlockEntity extends Entity {
         ResourceKey<Level> oldDimension = this.level().dimension();
         boolean fromOrToEnd = (oldDimension == Level.END || newDimension == Level.END) && oldDimension != newDimension;
         Entity newEntity = super.teleport(transition);
-        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation || fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled); // Paper // Luminol - Unsafe teleportation
+        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation || fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled); // Paper // Lmili - Unsafe teleportation
         return newEntity;
     }
 }

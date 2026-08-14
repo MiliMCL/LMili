@@ -97,7 +97,7 @@ Minecraft（原版）
 |------|------|
 | `gradle.properties` | 项目版本 `26.2-R0.1-SNAPSHOT`、MC 版本 `26.2`、`foliaRef=57f643f`、`weightVersion=2.0.15`、`clipVersion=3.0.18` |
 | `mili-server/build.gradle.kts` | 服务器构建核心（Java toolchain 25、lithium 依赖等） |
-| `mili_config.toml` | 运行时主配置（TOML 格式） |
+| `lmili_config.toml` | 运行时主配置（TOML 格式） |
 
 ---
 

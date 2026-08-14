@@ -75,10 +75,10 @@ public final class RegionizedWorldData {
     public static final RegionizedData.RegioniserCallback<RegionizedWorldData> REGION_CALLBACK = new RegionizedData.RegioniserCallback<>() {
         @Override
         public void merge(final RegionizedWorldData from, final RegionizedWorldData into, final long fromTickOffset) {
-            // Luminol start - Portal rate limiter
+            // Lmili start - Portal rate limiter
             into.portalRateThrottler.mergeWith(from.portalRateThrottler);
             from.portalRateThrottler.destroy();
-            // Luminol end
+            // Lmili end
             // connections
             for (final Connection conn : from.connections) {
                 into.connections.add(conn);
@@ -164,12 +164,12 @@ public final class RegionizedWorldData {
         public void split(final RegionizedWorldData from, final int chunkToRegionShift,
                           final Long2ReferenceOpenHashMap<RegionizedWorldData> regionToData,
                           final ReferenceOpenHashSet<RegionizedWorldData> dataSet) {
-            // Luminol start - Portal rate limiter
+            // Lmili start - Portal rate limiter
             for (var worldData : dataSet) {
                 from.portalRateThrottler.splitInto(worldData.portalRateThrottler);
             }
             from.portalRateThrottler.destroy();
-            // Luminol end
+            // Lmili end
             Set<Connection> cons = new java.util.HashSet<>(from.connections.size()); // Mili - save all connections we have processed in connection process
             // connections
             for (final Connection conn : from.connections) {
@@ -343,10 +343,10 @@ public final class RegionizedWorldData {
 
     private RegionizedServer.WorldLevelData tickData;
 
-    // Luminol start - Pufferfish projectile limiter
+    // Lmili start - Pufferfish projectile limiter
     public long pufferfish$loadedThisTick = 0L;
     public long pufferfish$loadedTick = 0L;
-    // Luminol end
+    // Lmili end
     // connections
     private static final Connection[] EMPTY_CONNECTION_ARRAY = new Connection[0];
     private final ReferenceList<Connection> connections = new ReferenceList<>(EMPTY_CONNECTION_ARRAY);
@@ -464,7 +464,7 @@ public final class RegionizedWorldData {
     // Environment attribute system
     public Reference2ObjectOpenHashMap<EnvironmentAttribute<?>, EnvironmentAttributeSystem.ValueSampler<?>> attributeSamplers;
 
-    // Luminol start - Portal rate limiter
+    // Lmili start - Portal rate limiter
     public final fun.bm.mili.lmili.utils.RateThrottler portalRateThrottler = new fun.bm.mili.lmili.utils.RateThrottler();
     public final net.objecthunter.exp4j.Expression portalRateCapExpression = fun.bm.mili.lmili.config.modules.function.PortalRateLimiterConfig.getExpressionIfConfigured();
 
@@ -492,7 +492,7 @@ public final class RegionizedWorldData {
 
         return this.portalRateThrottler.isOutOfRate(this.computePortalRateCap());
     }
-    // Luminol end
+    // Lmili end
 
     public int uniqueId = -1; // Mili - Global Entities Counter
     public boolean underGlobalEntitiesCounter = false; // Mili - Global Entities Counter

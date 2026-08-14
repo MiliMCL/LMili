@@ -8,5 +8,5 @@ public interface ChunkSystemChunkBuffer {
 
     public void moonrise$setWriteOnClose(final boolean value);
 
-    public void moonrise$write(final abomination.IRegionFile regionFile) throws IOException; // Luminol - Configurable region file format
+    public void moonrise$write(final abomination.IRegionFile regionFile) throws IOException; // Lmili - Configurable region file format
 }

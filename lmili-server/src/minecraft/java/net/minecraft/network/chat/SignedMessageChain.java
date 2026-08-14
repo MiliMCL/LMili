@@ -49,7 +49,7 @@ public class SignedMessageChain {
                     throw new SignedMessageChain.DecodeException(SignedMessageChain.DecodeException.CHAIN_BROKEN);
                 }
 
-                if (fun.bm.mili.lmili.config.modules.misc.InorderChatConfig.enabled && body.timeStamp().isBefore(SignedMessageChain.this.lastTimeStamp)) { // Luminol - Add config for out-of-order chat checks
+                if (fun.bm.mili.lmili.config.modules.misc.InorderChatConfig.enabled && body.timeStamp().isBefore(SignedMessageChain.this.lastTimeStamp)) { // Lmili - Add config for out-of-order chat checks
                     this.setChainBroken();
                     throw new SignedMessageChain.DecodeException(SignedMessageChain.DecodeException.OUT_OF_ORDER_CHAT, org.bukkit.event.player.PlayerKickEvent.Cause.OUT_OF_ORDER_CHAT); // Paper - kick event causes
                 }

@@ -76,8 +76,8 @@ public interface WaypointTransmitter extends Waypoint {
         private final LivingEntity source;
         private final Waypoint.Icon icon;
         private final ServerPlayer receiver;
-        private volatile float lastAngle; // Luminol - Restore waypoints
-        private final java.util.UUID sourceUUID; // Luminol - Restore waypoints (prevent UUID mutation)
+        private volatile float lastAngle; // Lmili - Restore waypoints
+        private final java.util.UUID sourceUUID; // Lmili - Restore waypoints (prevent UUID mutation)
 
         public EntityAzimuthConnection(final LivingEntity source, final Waypoint.Icon icon, final ServerPlayer receiver) {
             this.source = source;
@@ -85,7 +85,7 @@ public interface WaypointTransmitter extends Waypoint {
             this.receiver = receiver;
             Vec3 direction = receiver.position().subtract(source.position()).rotateClockwise90();
             this.lastAngle = (float)Mth.atan2(direction.z(), direction.x());
-            this.sourceUUID = this.source.getUUID(); // Luminol - Restore waypoints (prevent UUID mutation)
+            this.sourceUUID = this.source.getUUID(); // Lmili - Restore waypoints (prevent UUID mutation)
         }
 
         @Override
@@ -97,16 +97,16 @@ public interface WaypointTransmitter extends Waypoint {
 
         @Override
         public void connect() {
-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointAzimuth(this.sourceUUID, this.icon, this.lastAngle)); // Luminol - Restore waypoints (prevent UUID mutation)
+            this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointAzimuth(this.sourceUUID, this.icon, this.lastAngle)); // Lmili - Restore waypoints (prevent UUID mutation)
         }
 
         @Override
         public void disconnect() {
-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.sourceUUID)); // Luminol - Restore waypoints (prevent UUID mutation)
+            this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.sourceUUID)); // Lmili - Restore waypoints (prevent UUID mutation)
         }
 
         @Override
-        public synchronized void update() { // Luminol - Restore waypoints
+        public synchronized void update() { // Lmili - Restore waypoints
             Vec3 direction = this.receiver.position().subtract(this.source.position()).rotateClockwise90();
             float currentAngle = (float)Mth.atan2(direction.z(), direction.x());
             if (Mth.abs(currentAngle - this.lastAngle) > 0.008726646F) {
@@ -120,29 +120,29 @@ public interface WaypointTransmitter extends Waypoint {
         private final LivingEntity source;
         private final Waypoint.Icon icon;
         private final ServerPlayer receiver;
-        private volatile BlockPos lastPosition; // Luminol - Restore waypoints
-        private final java.util.UUID sourceUUID; // Luminol - Restore waypoints (prevent UUID mutation)
+        private volatile BlockPos lastPosition; // Lmili - Restore waypoints
+        private final java.util.UUID sourceUUID; // Lmili - Restore waypoints (prevent UUID mutation)
 
         public EntityBlockConnection(final LivingEntity source, final Waypoint.Icon icon, final ServerPlayer receiver) {
             this.source = source;
             this.receiver = receiver;
             this.icon = icon;
             this.lastPosition = source.blockPosition();
-            this.sourceUUID = this.source.getUUID(); // Luminol - Restore waypoints (prevent UUID mutation)
+            this.sourceUUID = this.source.getUUID(); // Lmili - Restore waypoints (prevent UUID mutation)
         }
 
         @Override
         public void connect() {
-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointPosition(this.sourceUUID, this.icon, this.lastPosition)); // Luminol - Restore waypoints (prevent UUID mutation)
+            this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointPosition(this.sourceUUID, this.icon, this.lastPosition)); // Lmili - Restore waypoints (prevent UUID mutation)
         }
 
         @Override
         public void disconnect() {
-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.sourceUUID)); // Luminol - Restore waypoints (prevent UUID mutation)
+            this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.sourceUUID)); // Lmili - Restore waypoints (prevent UUID mutation)
         }
 
         @Override
-        public synchronized void update() { // Luminol - Restore waypoints
+        public synchronized void update() { // Lmili - Restore waypoints
             BlockPos currentPosition = this.source.blockPosition();
             if (currentPosition.distManhattan(this.lastPosition) > 0) {
                 this.receiver.connection.send(ClientboundTrackedWaypointPacket.updateWaypointPosition(this.source.getUUID(), this.icon, currentPosition));
@@ -165,15 +165,15 @@ public interface WaypointTransmitter extends Waypoint {
         private final LivingEntity source;
         private final Waypoint.Icon icon;
         private final ServerPlayer receiver;
-        private volatile ChunkPos lastPosition; // Luminol - Restore waypoints
-        private final java.util.UUID sourceUUID; // Luminol - Restore waypoints (prevent UUID mutation)
+        private volatile ChunkPos lastPosition; // Lmili - Restore waypoints
+        private final java.util.UUID sourceUUID; // Lmili - Restore waypoints (prevent UUID mutation)
 
         public EntityChunkConnection(final LivingEntity source, final Waypoint.Icon icon, final ServerPlayer receiver) {
             this.source = source;
             this.icon = icon;
             this.receiver = receiver;
             this.lastPosition = source.chunkPosition();
-            this.sourceUUID = this.source.getUUID(); // Luminol - Restore waypoints (prevent UUID mutation)
+            this.sourceUUID = this.source.getUUID(); // Lmili - Restore waypoints (prevent UUID mutation)
         }
 
         @Override
@@ -183,16 +183,16 @@ public interface WaypointTransmitter extends Waypoint {
 
         @Override
         public void connect() {
-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointChunk(this.sourceUUID, this.icon, this.lastPosition)); // Luminol - Restore waypoints (prevent UUID mutable)
+            this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointChunk(this.sourceUUID, this.icon, this.lastPosition)); // Lmili - Restore waypoints (prevent UUID mutable)
         }
 
         @Override
         public void disconnect() {
-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.sourceUUID)); // Luminol - Restore waypoints (prevent UUID mutable)
+            this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.sourceUUID)); // Lmili - Restore waypoints (prevent UUID mutable)
         }
 
         @Override
-        public synchronized void update() { // Luminol - Restore waypoints
+        public synchronized void update() { // Lmili - Restore waypoints
             ChunkPos currentPosition = this.source.chunkPosition();
             if (currentPosition.getChessboardDistance(this.lastPosition) > 0) {
                 this.receiver.connection.send(ClientboundTrackedWaypointPacket.updateWaypointChunk(this.source.getUUID(), this.icon, currentPosition));

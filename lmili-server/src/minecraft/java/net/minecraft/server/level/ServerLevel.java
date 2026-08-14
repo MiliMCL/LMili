@@ -686,8 +686,8 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
 
         this.sleepStatus = new SleepStatus();
         this.gameEventDispatcher = new GameEventDispatcher(this);
-        //this.waypointManager = new ServerWaypointManager(this); // Paper - optimize ServerWaypointManager with locator bar disabled // Luminol - Restore waypoints
-        this.waypointManager = new fun.bm.mili.lmili.utils.FoliaServerWaypointManager(this); // Luminol - Restore waypoints
+        //this.waypointManager = new ServerWaypointManager(this); // Paper - optimize ServerWaypointManager with locator bar disabled // Lmili - Restore waypoints
+        this.waypointManager = new fun.bm.mili.lmili.utils.FoliaServerWaypointManager(this); // Lmili - Restore waypoints
         this.environmentAttributes = EnvironmentAttributeSystem.builder().addDefaultLayers(this).build();
         //this.updateSkyBrightness(); // Folia - region threading - delay until first tick
         // Paper start - rewrite chunk system
@@ -1720,38 +1720,38 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         foliaProfiler.startTimer(timerId);
         try {
         // Folia end - profiler
-        // Luminol start - Entity portal-teleport speed fix
+        // Lmili start - Entity portal-teleport speed fix
         if (isActive) { // Paper - EAR 2
-            if (!(entity instanceof Player) && entity.teleportTickType == 2) { // Luminol - after portal compensate tick
+            if (!(entity instanceof Player) && entity.teleportTickType == 2) { // Lmili - after portal compensate tick
                 entity.tick();
                 entity.tick();
                 entity.teleportTickType = 0;
                 if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
                     return;
                 }
-                // Luminol start - Portal rate limiter
+                // Lmili start - Portal rate limiter
                 var worldData0 = entity.level().getCurrentWorldData();
                 if (entity.portalProcess != null && worldData0.isPortalTeleportationOutOfRate()) {
                     return;
                 }
-                // Luminol end
+                // Lmili end
                 if (entity.handlePortal()) {
-                    worldData0.portalRateThrottler.increase(); // Luminol - Portal rate limiter
+                    worldData0.portalRateThrottler.increase(); // Lmili - Portal rate limiter
                     return;
                 }
-            } else if (!(entity instanceof Player) && entity.teleportTickType == 1) { // Luminol - portal teleport only
+            } else if (!(entity instanceof Player) && entity.teleportTickType == 1) { // Lmili - portal teleport only
                 entity.teleportTickType++;
                 if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
                     return;
                 }
-                // Luminol start - Portal rate limiter
+                // Lmili start - Portal rate limiter
                 var worldData = entity.level().getCurrentWorldData();
                 if (entity.portalProcess != null && worldData.isPortalTeleportationOutOfRate()) {
                     return;
                 }
-                // Luminol end
+                // Lmili end
                 if (entity.handlePortal()) {
-                    worldData.portalRateThrottler.increase(); // Luminol - Portal rate limiter
+                    worldData.portalRateThrottler.increase(); // Lmili - Portal rate limiter
                     return;
                 }
             } else {
@@ -1761,19 +1761,19 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
             // removed from region while ticking
             return;
         }
-        // Luminol start - Portal rate limiter
+        // Lmili start - Portal rate limiter
         var worldData2 = entity.level().getCurrentWorldData();
         if (entity.portalProcess != null && worldData2.isPortalTeleportationOutOfRate()) {
             return;
         }
-        // Luminol end
+        // Lmili end
         if (entity.handlePortal()) {
             // portalled
-            worldData2.portalRateThrottler.increase(); // Luminol - Portal rate limiter
+            worldData2.portalRateThrottler.increase(); // Lmili - Portal rate limiter
             return;
         }
         }
-        // Luminol end - Entity portal-teleport speed fix
+        // Lmili end - Entity portal-teleport speed fix
         // Folia end - region threading
         } else {entity.inactiveTick();} // Paper - EAR 2
         profiler.pop();
@@ -1816,15 +1816,15 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                 // removed from region while ticking
                 return;
             }
-            // Luminol start - Portal rate limiter
+            // Lmili start - Portal rate limiter
             var worldData3 = entity.level().getCurrentWorldData();
             if (entity.portalProcess != null && worldData3.isPortalTeleportationOutOfRate()) {
                 return;
             }
-            // Luminol end
+            // Lmili end
             if (entity.handlePortal()) {
                 // portalled
-                worldData3.portalRateThrottler.increase(); // Luminol - Portal rate limiter
+                worldData3.portalRateThrottler.increase(); // Lmili - Portal rate limiter
                 return;
             }
             // Folia end - region threading
@@ -2832,12 +2832,12 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         Optional<Holder<PoiType>> newType = PoiTypes.forState(newState);
         if (!Objects.equals(oldType, newType)) {
             BlockPos immutable = pos.immutable();
-            final java.util.concurrent.Executor scheduler = this.regionizedBlockableEventLoop.asExecutor(pos, true); // Luminol - Instant POI updates
-            oldType.ifPresent(poiType -> /*io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(this, immutable.getX() >> 4, immutable.getZ() >> 4,*/scheduler.execute( () -> { // Folia - region threading // Luminol - Instant POI updates
+            final java.util.concurrent.Executor scheduler = this.regionizedBlockableEventLoop.asExecutor(pos, true); // Lmili - Instant POI updates
+            oldType.ifPresent(poiType -> /*io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(this, immutable.getX() >> 4, immutable.getZ() >> 4,*/scheduler.execute( () -> { // Folia - region threading // Lmili - Instant POI updates
                 this.getPoiManager().remove(immutable);
                 this.debugSynchronizers.dropPoi(immutable);
             }));
-            newType.ifPresent(poiType -> /*io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(this, immutable.getX() >> 4, immutable.getZ() >> 4,*/scheduler.execute( () -> { // Folia - region threading // Luminol - Instant POI updates
+            newType.ifPresent(poiType -> /*io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(this, immutable.getX() >> 4, immutable.getZ() >> 4,*/scheduler.execute( () -> { // Folia - region threading // Lmili - Instant POI updates
                 // Paper start - Remove stale POIs
                 if (oldType.isEmpty() && this.getPoiManager().exists(immutable, _ -> true)) {
                     this.getPoiManager().remove(immutable);

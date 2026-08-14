@@ -420,7 +420,7 @@ public class ItemEntity extends Entity implements TraceableEntity {
             Item item = itemStack.getItem();
             int orgCount = itemStack.getCount();
             // CraftBukkit start - fire PlayerPickupItemEvent
-            int canHold = player.hasInfiniteMaterials() ? orgCount : player.getInventory().canHold(itemStack); // Luminol - Fix creative item picking
+            int canHold = player.hasInfiniteMaterials() ? orgCount : player.getInventory().canHold(itemStack); // Lmili - Fix creative item picking
             int remaining = orgCount - canHold;
             boolean flyAtPlayer = false; // Paper
 

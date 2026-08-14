@@ -43,7 +43,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
     private final RegionCallbacks<R, S> callbacks;
     private final StampedLock regionLock = new StampedLock();
     private Thread writeLockOwner;
-    public final fun.bm.mili.lmili.api.ThreadedRegionizer threadedRegionizerAPI; // Luminol - Tick region API
+    public final fun.bm.mili.lmili.api.ThreadedRegionizer threadedRegionizerAPI; // Lmili - Tick region API
 
     /*
     static final record Operation(String type, int chunkX, int chunkZ) {}
@@ -73,7 +73,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
         this.world = world;
         this.callbacks = callbacks;
         //this.loadTestData();
-        this.threadedRegionizerAPI = new fun.bm.mili.lmili.api.impl.ThreadedRegionizerImpl(this.world); // Luminol - Tick region API
+        this.threadedRegionizerAPI = new fun.bm.mili.lmili.api.impl.ThreadedRegionizerImpl(this.world); // Lmili - Tick region API
     }
 
     /*
@@ -695,7 +695,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
 
         private final ReferenceOpenHashSet<ThreadedRegion<R, S>> mergeIntoLater = new ReferenceOpenHashSet<>();
         private final ReferenceOpenHashSet<ThreadedRegion<R, S>> expectingMergeFrom = new ReferenceOpenHashSet<>();
-        public final fun.bm.mili.lmili.api.ThreadedRegion threadedRegionAPI = new fun.bm.mili.lmili.api.impl.ThreadedRegionImpl((ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>) this); // Luminol - Tickregion API
+        public final fun.bm.mili.lmili.api.ThreadedRegion threadedRegionAPI = new fun.bm.mili.lmili.api.impl.ThreadedRegionImpl((ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>) this); // Lmili - Tickregion API
 
         public ThreadedRegion(final ThreadedRegionizer<R, S> regioniser) {
             this.regioniser = regioniser;
@@ -822,7 +822,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
             return this.deadSections.size() == this.sectionByKey.size();
         }
 
-        public final double getDeadSectionPercent() { // Luminol - Threaded regions api
+        public final double getDeadSectionPercent() { // Lmili - Threaded regions api
             return (double)this.deadSections.size() / (double)this.sectionByKey.size();
         }
 

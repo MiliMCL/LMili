@@ -143,7 +143,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
     private final RegistryAccess registryAccess;
     private final DamageSources damageSources;
     private final PalettedContainerFactory palettedContainerFactory;
-    public final fun.bm.mili.lmili.utils.thread.RegionizedBlockableEventLoop regionizedBlockableEventLoop = new fun.bm.mili.lmili.utils.thread.RegionizedBlockableEventLoop(this); // Luminol - Threading utilies
+    public final fun.bm.mili.lmili.utils.thread.RegionizedBlockableEventLoop regionizedBlockableEventLoop = new fun.bm.mili.lmili.utils.thread.RegionizedBlockableEventLoop(this); // Lmili - Threading utilies
     private final java.util.concurrent.atomic.AtomicLong subTickCount = new java.util.concurrent.atomic.AtomicLong(); //private long subTickCount; // Folia - region threading
 
     // CraftBukkit start
@@ -1572,8 +1572,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
     public <T extends Entity> void guardEntityTick(final Consumer<T> tick, final T entity) {
         try {
             tick.accept(entity);
-        } catch (fun.bm.mili.lmili.utils.EntityMoveOutOfRegionException moveOutOfRegionException) {  // Luminol - Teleport async if entity was moving to another region at once
-            // Luminol start - Teleport async if entity was moving to another region at once
+        } catch (fun.bm.mili.lmili.utils.EntityMoveOutOfRegionException moveOutOfRegionException) {  // Lmili - Teleport async if entity was moving to another region at once
+            // Lmili start - Teleport async if entity was moving to another region at once
             final Entity ent = moveOutOfRegionException.getEntity();
             var currPosition = ent.position();
             var toPosition = moveOutOfRegionException.getMovement().add(currPosition);
@@ -1590,9 +1590,9 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
                     Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
                     null
             ), null, 1L);
-            // Luminol end
+            // Lmili end
         } catch (Throwable t) {
-            if (fun.bm.mili.lmili.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Luminol
+            if (fun.bm.mili.lmili.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Lmili
             // Paper start - Prevent block entity and entity crashes
             final String msg = String.format("Entity threw exception at %s:%s,%s,%s", io.papermc.paper.util.MCUtil.getLevelName(entity.level()), entity.getX(), entity.getY(), entity.getZ());
             MinecraftServer.LOGGER.error(msg, t);

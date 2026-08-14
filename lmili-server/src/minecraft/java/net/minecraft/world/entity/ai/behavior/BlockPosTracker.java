@@ -38,10 +38,10 @@ public class BlockPosTracker implements PositionTracker {
         return "BlockPosTracker{blockPos=" + this.blockPos + ", centerPosition=" + this.centerPosition + "}";
     }
 
-    // Luminol start - Fix a series issue around entity memory typed GlobalPos and WalkTarget
+    // Lmili start - Fix a series issue around entity memory typed GlobalPos and WalkTarget
     @Override
     public boolean checkThread(net.minecraft.world.level.Level currOwnedByLevel) {
         return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(currOwnedByLevel, this.blockPos);
     }
-    // Luminol end
+    // Lmili end
 }

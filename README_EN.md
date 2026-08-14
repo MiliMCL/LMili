@@ -191,7 +191,7 @@ Mili provides a TOML configuration file (pure Java parsing implementation):
 
 | File | Package | Description |
 |------|---------|-------------|
-| `mili_config.toml` | `fun.bm.mili.config.modules` | Main config: feature toggles, experiments, fixes and optimizations |
+| `lmili_config.toml` | `fun.bm.mili.config.modules` | Main config: feature toggles, experiments, fixes and optimizations |
 
 Config categories:
 

@@ -191,7 +191,7 @@ Mili 提供 TOML 配置文件（纯 Java 解析实现）：
 
 | 文件 | 包路径 | 说明 |
 |------|--------|------|
-| `mili_config.toml` | `fun.bm.mili.config.modules` | 主配置，涵盖功能开关、实验功能、修复与优化开关 |
+| `lmili_config.toml` | `fun.bm.mili.config.modules` | 主配置，涵盖功能开关、实验功能、修复与优化开关 |
 
 配置分类：
 

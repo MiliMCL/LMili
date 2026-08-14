@@ -16,13 +16,13 @@ import java.util.Set;
         category = EnumConfigCategory.MISC,
         name = "auto_update",
         comments = """
-                Checks GitHub Releases for newer Luminol jars on a schedule.
-                Downloads are staged under auto_update/luminol and written to auto_update/core.path,
+                Checks GitHub Releases for newer Lmili jars on a schedule.
+                Downloads are staged under auto_update/lmili and written to auto_update/core.path,
                 which Hyacinthusclip can consume on the next restart.
-                If target_jar_path is set, Luminol will also try to replace that launcher jar directly."""
+                If target_jar_path is set, Lmili will also try to replace that launcher jar directly."""
 )
 public class AutoUpdateConfig implements IConfigModule {
-    @ConfigInfo(name = "enabled", comments = "Whether Luminol should check for updates automatically.")
+    @ConfigInfo(name = "enabled", comments = "Whether Lmili should check for updates automatically.")
     public static boolean enabled = false;
 
     @ConfigInfo(name = "check_times", comments = "List of daily check times in HH:mm, based on the server's local time zone.")
@@ -33,7 +33,7 @@ public class AutoUpdateConfig implements IConfigModule {
 
     @ConfigInfo(name = "target_jar_path", comments = """
             Optional launcher jar path to replace after a successful download.
-            Leave this blank to keep the downloaded jar staged in auto_update/luminol
+            Leave this blank to keep the downloaded jar staged in auto_update/lmili
             and let Hyacinthusclip switch to it through auto_update/core.path on restart.""")
     public static String targetJarPath = "";
 

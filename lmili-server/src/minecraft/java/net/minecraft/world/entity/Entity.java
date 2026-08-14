@@ -298,7 +298,7 @@ public abstract class Entity
     public double yOld;
     public double zOld;
     public boolean noPhysics;
-    protected final RandomSource random = fun.bm.mili.lmili.config.modules.fixes.VanillaRandomSourceConfig.useLegacyRandomSourceForPlayers ? RandomSource.create() : SHARED_RANDOM; // Paper - Share random for entities to make them more random // Luminol - Add config for vanilla random SHARED_RANDOM
+    protected final RandomSource random = fun.bm.mili.lmili.config.modules.fixes.VanillaRandomSourceConfig.useLegacyRandomSourceForPlayers ? RandomSource.create() : SHARED_RANDOM; // Paper - Share random for entities to make them more random // Lmili - Add config for vanilla random SHARED_RANDOM
     public int tickCount;
     private int remainingFireTicks;
     private final EntityFluidInteraction fluidInteraction = new EntityFluidInteraction(Set.of(FluidTags.WATER, FluidTags.LAVA));
@@ -387,7 +387,7 @@ public abstract class Entity
     public long activatedTick = Integer.MIN_VALUE;
     public boolean isTemporarilyActive;
     public long activatedImmunityTick = Integer.MIN_VALUE;
-    public int teleportTickType = 0;// Luminol - Entity portal-teleport speed fix
+    public int teleportTickType = 0;// Lmili - Entity portal-teleport speed fix
 
     public void inactiveTick() {
     }
@@ -1169,7 +1169,7 @@ public abstract class Entity
             this.moveStartZ = this.getZ();
             this.moveVector = delta;
         }
-        //Luminol start - Fix high position moving
+        //Lmili start - Fix high position moving
         // Filter the threads as it may be called by the chunk system worker thread
         if (fun.bm.mili.lmili.config.modules.fixes.FoliaEntityMovingFixConfig.enabled && ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()){
             var finalPosition = delta.add(this.position);
@@ -1181,7 +1181,7 @@ public abstract class Entity
                 }
             }
         }
-        //Luminol end
+        //Lmili end
         try {
         // Paper end - detailed watchdog information
         if (this.noPhysics) {
@@ -3621,7 +3621,7 @@ public abstract class Entity
         } else {
             if (this.portalProcess == null || !this.portalProcess.isSamePortal(portal)) {
                 this.portalProcess = new PortalProcessor(portal, pos.immutable());
-                this.teleportTickType = 1; // Luminol - Entity portal-teleport speed fix
+                this.teleportTickType = 1; // Lmili - Entity portal-teleport speed fix
             } else if (!this.portalProcess.isInsidePortalThisTick()) {
                 this.portalProcess.updateEntryPosition(pos.immutable());
                 this.portalProcess.setAsInsidePortalThisTick(true);
@@ -4225,13 +4225,13 @@ public abstract class Entity
             }
         }
 
-        // Luminol start  - Fix riding statics desync
+        // Lmili start  - Fix riding statics desync
         public void adjustRiders(boolean teleport) {
             this.adjustRiders(teleport, false);
         }
 
         public void adjustRiders(boolean teleport, boolean syncStatics) {
-        // Luminol end - Fix riding statics desync
+        // Lmili end - Fix riding statics desync
             java.util.ArrayDeque<EntityTreeNode> queue = new java.util.ArrayDeque<>();
             queue.add(this);
 
@@ -4244,24 +4244,24 @@ public abstract class Entity
 
                 for (EntityTreeNode passenger : passengers) {
                     queue.add(passenger);
-                    // Luminol start  - Fix riding statics desync
+                    // Lmili start  - Fix riding statics desync
                     final double oldX = passenger.root.getX();
                     final double oldY = passenger.root.getY();
                     final double oldZ = passenger.root.getZ();
-                    // Luminol end - Fix riding statics desync
+                    // Lmili end - Fix riding statics desync
                     curr.root.positionRider(passenger.root, teleport ? Entity::snapTo : Entity::setPos);
-                    // Luminol start  - Fix riding statics desync
+                    // Lmili start  - Fix riding statics desync
                     if (syncStatics && passenger.root instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
                         serverPlayer.checkRidingStatistics(serverPlayer.getX() - oldX, serverPlayer.getY() - oldY, serverPlayer.getZ() - oldZ);
                     }
-                    // Luminol end - Fix riding statics desync
+                    // Lmili end - Fix riding statics desync
                 }
             }
         }
     }
 
     public void repositionAllPassengers(boolean teleport) {
-        this.makePassengerTree().adjustRiders(teleport, true); // Luminol - Fix riding statics desync
+        this.makePassengerTree().adjustRiders(teleport, true); // Lmili - Fix riding statics desync
     }
 
     protected EntityTreeNode makePassengerTree() {
@@ -4485,7 +4485,7 @@ public abstract class Entity
         Entity copy = this.getType().create(destination, EntitySpawnReason.DIMENSION_TRAVEL);
         copy.restoreFrom(this);
         copy.transform(pos, yaw, pitch, velocity);
-        if (copy instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon dragon) dragon.syncDragonPartsAfterTeleportTransform(); // Luminol - Sync dragon part when teleportation or firstly created
+        if (copy instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon dragon) dragon.syncDragonPartsAfterTeleportTransform(); // Lmili - Sync dragon part when teleportation or firstly created
         // vanilla code used to call remove _after_ copying, and some stuff is required to be after copy - so add hook here
         // for example, clearing of inventory after switching dimensions
         this.postRemoveAfterChangingDimensions();
@@ -4502,16 +4502,16 @@ public abstract class Entity
             teleportTarget.cause(), teleportFlags, teleportComplete
         );
     }
-    // Luminol start - Prevent teleprotAsync calls in move events
+    // Lmili start - Prevent teleprotAsync calls in move events
     public boolean blockTeleportAsync = false;
-    // Luminol end
+    // Lmili end
 
     public final boolean teleportAsync(ServerLevel destination, Vec3 pos, Float yaw, Float pitch, Vec3 velocity,
                                        org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, long teleportFlags,
                                        java.util.function.Consumer<Entity> teleportComplete) {
         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
 
-        // Luminol start - Prevent teleprotAsync calls in move events
+        // Lmili start - Prevent teleprotAsync calls in move events
         if (this.blockTeleportAsync && fun.bm.mili.lmili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.enabled) {
             if (fun.bm.mili.lmili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.throwWhenCaught) {
                 throw new IllegalStateException("Call teleportAsync during move events!");
@@ -4520,7 +4520,7 @@ public abstract class Entity
             LOGGER.error("Calling teleportAsync during move events!", new Throwable());
             return false;
         }
-        // Luminol end
+        // Lmili end
         if (!ServerLevel.isInSpawnableBounds(new BlockPos(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockY(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockZ(pos)))) {
             return false;
         }
@@ -4551,7 +4551,7 @@ public abstract class Entity
         }
 
         // TODO any events that can modify go HERE
-        // Luminol start - Add missing teleportation apis
+        // Lmili start - Add missing teleportation apis
         org.bukkit.Location destinationLoc;
 
         if (pitch == null) {
@@ -4575,7 +4575,7 @@ public abstract class Entity
         );
 
         wrapped.callEvent();
-        // Luminol end
+        // Lmili end
 
         // check for same region
         if (destination == this.level()
@@ -4686,7 +4686,7 @@ public abstract class Entity
             case END: {
                 if (destination.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END) {
                     BlockPos targetPos = ServerLevel.END_SPAWN_POINT;
-                    // Luminol start - Add missing teleportation apis
+                    // Lmili start - Add missing teleportation apis
                     final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
                     final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
 
@@ -4696,7 +4696,7 @@ public abstract class Entity
                     );
 
                     portalLocateEvent.callEvent();
-                    // Luminol end
+                    // Lmili end
                     // need to load chunks so we can create the platform
                     destination.moonrise$loadChunksAsync(
                         targetPos, 16, // load 16 blocks to be safe from block physics
@@ -4724,7 +4724,7 @@ public abstract class Entity
                     );
                 } else {
                     BlockPos spawnPos = destination.getRespawnData().pos();
-                    // Luminol start - Add missing teleportation apis
+                    // Lmili start - Add missing teleportation apis
                     final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
                     final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, spawnPos);
 
@@ -4734,7 +4734,7 @@ public abstract class Entity
                     );
 
                     portalLocateEvent.callEvent();
-                    // Luminol end
+                    // Lmili end
                     // need to load chunk for heightmap
                     destination.moonrise$loadChunksAsync(
                         spawnPos, 0,
@@ -4792,7 +4792,7 @@ public abstract class Entity
                 WorldBorder destinationBorder = destination.getWorldBorder();
                 double dimensionScale = net.minecraft.world.level.dimension.DimensionType.getTeleportationScale(origin.dimensionType(), destination.dimensionType());
                 BlockPos targetPos = destination.getWorldBorder().clampToBounds(this.getX() * dimensionScale, this.getY(), this.getZ() * dimensionScale);
-                // Luminol start - Add missing teleportation apis
+                // Lmili start - Add missing teleportation apis
                 final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
                 final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
 
@@ -4802,7 +4802,7 @@ public abstract class Entity
                 );
 
                 portalLocateEvent.callEvent();
-                // Luminol end
+                // Lmili end
                 ca.spottedleaf.concurrentutil.completable.CallbackCompletable<BlockUtil.FoundRectangle> portalFound
                     = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
 
@@ -4939,7 +4939,7 @@ public abstract class Entity
         if (!this.canPortalAsync(destination, takePassengers)) {
             return false;
         }
-        // Luminol start - Add missing teleportation events
+        // Lmili start - Add missing teleportation events
         if (!new fun.bm.mili.lmili.api.entity.PreEntityPortalEvent(
                 this.getBukkitEntity(),
                 io.papermc.paper.util.MCUtil.toLocation(this.level, portalPos),
@@ -4947,7 +4947,7 @@ public abstract class Entity
         ).callEvent()) {
             return false;
         }
-        // Luminol end
+        // Lmili end
         // Kaiiju start - sync end platform spawning & entity teleportation
         final java.util.function.Consumer<Entity> tpComplete = type == PortalType.END && destination.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ?
               e -> net.minecraft.world.level.levelgen.feature.EndPlatformFeature.createEndPlatform(destination, ServerLevel.END_SPAWN_POINT.below(), true, null) : teleportComplete;

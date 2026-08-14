@@ -301,11 +301,11 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
         if (Objects.equals(currentTarget, target)) {
             return false;
         }
-        // Luminol start - Fix off-region targeting
+        // Lmili start - Fix off-region targeting
         if (target != null && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(target)) {
             return false;
         }
-        // Luminol end
+        // Lmili end
         LivingEntity originalTarget = target;
         target = asValidTarget(target);
         if (reason != null) {
@@ -880,12 +880,12 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
             return;
         }
         // Paper end - Allow nerfed mobs to jump and float
-        int idBasedTickCount = this.tickCount + this.getId(); // Luminol - Petal - Move up
+        int idBasedTickCount = this.tickCount + this.getId(); // Lmili - Petal - Move up
         ProfilerFiller profiler = Profiler.get();
         profiler.push("sensing");
-        if (idBasedTickCount % fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Luminol - Petal - Reduce sensor work
+        if (idBasedTickCount % fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Lmili - Petal - Reduce sensor work
         profiler.pop();
-        //int idBasedTickCount = this.tickCount + this.getId(); // Luminol - Petal - Move up
+        //int idBasedTickCount = this.tickCount + this.getId(); // Lmili - Petal - Move up
         if (idBasedTickCount % 2 != 0 && this.tickCount > 1) {
             profiler.push("targetSelector");
             this.targetSelector.tickRunningGoals(false);

@@ -282,9 +282,9 @@ public abstract class AbstractBoat extends VehicleEntity implements Leashable {
 
         if (this.lastLocation != null && !this.lastLocation.equals(to)) {
             org.bukkit.event.vehicle.VehicleMoveEvent event = new org.bukkit.event.vehicle.VehicleMoveEvent(vehicle, this.lastLocation, to);
-            this.blockTeleportAsync = true; // Luminol - Prevent teleprotAsync calls during move events
+            this.blockTeleportAsync = true; // Lmili - Prevent teleprotAsync calls during move events
             event.callEvent();
-            this.blockTeleportAsync = false; // Luminol - Prevent teleprotAsync calls during move events
+            this.blockTeleportAsync = false; // Lmili - Prevent teleprotAsync calls during move events
         }
         this.lastLocation = vehicle.getLocation();
         // CraftBukkit end

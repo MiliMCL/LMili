@@ -10,7 +10,7 @@ import fun.bm.mili.lmili.enums.EnumConfigCategory;
 public class LeavesSleepingBlockEntityConfig implements IConfigModule {
     @ConfigInfo(name = "enabled", comments = """
             Use sleeping blocking optimizations from lithium,\s
-             on luminol the hopper optimizations of paper were totally removed and replaced by those of lithium\s
+             on lmili the hopper optimizations of paper were totally removed and replaced by those of lithium\s
             and it's turned on by default""")
     @HotReloadUnsupported
     public static boolean enabled = true;

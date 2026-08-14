@@ -33,23 +33,23 @@ paperweight {
         }
     }
 
-    val luminol = forks.register("luminol") {
+    val lmili = forks.register("lmili") {
         forks = fork
         upstream.patchRepo("paperServer") {
             upstreamRepo = fork.patchedRepo("paperServer")
-            patchesDir = rootDirectory.dir("luminol-server/paper-patches")
+            patchesDir = rootDirectory.dir("lmili-server/paper-patches")
             outputDir = rootDirectory.dir("paper-server")
         }
 
         upstream.patchDir("foliaServer") {
             upstreamPath = "folia-server"
             excludes = setOf("src/minecraft", "paper-patches", "minecraft-patches", "build.gradle.kts", "build.gradle.kts.patch")
-            patchesDir = rootDirectory.dir("luminol-server/folia-patches")
+            patchesDir = rootDirectory.dir("lmili-server/folia-patches")
             outputDir = rootDirectory.dir("folia-server")
         }
     }
 
-    activeFork = luminol
+    activeFork = lmili
 
 
     updatingMinecraft {

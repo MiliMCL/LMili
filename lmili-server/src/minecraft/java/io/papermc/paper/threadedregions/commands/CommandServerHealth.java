@@ -29,14 +29,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
-// Luminol start - Improved Server Health Report
+// Lmili start - Improved Server Health Report
 import java.util.concurrent.TimeUnit;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
 import java.lang.management.RuntimeMXBean;
 import org.jetbrains.annotations.NotNull;
-// Luminol end
+// Lmili end
 
 public final class CommandServerHealth extends Command {
 
@@ -53,7 +53,7 @@ public final class CommandServerHealth extends Command {
     private static final TextColor HEADER = TextColor.color(79, 164, 240);
     private static final TextColor PRIMARY = TextColor.color(48, 145, 237);
     private static final TextColor SECONDARY = TextColor.color(104, 177, 240);
-    private static final TextColor INFORMATION = TextColor.color(180, 220, 255); // Luminol start - Improved Server Health Report
+    private static final TextColor INFORMATION = TextColor.color(180, 220, 255); // Lmili start - Improved Server Health Report
     private static final TextColor LIST = TextColor.color(33, 97, 188);
 
     public CommandServerHealth() {
@@ -401,7 +401,7 @@ public final class CommandServerHealth extends Command {
         return new ArrayList<>();
     }
 
-    // Luminol start - Improved Server Health Report
+    // Lmili start - Improved Server Health Report
     private static @NotNull String formatUptime(long uptimeMillis) {
         long days = TimeUnit.MILLISECONDS.toDays(uptimeMillis);
         long hours = TimeUnit.MILLISECONDS.toHours(uptimeMillis) % 24;
@@ -416,5 +416,5 @@ public final class CommandServerHealth extends Command {
 
         return sb.toString();
     }
-    // Luminol end
+    // Lmili end
 }

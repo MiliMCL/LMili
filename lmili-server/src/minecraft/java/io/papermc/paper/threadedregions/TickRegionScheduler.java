@@ -66,7 +66,7 @@ public final class TickRegionScheduler {
 
             @Override
             public Thread newThread(final Runnable run) {
-                // Luminol start - cpu affinity
+                // Lmili start - cpu affinity
                 final Runnable actualRun;
                 if (fun.bm.mili.lmili.config.modules.optimizations.CpuAffinityConfig.cpuAffinityEnabled) {
                     actualRun = new Runnable() {
@@ -84,7 +84,7 @@ public final class TickRegionScheduler {
                 } else {
                     actualRun = run;
                 }
-                // Luminol end - cpu affinity
+                // Lmili end - cpu affinity
                 final Thread ret = new TickThreadRunner(this.threadGroup, actualRun, "Folia Region Scheduler Thread #" + this.idGenerator.getAndIncrement());
                 ret.setUncaughtExceptionHandler(TickRegionScheduler.this::uncaughtException);
                 return ret;
