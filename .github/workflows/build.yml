@@ -91,13 +91,15 @@ jobs:
           # This regenerates everything including lmili-server/src/minecraft/.
           ./gradlew applyAllPatches --no-configuration-cache
 
-      - name: Restore Committed lmili-server/src/minecraft/
+      - name: Restore Committed Sources
         run: |
           set -eux
-          # applyAllPatches regenerated lmili-server/src/minecraft/ with CI environment mappings
-          # which may be incompatible with our patches. Restore the committed version.
+          # applyAllPatches may regenerate source files with CI environment mappings
+          # which may be incompatible with our patches. Restore committed versions.
           git checkout HEAD -- lmili-server/src/minecraft/
+          git checkout HEAD -- lmili-api/build.gradle.kts
           echo "Restored lmili-server/src/minecraft/ ($(find lmili-server/src/minecraft -name '*.java' | wc -l) java files)"
+          echo "Restored lmili-api/build.gradle.kts"
 
       - name: Verify Generated Source
         run: |

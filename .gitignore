@@ -7,7 +7,6 @@ build
 **/bin/
 *.class
 /lmili-server/build.gradle.kts
-/lmili-api/build.gradle.kts
 /lmili-server/src/main/resources
 /paper-server
 /folia-server
