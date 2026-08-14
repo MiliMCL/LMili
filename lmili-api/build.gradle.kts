@@ -1,3 +1,4 @@
+import com.vanniktech.maven.publish.SonatypeHost
 import paper.libs.com.google.gson.Gson
 
 plugins {
@@ -154,12 +155,12 @@ configurations {
 
 mavenPublishing {
     // Publish to the new Central Publishing Portal (OSSRH was retired on 2025-06-30)
-    publishToMavenCentral(automaticRelease = true)
+    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = true)
     signAllPublications()
 
     // Central Portal (and Maven Central) does not support -SNAPSHOT versions, use release version
     val releaseVersion = project.version.toString().replace("-SNAPSHOT", "")
-    coordinates("fun.bm.mili", "lmili-api", releaseVersion)
+    coordinates("io.github.xucy10", "lmili-api", releaseVersion)
 
     // Maven Central required POM metadata
     pom {
