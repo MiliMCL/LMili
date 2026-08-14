@@ -280,9 +280,7 @@ tasks.withType<Javadoc>().configureEach {
     }
 
     // Add jdk.incubator.vector module for SIMD classes (Pufferfish)
-    options {
-        addStringOption("add-modules", "jdk.incubator.vector")
-    }
+    options.addStringOption("add-modules", "jdk.incubator.vector")
 
     // workaround for https://github.com/gradle/gradle/issues/4046
     inputs.dir("../paper-api/src/main/javadoc").withPropertyName("javadoc-sourceset")
