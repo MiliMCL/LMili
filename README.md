@@ -119,7 +119,50 @@ python scripts/inject_kotlin.py
 
 ## API 使用
 
-### Gradle
+### Maven Central（正式版本）
+
+**坐标：** `io.github.xucy10:lmili-api:26.2-R0.1`
+
+#### Gradle (Kotlin DSL)
+
+```kotlin
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly("io.github.xucy10:lmili-api:26.2-R0.1")
+}
+```
+
+#### Gradle (Groovy)
+
+```groovy
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly 'io.github.xucy10:lmili-api:26.2-R0.1'
+}
+```
+
+#### Maven
+
+```xml
+<dependency>
+    <groupId>io.github.xucy10</groupId>
+    <artifactId>lmili-api</artifactId>
+    <version>26.2-R0.1</version>
+    <scope>provided</scope>
+</dependency>
+```
+
+### MenthaMC（快照版本）
+
+快照版本可通过 MenthaMC 仓库获取。
+
+#### Gradle
 
 ```kotlin
 repositories {
@@ -133,7 +176,7 @@ dependencies {
 }
 ```
 
-### Maven
+#### Maven
 
 ```xml
 <repositories>
