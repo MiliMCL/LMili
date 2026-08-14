@@ -22,15 +22,11 @@ public final class RegionTickBootstrap {
         }
         disableConflicting();
         try {
-            RegionTickPool pool = RegionTickPool.initIfNeeded();
-            if (pool != null) {
-                initialized = true;
-                // 注册公共 API —— 让 Mili.scheduler() 可用
-                Mili.registerScheduler(new PublicSchedulerAdapter(VirtualThreadScheduler.getInstance()));
-                LOGGER.info("[RegionTickPool] Initialization complete (public API registered)");
-            } else {
-                LOGGER.warn("[RegionTickPool] Initialization returned null");
-            }
+            RegionTickDispatcher.init();
+            initialized = true;
+            // 注册公共 API —— 让 Mili.scheduler() 可用
+            Mili.registerScheduler(new PublicSchedulerAdapter(VirtualThreadScheduler.getInstance()));
+            LOGGER.info("[RegionTickPool] Initialization complete (public API registered)");
         } catch (Throwable throwable) {
             LOGGER.error("[RegionTickPool] Initialization failed", throwable);
         }
@@ -40,7 +36,10 @@ public final class RegionTickBootstrap {
         if (!initialized) return;
         initialized = false;
         try {
-            RegionTickPool.shutdown();
+            RegionTickDispatcher dispatcher = RegionTickDispatcher.getInstance();
+            if (dispatcher != null) {
+                dispatcher.shutdown();
+            }
             Mili.resetScheduler();
             LOGGER.info("[RegionTickPool] Shutdown complete");
         } catch (Throwable throwable) {

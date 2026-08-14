@@ -13,16 +13,26 @@ import org.slf4j.Logger;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ForkJoinPool;
 import java.util.function.BiConsumer;
 
 public final class DagBasedTickExecutor implements RegionTickExecutor {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    // Mili start - fix: Shared long-lived ForkJoinPool to avoid creating/destroying
+    // a new pool on every tick (which wastes threads and causes thread churn).
+    private static final ForkJoinPool SHARED_DAG_POOL = new ForkJoinPool(
+            Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
+            ForkJoinPool.defaultForkJoinWorkerThreadFactory,
+            (t, e) -> LOGGER.error("[DagBasedTickExecutor] Uncaught exception in worker", e),
+            true // asyncMode for better throughput with independent tasks
+    );
+    // Mili end
+
     private final FoliaTickExecutor foliaExecutor = new FoliaTickExecutor();
     private final Map<String, BiConsumer<SystemProfile, Scope>> systemExecutors = new ConcurrentHashMap<>();
     private volatile RegionDag cachedDag;
-    private volatile List<Map.Entry<SystemProfile, Scope>> cachedPairs;
     private volatile long dagBuildNanos;
 
     public void registerSystem(@NotNull final String name,
@@ -36,7 +46,7 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
 
         systemExecutors.put(name, executor);
         this.cachedDag = null;
-        this.cachedPairs = null;
+        this.cachedVersion = -1;
         LOGGER.debug("[DagBasedTickExecutor] Registered system '{}' (resource reads={}, writes={})",
                 name, profile.readBits().length, profile.writeBits().length);
     }
@@ -44,7 +54,7 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
     public void unregisterSystem(@NotNull final String name) {
         if (systemExecutors.remove(name) != null) {
             this.cachedDag = null;
-            this.cachedPairs = null;
+            this.cachedVersion = -1;
         }
     }
 
@@ -78,8 +88,9 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
         RegionDag dag = getOrBuildDag(regionId, systemScopePairs);
         if (dag == null) return;
 
+        // Mili start - fix: Use shared pool instead of creating a new one per tick
         int threadCount = Math.min(systemScopePairs.size(), Runtime.getRuntime().availableProcessors());
-        RegionDagExecutor executor = new RegionDagExecutor(threadCount);
+        RegionDagExecutor executor = new RegionDagExecutor(threadCount, SHARED_DAG_POOL);
         for (Map.Entry<SystemProfile, Scope> entry : systemScopePairs) {
             final SystemProfile profile = entry.getKey();
             final Scope scope = entry.getValue();
@@ -96,6 +107,7 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
         } finally {
             executor.close();
         }
+        // Mili end
     }
 
     public void executeSystems(final long regionId,
@@ -106,8 +118,9 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
         RegionDag dag = getOrBuildDag(regionId, systemScopePairs);
         if (dag == null) return;
 
+        // Mili start - fix: Use shared pool instead of creating a new one per tick
         int threadCount = Math.min(systemScopePairs.size(), Runtime.getRuntime().availableProcessors());
-        RegionDagExecutor executor = new RegionDagExecutor(threadCount);
+        RegionDagExecutor executor = new RegionDagExecutor(threadCount, SHARED_DAG_POOL);
         for (Map.Entry<SystemProfile, Scope> entry : systemScopePairs) {
             final SystemProfile profile = entry.getKey();
             final Scope scope = entry.getValue();
@@ -124,15 +137,25 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
         } finally {
             executor.close();
         }
+        // Mili end
     }
 
+    // Mili start - fix: Use content-based cache key instead of reference equality (==)
+    // The old implementation used == to compare pairs list, which means a new ArrayList
+    // with the same content would invalidate the cache every tick.
+    private volatile long cachedVersion = -1;
+    // Mili end
+
     private RegionDag getOrBuildDag(final long regionId, final List<Map.Entry<SystemProfile, Scope>> pairs) {
-        if (this.cachedDag != null && this.cachedPairs == pairs) return this.cachedDag;
+        // Mili start - fix: content-based cache - compute a simple hash of the pairs
+        long version = computeVersion(pairs);
+        if (this.cachedDag != null && this.cachedVersion == version) return this.cachedDag;
+        // Mili end
 
         long start = System.nanoTime();
         try {
             this.cachedDag = RegionDag.build(regionId, pairs);
-            this.cachedPairs = pairs;
+            this.cachedVersion = version;
             this.dagBuildNanos = System.nanoTime() - start;
             return this.cachedDag;
         } catch (Throwable throwable) {
@@ -140,6 +163,17 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
             return null;
         }
     }
+
+    // Mili start - Compute a content-based version hash for the system-scope pairs list.
+    // This avoids the brittle == reference comparison that would invalidate cache on every tick.
+    private static long computeVersion(List<Map.Entry<SystemProfile, Scope>> pairs) {
+        long hash = 0;
+        for (Map.Entry<SystemProfile, Scope> entry : pairs) {
+            hash = hash * 31 + (entry.getKey().name().hashCode() ^ System.identityHashCode(entry.getValue()));
+        }
+        return hash;
+    }
+    // Mili end
 
     public int getSystemCount() { return systemExecutors.size(); }
     public long getDagBuildNanos() { return this.dagBuildNanos; }

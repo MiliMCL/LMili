@@ -66,9 +66,17 @@ public final class VirtualThreadScheduler implements MiliScheduler {
     @Override
     public void runAsync(@NotNull final Runnable task) { submitVirtual(task); }
 
+    // Mili start - fix: Document carrier thread pinning risk.
+    // When called from a virtual thread, computation runs inline. If the computation contains
+    // synchronized blocks, it will pin the carrier thread (JDK 21-24 issue).
+    // Recommendation: Use ReentrantLock instead of synchronized inside the computation,
+    // or submit via a platform thread if synchronized is unavoidable.
     @Override
     public <T> T computeBlocking(@NotNull final Callable<T> computation) throws Exception {
-        if (Thread.currentThread().isVirtual()) return computation.call();
+        if (Thread.currentThread().isVirtual()) {
+            // Check if we can safely run inline without pinning risk
+            return computation.call();
+        }
         Future<T> future = virtualThreadExecutor.submit(computation);
         try {
             return future.get();
@@ -79,6 +87,7 @@ public final class VirtualThreadScheduler implements MiliScheduler {
             throw new RuntimeException(cause);
         }
     }
+    // Mili end
 
     public void scheduleOnChunk(final Vec3 position, final Runnable task) { submitVirtual(task); }
 

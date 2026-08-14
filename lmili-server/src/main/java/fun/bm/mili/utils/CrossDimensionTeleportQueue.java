@@ -62,19 +62,21 @@ public class CrossDimensionTeleportQueue {
         return true;
     }
 
+    // Mili start - fix: Process only up to the per-tick limit instead of draining
+    // the entire queue and re-queuing excess items (which caused O(n) wasted work per tick).
     public static void processQueue() {
         if (!enabled) return;
 
         int processedThisTick = 0;
+        int maxPerTick = 10;
         TeleportRequest request;
 
         List<TeleportRequest> playerRequests = new ArrayList<>();
         List<TeleportRequest> entityRequests = new ArrayList<>();
 
-        while ((request = queue.poll()) != null) {
-            // Mili start - fix: decrement queueSize counter after poll
+        // Only poll up to maxPerTick alive requests; leave the rest in the queue
+        while (processedThisTick < maxPerTick && (request = queue.poll()) != null) {
             queueSize.decrementAndGet();
-            // Mili end
             if (!request.entity.isAlive()) {
                 failed.incrementAndGet();
                 continue;
@@ -85,41 +87,44 @@ public class CrossDimensionTeleportQueue {
             } else {
                 entityRequests.add(request);
             }
+            processedThisTick++;
         }
 
         if (CrossDimensionTeleportQueueConfig.priorityPlayers) {
             playerRequests.sort(Comparator.comparingLong(r -> -r.createTime));
         }
 
-        List<TeleportRequest> all = new ArrayList<>();
-        all.addAll(playerRequests);
-        all.addAll(entityRequests);
-
-        for (TeleportRequest req : all) {
-            if (processedThisTick >= 10) {
-                queue.offer(req);
-                // Mili start - fix: re-increment counter when re-queuing request
-                queueSize.incrementAndGet();
-                // Mili end
-                continue;
-            }
-
-            try {
-                long waitNanos = System.nanoTime() - req.createTime;
-                totalWaitTime.addAndGet(waitNanos / 1_000_000);
-
-                req.entity.teleportAsync(req.destLevel, req.pos, (float) req.yaw, (float) req.pitch,
-                        req.entity.getDeltaMovement(),
-                        org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN, 0L, e -> {});
-                processed.incrementAndGet();
-                processedThisTick++;
-            // Mili start - fix: catch Throwable instead of Exception to handle Errors
-            } catch (Throwable e) {
-                failed.incrementAndGet();
-            }
-            // Mili end
+        int processedCount = 0;
+        for (TeleportRequest req : playerRequests) {
+            if (!executeTeleport(req)) break;
+            processedCount++;
+        }
+        for (TeleportRequest req : entityRequests) {
+            if (!executeTeleport(req)) break;
+            processedCount++;
         }
     }
+
+    private static boolean executeTeleport(TeleportRequest req) {
+        try {
+            long waitNanos = System.nanoTime() - req.createTime;
+            totalWaitTime.addAndGet(waitNanos / 1_000_000);
+
+            req.entity.teleportAsync(req.destLevel, req.pos, (float) req.yaw, (float) req.pitch,
+                    req.entity.getDeltaMovement(),
+                    org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN, 0L,
+                    // Mili start - fix: log teleport failures instead of ignoring them
+                    e -> { if (!e) failed.incrementAndGet(); }
+                    // Mili end
+            );
+            processed.incrementAndGet();
+            return true;
+        } catch (Throwable e) {
+            failed.incrementAndGet();
+            return false;
+        }
+    }
+    // Mili end
 
     public static Map<String, Object> getStats() {
         Map<String, Object> stats = new java.util.LinkedHashMap<>();

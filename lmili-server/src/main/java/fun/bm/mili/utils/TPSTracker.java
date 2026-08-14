@@ -20,7 +20,9 @@ public final class TPSTracker {
     private static final int TICK_HISTORY_MASK = TICK_HISTORY_SIZE - 1;
     private static final AtomicLongArray ticks = new AtomicLongArray(TICK_HISTORY_SIZE);
     private static final AtomicLong runningSum = new AtomicLong(0);
-    private static final AtomicInteger tickCount = new AtomicInteger(0);
+    // Mili start - fix: use AtomicLong to prevent overflow after ~24 days at 20 TPS
+    private static final AtomicLong tickCount = new AtomicLong(0);
+    // Mili end
     private static volatile double currentTPS = 20.0;
 
     private TPSTracker() {}
@@ -29,14 +31,17 @@ public final class TPSTracker {
         new BukkitRunnable() {
             @Override
             public void run() {
-                int count = tickCount.getAndIncrement();
-                int idx = count & TICK_HISTORY_MASK;
+                long count = tickCount.getAndIncrement();
+                int idx = (int) (count & TICK_HISTORY_MASK);
                 long now = System.currentTimeMillis();
                 long old = ticks.getAndSet(idx, now);
                 if (old > 0) {
                     runningSum.addAndGet(now - old);
                 }
-                currentTPS = calculateTPS(100);
+                // Mili start - fix: skip expensive calculateTPS(100) every tick;
+                // the 100-tick TPS is only 2 seconds of history, getTPS() already calls it on demand
+                currentTPS = Math.min(20.0, 1000.0 / Math.max(1.0, runningSum.get() / (double) Math.min(count, TICK_HISTORY_SIZE)));
+                // Mili end
             }
         }.runTaskTimer(plugin, 1L, 1L);
     }
@@ -50,18 +55,18 @@ public final class TPSTracker {
     }
 
     private static double calculateTPS(int requestedTicks) {
-        int count = tickCount.get();
+        long count = tickCount.get();
         // Mili start - fix: use <= to correctly handle boundary when count equals requestedTicks
         if (count <= requestedTicks) {
             return 20.0;
         }
         // Mili end
-        int target = ((count - 1) - requestedTicks) & TICK_HISTORY_MASK;
+        int target = (int) (((count - 1) - requestedTicks) & TICK_HISTORY_MASK);
         long elapsed = System.currentTimeMillis() - ticks.get(target);
         if (elapsed <= 0) {
             return 20.0;
         }
-        return requestedTicks / (elapsed / 1000.0);
+        return Math.min(20.0, requestedTicks / (elapsed / 1000.0));
     }
 
     public static String formatTPS() {

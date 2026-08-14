@@ -24,6 +24,10 @@ public class ChunkDeltaCompressionConfig implements IConfigModule {
             快照间隔（tick）""")
     public static int snapshotInterval = 20;
 
+    @ConfigInfo(name = "compression-level", comments = """
+            压缩级别（1-9，默认3，越低越快但压缩率越低）""")
+    public static int compressionLevel = 3;
+
     @Override
     public void onLoaded(TomlConfigData configInstance, @Nullable Set<Exception> exs) {
         ChunkDeltaCompressor.setEnabled(enabled);

@@ -13,13 +13,15 @@ import java.util.function.BiConsumer;
 public final class RegionDagExecutor implements AutoCloseable {
 
     private static final Logger LOGGER = LogUtils.getLogger();
-    private final ExecutorService executor;
+    private final ForkJoinPool executor;
     private final Map<String, BiConsumer<DagNode, RegionTickContext>> systemExecutors = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
-    public RegionDagExecutor(final int threadCount) {
-        this.executor = Executors.newWorkStealingPool(threadCount);
+    // Mili start - fix: Accept shared pool instead of creating a new one per tick
+    public RegionDagExecutor(final int threadCount, final ForkJoinPool sharedPool) {
+        this.executor = sharedPool;
     }
+    // Mili end
 
     public void registerSystemExecutor(final @NotNull String systemName,
                                         final @NotNull BiConsumer<DagNode, RegionTickContext> exec) {
@@ -35,40 +37,53 @@ public final class RegionDagExecutor implements AutoCloseable {
         AtomicInteger[] inDegrees = new AtomicInteger[n];
         for (int i = 0; i < n; i++) inDegrees[i] = new AtomicInteger(dag.getInDegree(i));
 
-        ConcurrentLinkedDeque<Integer> workQueue = new ConcurrentLinkedDeque<>();
+        // Mili start - fix: Use blocking queue to avoid busy-wait when dependencies aren't ready
+        LinkedBlockingQueue<Integer> workQueue = new LinkedBlockingQueue<>();
         for (int nodeId : topoOrder) if (inDegrees[nodeId].get() == 0) workQueue.add(nodeId);
 
-        int workerCount = Math.min(n, ((ForkJoinPool) executor).getParallelism());
+        int workerCount = Math.min(n, executor.getParallelism());
         CountDownLatch completionLatch = new CountDownLatch(n);
+        // Track active workers to know when to stop feeding the queue
+        AtomicInteger activeWorkers = new AtomicInteger(workerCount);
 
         for (int w = 0; w < workerCount; w++) {
             executor.submit(() -> {
-                while (!closed) {
-                    Integer nodeId = workQueue.poll();
-                    if (nodeId == null) {
-                        if (completionLatch.getCount() == 0) break;
-                        Thread.yield();
-                        continue;
-                    }
-                    DagNode node = dag.getNode(nodeId);
-                    if (!node.tryBeginExecution()) continue;
+                try {
+                    while (!closed) {
+                        Integer nodeId = workQueue.poll(100, TimeUnit.MILLISECONDS);
+                        if (nodeId == null) {
+                            // No work available - check if all workers are idle and no work remains
+                            if (activeWorkers.get() == 0 && workQueue.isEmpty()) break;
+                            continue;
+                        }
+                        DagNode node = dag.getNode(nodeId);
+                        if (!node.tryBeginExecution()) continue;
 
-                    executeNode(node, context);
+                        executeNode(node, context);
 
-                    for (int succ : dag.getSuccessors(nodeId)) {
-                        if (inDegrees[succ].decrementAndGet() == 0) workQueue.add(succ);
+                        for (int succ : dag.getSuccessors(nodeId)) {
+                            if (inDegrees[succ].decrementAndGet() == 0) workQueue.add(succ);
+                        }
+                        completionLatch.countDown();
                     }
-                    completionLatch.countDown();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    activeWorkers.decrementAndGet();
                 }
             });
         }
 
         try {
-            completionLatch.await(5, TimeUnit.SECONDS);
+            if (!completionLatch.await(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("[DagExecutor] DAG execution timed out for region #{} (remaining: {})",
+                        dag.regionId, completionLatch.getCount());
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             LOGGER.error("[DagExecutor] Interrupted for region #{}", dag.regionId, e);
         }
+        // Mili end
     }
 
     private void executeNode(@NotNull final DagNode node, @NotNull final RegionTickContext context) {
@@ -82,15 +97,11 @@ public final class RegionDagExecutor implements AutoCloseable {
         }
     }
 
+    // Mili start - fix: Don't shutdown the shared pool; just signal this executor is done.
+    // The shared pool is owned by DagBasedTickExecutor and lives for the server lifetime.
     @Override
     public void close() {
         this.closed = true;
-        this.executor.shutdown();
-        try {
-            if (!this.executor.awaitTermination(5, TimeUnit.SECONDS)) this.executor.shutdownNow();
-        } catch (InterruptedException e) {
-            this.executor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
     }
+    // Mili end
 }

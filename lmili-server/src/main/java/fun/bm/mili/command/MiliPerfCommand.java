@@ -74,7 +74,6 @@ public class MiliPerfCommand extends RootNode {
         printStats(sender, "Chunk Delta", ChunkDeltaCompressor.getStats());
         printStats(sender, "Light Callback", LightCallbackManager.getStats());
         printStats(sender, "Entity Density", EntityDensityTracker.getStats());
-        printStats(sender, "Mmap Storage", MmapRegionStorage.getStats());
         printStats(sender, "Network", NetworkOptimizer.getStats());
     }
 

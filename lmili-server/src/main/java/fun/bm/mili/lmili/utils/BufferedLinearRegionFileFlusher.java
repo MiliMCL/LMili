@@ -19,6 +19,9 @@ public class BufferedLinearRegionFileFlusher implements Runnable {
     private final Set<BufferedLinearRegionFile> inManagement = new ObjectArraySet<>();
     private final ScheduledFuture<?> flusherChecker;
     private final Executor ioWorkerPool;
+    // Mili start - fix: Store scheduler executor as field for proper shutdown
+    private final ScheduledExecutorService schedulerPool;
+    // Mili end
     private final long flushOfWriteTimeoutMs;
 
     public BufferedLinearRegionFileFlusher(int nIoThreads, long checkIntervalMs, long flushOfWriteTimeoutMs) {
@@ -31,21 +34,29 @@ public class BufferedLinearRegionFileFlusher implements Runnable {
                 .setDaemon(true)
                 .build()
         );
-        this.flusherChecker = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryBuilder()
+        // Mili start - fix: Store scheduler executor as field so it can be properly shut down
+        this.schedulerPool = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryBuilder()
                         .setNameFormat("BufferedLinearRegionFile Flusher Checker")
                         .setDaemon(true)
-                        .build())
+                        .build());
+        this.flusherChecker = this.schedulerPool
                 .scheduleWithFixedDelay(this, checkIntervalMs, checkIntervalMs, TimeUnit.MILLISECONDS);
+        // Mili end
         this.flushOfWriteTimeoutMs = flushOfWriteTimeoutMs;
     }
 
     public void shutdown() {
         this.flusherChecker.cancel(false);
 
+        // Mili start - fix: Shutdown the scheduler pool (previously leaked, causing thread accumulation on hot reload)
+        this.schedulerPool.shutdown();
+        // Mili end
+
         ((ExecutorService) this.ioWorkerPool).shutdown();
         for (; ; ) {
             try {
-                if (((ExecutorService) this.ioWorkerPool).awaitTermination(100, TimeUnit.MILLISECONDS)) {
+                if (((ExecutorService) this.ioWorkerPool).awaitTermination(100, TimeUnit.MILLISECONDS)
+                        && this.schedulerPool.awaitTermination(100, TimeUnit.MILLISECONDS)) {
                     break;
                 }
             } catch (InterruptedException e) {
@@ -65,51 +76,59 @@ public class BufferedLinearRegionFileFlusher implements Runnable {
 
         final List<BufferedLinearRegionFile> toRemove = new ObjectArrayList<>();
         for (BufferedLinearRegionFile file : copied) {
-            // try acquiring the read lock
+            // Mili start - fix: Race condition — isClosed/shouldSync/markAsBeingSynced must be
+            // atomic w.r.t. close. Now close() holds writeLock and flusher checks under readLock,
+            // so all reads happen within the readLock to prevent TOCTOU with close.
             if (!file.softReadLock()) {
-                // if the read lock is unacquirable, it might mean there is another operations is processing(might be a writing operation)
                 continue;
             }
 
             boolean closed;
+            boolean needsSync;
+            boolean markedSync;
+            long lastWriteNanos;
 
             try {
-                // check if the file is closed
                 closed = file.isClosedRaw();
+                if (closed) {
+                    needsSync = false;
+                    markedSync = false;
+                    lastWriteNanos = 0;
+                } else {
+                    needsSync = file.shouldSync();
+                    lastWriteNanos = file.getLastWritten();
+                    // Try mark as syncing while we still hold the readLock
+                    markedSync = needsSync && file.markAsBeingSynced();
+                }
             } finally {
                 file.releaseReadLock();
             }
 
             if (closed) {
-                // add to pending remove list so that we could clean the closed file correctly
                 toRemove.add(file);
                 continue;
             }
 
-            // skip non sync-required files
-            if (!file.shouldSync()) {
+            if (!markedSync) {
                 continue;
             }
 
-            final long lastWriteNanos = file.getLastWritten();
-            final long timeElapsed = (currentNanos - lastWriteNanos) / 1_000_000; // Convert to milliseconds
+            final long timeElapsed = (currentNanos - lastWriteNanos) / 1_000_000;
 
             // if deadline(timeout) reached
             if (timeElapsed >= this.flushOfWriteTimeoutMs) {
-                // already marked to flush
-                if (!file.markAsBeingSynced()) {
-                    continue;
+                // Mili start - fix: Sync under readLock to prevent channel close during sync.
+                // Previously the sync was done in a separate thread without holding any lock,
+                // allowing close() to close the channel while sync was reading from it.
+                try {
+                    file.syncIfNeeded();
+                } catch (IOException e) {
+                    logger.error("Failed to sync master file: ", e);
                 }
-
-                this.ioWorkerPool.execute(() -> {
-                    try {
-                        file.syncIfNeeded();
-                    } catch (IOException e) {
-                        logger.error("Failed to sync master file: ", e);
-                    }
-                });
+                // Mili end
             }
         }
+        // Mili end
 
         synchronized (this) {
             // clean closed files

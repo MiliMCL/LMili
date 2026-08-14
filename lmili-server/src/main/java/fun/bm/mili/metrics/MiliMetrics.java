@@ -1,33 +1,30 @@
 package fun.bm.mili.metrics;
 
 import fun.bm.mili.config.modules.misc.BStatsConfig;
+import org.bstats.MetricsBase;
+import org.bstats.charts.CustomChart;
+import org.bstats.charts.SimplePie;
+import org.bstats.json.JsonObjectBuilder;
 import org.bukkit.Bukkit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
+import java.util.Properties;
 import java.util.UUID;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
- * Minimal bStats metrics class for server implementation reporting.
+ * bStats metrics class for Mili server implementation.
+ * Uses official bStats library for data collection and reporting.
  */
 public class MiliMetrics {
     private static final Logger LOGGER = LoggerFactory.getLogger("MiliMetrics");
-    // Mili start - fix: use AtomicBoolean to prevent check-then-act race in start()
-    private static final java.util.concurrent.atomic.AtomicBoolean enabled = new java.util.concurrent.atomic.AtomicBoolean(false);
-    // Mili end
-    private static ScheduledExecutorService scheduler;
+    private static MetricsBase metricsBase;
+    private static volatile boolean enabled = false;
 
-    public static void init(int defaultPluginId) {
-        if (defaultPluginId <= 0) return;
-        start(defaultPluginId);
-    }
-
+    /**
+     * Initialize bStats metrics with configured plugin ID.
+     */
     public static void init() {
         int pluginId = BStatsConfig.pluginId;
         if (pluginId <= 0) {
@@ -37,111 +34,107 @@ public class MiliMetrics {
         start(pluginId);
     }
 
+    /**
+     * Initialize bStats metrics with a specific plugin ID.
+     */
+    public static void init(int defaultPluginId) {
+        if (defaultPluginId <= 0) return;
+        start(defaultPluginId);
+    }
+
     private static void start(int pluginId) {
-        // Mili start - fix: use AtomicBoolean.compareAndSet to prevent race condition
-        if (!enabled.compareAndSet(false, true)) return;
-        // Mili end
+        if (enabled) return;
+        enabled = true;
 
-        scheduler = Executors.newScheduledThreadPool(1, r -> {
-            Thread t = new Thread(r, "MiliMetrics");
-            t.setDaemon(true);
-            return t;
-        });
+        String serverUUID = getServerUUID();
 
-        scheduler.scheduleWithFixedDelay(() -> {
-            try {
-                sendMetrics(pluginId);
-            // Mili start - fix: catch Throwable instead of Exception to handle Errors
-            } catch (Throwable t) {
-                LOGGER.debug("[MiliMetrics] Failed to send metrics", t);
-            }
-            // Mili end
-        }, 30, 30, TimeUnit.MINUTES);
+        metricsBase = new MetricsBase(
+                "server-implementation",
+                serverUUID,
+                pluginId,
+                true,
+                MiliMetrics::appendPlatformData,
+                MiliMetrics::appendServiceData,
+                null,
+                () -> true,
+                (message, error) -> LOGGER.warn("[MiliMetrics] {}", message, error),
+                (message) -> LOGGER.info("[MiliMetrics] {}", message),
+                false,
+                false,
+                false,
+                false
+        );
+
+        // Add custom charts
+        metricsBase.addCustomChart(new SimplePie("java_version", () -> System.getProperty("java.version")));
+        metricsBase.addCustomChart(new SimplePie("os_name", () -> System.getProperty("os.name")));
+        metricsBase.addCustomChart(new SimplePie("os_arch", () -> System.getProperty("os.arch")));
+        metricsBase.addCustomChart(new SimplePie("mc_version", () -> Bukkit.getBukkitVersion().split("-")[0]));
 
         LOGGER.info("[MiliMetrics] Started bStats metrics (pluginId={})", pluginId);
     }
 
-    private static void sendMetrics(int pluginId) {
-        String serverUUID = getServerUUID();
-        int players = Bukkit.getOnlinePlayers().size();
-        int maxPlayers = Bukkit.getMaxPlayers();
-        String javaVersion = System.getProperty("java.version");
-        String osName = System.getProperty("os.name");
-        String osArch = System.getProperty("os.arch");
-        String mcVersion = Bukkit.getBukkitVersion().split("-")[0];
-        int worldCount = Bukkit.getWorlds().size();
+    private static void appendPlatformData(JsonObjectBuilder builder) {
+        builder.appendField("playerAmount", Bukkit.getOnlinePlayers().size());
+        builder.appendField("managedServers", Bukkit.getWorlds().size());
+        builder.appendField("onlineMode", Bukkit.getOnlineMode() ? 1 : 0);
+        builder.appendField("minecraftVersion", Bukkit.getBukkitVersion().split("-")[0]);
 
-        String json = "{" +
-            "\"osname\":\"" + jsonEscape(osName) + "\"," +
-            "\"osarch\":\"" + jsonEscape(osArch) + "\"," +
-            "\"javaVersion\":\"" + jsonEscape(javaVersion) + "\"," +
-            "\"serverImplementation\":\"Mili\"," +
-            "\"mcVersion\":\"" + jsonEscape(mcVersion) + "\"," +
-            "\"onlinePlayers\":" + players + "," +
-            "\"maxPlayers\":" + maxPlayers + "," +
-            "\"worldCount\":" + worldCount +
-            "}";
+        builder.appendField("javaVersion", System.getProperty("java.version"));
+        builder.appendField("osName", System.getProperty("os.name"));
+        builder.appendField("osArch", System.getProperty("os.arch"));
+        builder.appendField("osVersion", System.getProperty("os.version"));
+        builder.appendField("coreCount", Runtime.getRuntime().availableProcessors());
+    }
 
-        // Mili start - fix: ensure HttpURLConnection is disconnected to prevent connection leak
-        java.net.HttpURLConnection conn = null;
-        try {
-            URL url = new URL("https://bStats.org/submitData/server-implementation");
-            conn = (java.net.HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Accept", "*/*");
-            conn.setRequestProperty("Connection", "close");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("User-Agent", "Server-Software");
-            conn.setDoOutput(true);
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
-
-            String postData = "metrics=" + java.net.URLEncoder.encode(json, StandardCharsets.UTF_8);
-            conn.getOutputStream().write(postData.getBytes(StandardCharsets.UTF_8));
-
-            int responseCode = conn.getResponseCode();
-            LOGGER.debug("[MiliMetrics] Response: {}", responseCode);
-        // Mili start - fix: catch Throwable instead of Exception to handle Errors in network request
-        } catch (Throwable e) {
-            LOGGER.debug("[MiliMetrics] Request failed", e);
-        } finally {
-            // Mili end
-            if (conn != null) {
-                conn.disconnect();
-            }
-        }
-        // Mili end
+    private static void appendServiceData(JsonObjectBuilder builder) {
+        builder.appendField("pluginVersion", getBukkitVersion());
     }
 
     private static String getServerUUID() {
         try {
             File file = new File(Bukkit.getWorldContainer(), "bStats/metricsId.txt");
             if (file.exists()) {
-                String id = new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8).trim();
+                String id = new String(java.nio.file.Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8).trim();
                 if (!id.isEmpty()) return id;
             }
             String id = UUID.randomUUID().toString();
             file.getParentFile().mkdirs();
-            java.nio.file.Files.write(file.toPath(), id.getBytes(StandardCharsets.UTF_8));
+            java.nio.file.Files.write(file.toPath(), id.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             return id;
-        // Mili start - fix: catch Throwable instead of Exception to handle Errors
         } catch (Throwable e) {
             return "unknown";
         }
-        // Mili end
     }
 
-    private static String jsonEscape(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
-
-    public static void shutdown() {
-        if (scheduler != null) {
-            scheduler.shutdownNow();
-            scheduler = null;
+    private static String getBukkitVersion() {
+        try {
+            String version = Bukkit.getVersion();
+            if (version != null && !version.isEmpty()) {
+                return version;
+            }
+        } catch (Throwable ignored) {
         }
-        // Mili start - fix: use AtomicBoolean set
-        enabled.set(false);
-        // Mili end
+        return "unknown";
+    }
+
+    /**
+     * Add a custom chart to bStats reporting.
+     */
+    public static void addCustomChart(CustomChart chart) {
+        if (metricsBase != null) {
+            metricsBase.addCustomChart(chart);
+        }
+    }
+
+    /**
+     * Shutdown bStats metrics scheduler.
+     */
+    public static void shutdown() {
+        if (metricsBase != null) {
+            metricsBase.shutdown();
+            metricsBase = null;
+        }
+        enabled = false;
     }
 }

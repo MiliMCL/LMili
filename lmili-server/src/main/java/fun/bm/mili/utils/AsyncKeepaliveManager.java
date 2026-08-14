@@ -100,15 +100,19 @@ public final class AsyncKeepaliveManager {
 
     private static void tickAll() {
         long currentTimeNs = System.nanoTime();
-        long currentTimeMs = Util.getMillis();
 
         for (ServerCommonPacketListenerImpl listener : ACTIVE_LISTENERS.values()) {
             try {
-                // Mili start - keepConnectionAliveAsync not in this MC version; use tickKeepAlive instead
-                // listener.keepConnectionAliveAsync(currentTimeNs, currentTimeMs);
-                if (!listener.connection.isConnected()) {
-                    ACTIVE_LISTENERS.remove(listener.connection, listener);
+                // Mili start - actually send keepalive packet instead of just checking isConnected()
+                io.papermc.paper.util.KeepAlive keepAlive = listener.keepAlive;
+                if ((currentTimeNs - keepAlive.lastKeepAliveTx) >= java.util.concurrent.TimeUnit.SECONDS.toNanos(1L)) {
+                    keepAlive.lastKeepAliveTx = currentTimeNs;
+                    io.papermc.paper.util.KeepAlive.PendingKeepAlive pka =
+                        new io.papermc.paper.util.KeepAlive.PendingKeepAlive(currentTimeNs, Util.getMillis());
+                    keepAlive.pendingKeepAlives.add(pka);
+                    listener.send(new net.minecraft.network.protocol.common.ClientboundKeepAlivePacket(pka.challengeId()));
                 }
+                // Mili end
             } catch (Throwable throwable) {
                 ACTIVE_LISTENERS.remove(listener.connection, listener);
                 LOGGER.error("Failed to run async keepalive for connection " + listener.connection.getRemoteAddress(), throwable);

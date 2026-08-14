@@ -1,6 +1,8 @@
 package fun.bm.mili.utils;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.world.entity.Entity;
+import org.slf4j.Logger;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -8,12 +10,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class EntityDirtyTracker {
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static volatile boolean enabled = false;
 
     private static final ConcurrentHashMap<Integer, EntityState> states = new ConcurrentHashMap<>();
     private static final AtomicInteger totalChecks = new AtomicInteger();
     private static final AtomicInteger skippedEntities = new AtomicInteger();
     private static final AtomicLong savedTicks = new AtomicLong();
+    // Mili start - fix: periodic cleanup to prevent unbounded map growth
+    private static final AtomicLong lastCleanupTime = new AtomicLong(System.currentTimeMillis());
+    private static final long CLEANUP_INTERVAL_MS = 60_000; // cleanup every 60 seconds
+    private static final int MAX_STATES_SIZE = 32768; // hard cap to prevent OOM
+    // Mili end
 
     public static void setEnabled(boolean v) { enabled = v; }
     public static boolean isEnabled() { return enabled; }
@@ -21,8 +29,18 @@ public class EntityDirtyTracker {
     public static boolean shouldSkipTick(Entity entity) {
         if (!enabled) return false;
 
+        // Mili start - fix: periodic cleanup to prevent unbounded map growth
+        maybeCleanupStaleEntries(entity);
+        // Mili end
+
         int id = entity.getId();
-        EntityState state = states.computeIfAbsent(id, k -> new EntityState());
+        EntityState state = states.computeIfAbsent(id, k -> {
+            // Mili start - fix: hard cap to prevent OOM under extreme conditions
+            if (states.size() >= MAX_STATES_SIZE) {
+                return new EntityState(); // Don't store if over limit
+            }
+            return new EntityState();
+        });
         totalChecks.incrementAndGet();
 
         double x = entity.getX();
@@ -76,6 +94,41 @@ public class EntityDirtyTracker {
     public static void removeEntity(Entity entity) {
         states.remove(entity.getId());
     }
+
+    // Mili start - fix: Periodically remove entries for entities no longer in the world.
+    // Entity IDs are not reused by Minecraft, so without cleanup this map grows forever.
+    private static void maybeCleanupStaleEntries(Entity currentEntity) {
+        long now = System.currentTimeMillis();
+        long last = lastCleanupTime.get();
+        if (now - last < CLEANUP_INTERVAL_MS) return;
+        if (!lastCleanupTime.compareAndSet(last, now)) return; // only one thread cleans
+
+        // Access the entity's level to check which entities are still alive
+        if (currentEntity.level() == null) return;
+        org.bukkit.World world = currentEntity.level().getWorld();
+        if (world == null) return;
+
+        // Build set of currently alive entity IDs
+        java.util.Set<Integer> aliveIds = new java.util.HashSet<>();
+        for (org.bukkit.entity.Entity e : world.getEntities()) {
+            aliveIds.add(e.getEntityId());
+        }
+
+        // Remove entries not in alive set
+        int removed = 0;
+        java.util.Iterator<Map.Entry<Integer, EntityState>> it = states.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<Integer, EntityState> entry = it.next();
+            if (!aliveIds.contains(entry.getKey())) {
+                it.remove();
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            LOGGER.debug("[EntityDirtyTracker] Cleaned up {} stale entries, remaining: {}", removed, states.size());
+        }
+    }
+    // Mili end
 
     public static Map<String, Object> getStats() {
         Map<String, Object> stats = new java.util.LinkedHashMap<>();

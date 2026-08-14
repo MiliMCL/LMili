@@ -93,7 +93,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
     // Mili start - shutdown hook
     public static void shutdown() {
         try {
-            fun.bm.mili.lmili.thread.regiontick.RegionTickPool.shutdown();
+            fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher dispatcher = fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
+            if (dispatcher != null) dispatcher.shutdown();
         } catch (Throwable throwable) {
             LOGGER.error("[Mili] Error during RegionTickPool shutdown", throwable);
         }
@@ -502,8 +503,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
         protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
             final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler(); // Folia - profiler
             profiler.startTick(); try { // Folia - profiler
-            // Mili start - parallel region tick via RegionTickPool
-            if (fun.bm.mili.lmili.thread.regiontick.RegionTickPool.isRunning()) {
+            // Mili start - parallel region tick via RegionTickDispatcher
+            if (fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.isRunning()) {
                 final fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher dispatcher =
                         fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
                 if (dispatcher != null) {

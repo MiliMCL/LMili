@@ -1,17 +1,22 @@
 package fun.bm.mili.lmili.thread.regiontick;
 
+import com.mojang.logging.LogUtils;
 import io.papermc.paper.threadedregions.TickRegions;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
 import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
 
 import java.util.Objects;
 import java.util.concurrent.Phaser;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class RegionTickContext {
 
+    private static final Logger LOGGER = LogUtils.getLogger();
     public final long regionId;
     public final io.papermc.paper.threadedregions.ThreadedRegionizer
             .ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
@@ -22,6 +27,9 @@ public final class RegionTickContext {
     private volatile long tickStartNanos;
     private volatile long lastTickDurationNanos;
     private volatile long currentTick;
+    // Mili start - fix: timeout for Phaser to prevent permanent block if a worker crashes
+    private static final long AWAIT_TIMEOUT_SECONDS = 30;
+    // Mili end
 
     public RegionTickContext(
             final long regionId,
@@ -39,10 +47,22 @@ public final class RegionTickContext {
         this.tickStartNanos = System.nanoTime();
     }
 
+    // Mili start - fix: Phaser with timeout to prevent permanent block if a worker thread crashes.
+    // Previously arriveAndAwaitAdvance() would block forever, freezing the region tick thread.
     public void awaitTickCompletion() {
         Phaser barrier = this.tickBarrier;
-        if (barrier != null) barrier.arriveAndAwaitAdvance();
+        if (barrier == null) return;
+        try {
+            barrier.arriveAndAwaitAdvance(AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            LOGGER.error("[RegionTickContext] Region #{} tick timed out after {}s — forcing advance. " +
+                            "Possible worker thread crash. Registered={}, Arrived={}, Unarrived={}",
+                    regionId, AWAIT_TIMEOUT_SECONDS,
+                    barrier.getRegisteredParties(), barrier.getArrivedParties(), barrier.getUnarrivedParties());
+            barrier.forceTermination();
+        }
     }
+    // Mili end
 
     public void arriveSlice() {
         Phaser barrier = this.tickBarrier;

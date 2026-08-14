@@ -4,9 +4,6 @@ import com.mojang.logging.LogUtils;
 import fun.bm.mili.config.modules.experiment.RegionBalancerConfig;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -20,15 +17,21 @@ public class AdaptiveTPSManager {
     private static final long maxIntervalNs = 100_000_000L;
     private static final long baseIntervalNs = 50_000_000L;
 
-    private static final Collection<RegionLoadMonitor.RegionLoadSnapshot> snapshotCache = Collections.synchronizedList(new ArrayList<>());
+    // Mili start - fix: removed dead snapshotCache field that was never used
+
+    // Mili start - fix: store thread reference for interrupt on shutdown
+    private static volatile Thread managerThread;
+    // Mili end
 
     public static void start() {
         if (!RegionBalancerConfig.enabled) return;
         if (running.getAndSet(true)) return;
 
-        Thread t = new Thread(AdaptiveTPSManager::runLoop, "AdaptiveTPS-Manager");
-        t.setDaemon(true);
-        t.start();
+        // Mili start - fix: store thread reference for proper shutdown
+        managerThread = new Thread(AdaptiveTPSManager::runLoop, "AdaptiveTPS-Manager");
+        managerThread.setDaemon(true);
+        managerThread.start();
+        // Mili end
 
         LogUtils.getClassLogger().info("AdaptiveTPSManager started");
     }
@@ -64,10 +67,16 @@ public class AdaptiveTPSManager {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
-            // Mili start - fix: catch Throwable to handle Error (OOM/StackOverflowError); reset running flag to prevent zombie thread state
+            // Mili start - fix: catch Throwable to handle Error (OOM/StackOverflowError);
+            // distinguish between fatal and transient errors
             } catch (Throwable ex) {
-                LogUtils.getClassLogger().error("AdaptiveTPS error, stopping manager thread", ex);
-                running.set(false);
+                LogUtils.getClassLogger().error("AdaptiveTPS error in manager thread", ex);
+                if (ex instanceof OutOfMemoryError) {
+                    // fatal - stop the thread to prevent repeated OOM loops
+                    running.set(false);
+                    break;
+                }
+                // For other transient errors (e.g., ConcurrentModificationException), just log and continue
             }
             // Mili end
         }
@@ -77,7 +86,13 @@ public class AdaptiveTPSManager {
         return currentInterval.get();
     }
 
+    // Mili start - fix: interrupt the sleeping thread for immediate shutdown
     public static void shutdown() {
         running.set(false);
+        Thread t = managerThread;
+        if (t != null) {
+            t.interrupt();
+        }
     }
+    // Mili end
 }

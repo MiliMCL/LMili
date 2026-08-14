@@ -7,7 +7,6 @@ import fun.bm.mili.lmili.thread.regiontick.dag.Scope;
 import fun.bm.mili.lmili.thread.regiontick.dag.SystemProfile;
 import fun.bm.mili.lmili.thread.regiontick.executor.DagBasedTickExecutor;
 import fun.bm.mili.lmili.thread.regiontick.executor.FoliaTickExecutor;
-import fun.bm.mili.lmili.thread.regiontick.migration.TickMigrationQueue;
 import io.papermc.paper.threadedregions.TickRegions;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -42,9 +41,7 @@ public final class RegionTickDispatcher {
     private final int sliceSize;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
     private final DagBasedTickExecutor dagExecutor = new DagBasedTickExecutor();
-    private final TickMigrationQueue migrationQueue = TickMigrationQueue.getInstance();
     private long totalTicksDispatched;
-    private int migrationsCommitted;
 
     private RegionTickDispatcher(final int workerCount, final int maxWorkersPerRegion,
                                   final int minWorkersPerRegion, final int parallelismThreshold,
@@ -91,6 +88,13 @@ public final class RegionTickDispatcher {
     }
 
     public static RegionTickDispatcher getInstance() { return instance; }
+
+    /**
+     * Returns true if the tick dispatcher is initialized and ready.
+     */
+    public static boolean isRunning() {
+        return instance != null && RegionTickPoolConfig.enabled;
+    }
 
     public RegionTickContext registerRegion(final long regionId,
                                              final io.papermc.paper.threadedregions.ThreadedRegionizer
@@ -142,7 +146,6 @@ public final class RegionTickDispatcher {
         context.beginTick(slices.length);
         distributeSlices(slices, actualWorkers);
         context.awaitTickCompletion();
-        commitMigrations();
         context.endTick();
         this.totalTicksDispatched++;
     }
@@ -159,14 +162,8 @@ public final class RegionTickDispatcher {
             }
         }
         context.arriveSlice();
-        commitMigrations();
         context.endTick();
         this.totalTicksDispatched++;
-    }
-
-    private void commitMigrations() {
-        int committed = migrationQueue.commitAll();
-        if (committed > 0) this.migrationsCommitted += committed;
     }
 
     private void distributeSlices(final RegionTickSlice[] slices, final int workerCount) {
@@ -271,11 +268,9 @@ public final class RegionTickDispatcher {
         Map<String, Object> stats = new java.util.LinkedHashMap<>();
         stats.put("active_regions", this.activeContexts.size());
         stats.put("total_ticks_dispatched", this.totalTicksDispatched);
-        stats.put("migrations_committed", this.migrationsCommitted);
         stats.put("worker_count", this.workers.length);
         stats.put("dag_systems", dagExecutor.getSystemCount());
         stats.put("dag_build_nanos", dagExecutor.getDagBuildNanos());
-        stats.put("pending_migrations", migrationQueue.pendingCount());
         stats.put("shutdown", this.shutdown.get());
         return stats;
     }

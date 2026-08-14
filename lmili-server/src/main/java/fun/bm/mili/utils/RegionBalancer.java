@@ -129,6 +129,14 @@ public final class RegionBalancer {
     private static final long RECORD_CLEANUP_INTERVAL_NS = 30_000_000_000L; // 30 seconds
     // Mili end
 
+    // Mili start - fix: cleanup for lastTickTime map to prevent memory leak
+    // Regions are dynamically created/destroyed in Folia; old identityHashCode keys
+    // accumulate forever without cleanup.
+    private static final long LAST_TICK_CLEANUP_INTERVAL_NS = 120_000_000_000L; // 2 minutes
+    private static final long LAST_TICK_STALE_THRESHOLD_NS = 300_000_000_000L; // 5 minutes
+    private static volatile long lastTickCleanupNanos = 0;
+    // Mili end
+
     /**
      * Initialize the balancer.  Safe to call multiple times; idempotent.
      */
@@ -201,6 +209,10 @@ public final class RegionBalancer {
     private static void dispatchLoop() {
         while (!shutdown.get()) {
             try {
+                // Mili start - fix: periodic cleanup of lastTickTime map
+                maybeCleanupLastTickTime();
+                // Mili end
+
                 RegionTask task = taskQueue.poll(100, TimeUnit.MILLISECONDS);
                 if (task == null) continue;
 
@@ -482,11 +494,19 @@ public final class RegionBalancer {
     public static void markTicked(Object scheduleRef) {
         if (!RegionBalancerConfig.enabled) return;
         int key = System.identityHashCode(scheduleRef);
-        AtomicLong last = lastTickTime.get(key);
-        if (last != null) {
-            last.set(System.nanoTime());
-        }
+        AtomicLong last = lastTickTime.computeIfAbsent(key, k -> new AtomicLong(System.nanoTime()));
+        last.set(System.nanoTime());
     }
+
+    // Mili start - fix: Periodically remove entries from lastTickTime for regions
+    // that haven't ticked recently (destroyed or inactive) to prevent memory leak.
+    static void maybeCleanupLastTickTime() {
+        long now = System.nanoTime();
+        if (now - lastTickCleanupNanos < LAST_TICK_CLEANUP_INTERVAL_NS) return;
+        lastTickCleanupNanos = now;
+        lastTickTime.entrySet().removeIf(entry -> now - entry.getValue().get() > LAST_TICK_STALE_THRESHOLD_NS);
+    }
+    // Mili end
 
     public static int pendingTasks() {
         return taskQueue.size();
