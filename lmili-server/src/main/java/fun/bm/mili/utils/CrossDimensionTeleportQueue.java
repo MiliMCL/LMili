@@ -110,13 +110,17 @@ public class CrossDimensionTeleportQueue {
             long waitNanos = System.nanoTime() - req.createTime;
             totalWaitTime.addAndGet(waitNanos / 1_000_000);
 
-            req.entity.teleportAsync(req.destLevel, req.pos, (float) req.yaw, (float) req.pitch,
+            boolean success = req.entity.teleportAsync(req.destLevel, req.pos, (float) req.yaw, (float) req.pitch,
                     req.entity.getDeltaMovement(),
                     org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN, 0L,
-                    // Mili start - fix: log teleport failures instead of ignoring them
-                    (java.util.function.Consumer<Boolean>) success -> { if (!success) failed.incrementAndGet(); }
-                    // Mili end
+                    null // callback not needed; result checked via return value
             );
+            // Mili start - fix: check teleport result
+            if (!success) {
+                failed.incrementAndGet();
+                return false;
+            }
+            // Mili end
             processed.incrementAndGet();
             return true;
         } catch (Throwable e) {
