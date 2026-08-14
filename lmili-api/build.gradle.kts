@@ -158,7 +158,9 @@ mavenPublishing {
     publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = true)
     signAllPublications()
 
-    coordinates("fun.bm.mili", "lmili-api", project.version.toString())
+    // Central Portal (and Maven Central) does not support -SNAPSHOT versions, use release version
+    val releaseVersion = project.version.toString().replace("-SNAPSHOT", "")
+    coordinates("fun.bm.mili", "lmili-api", releaseVersion)
 
     // Maven Central required POM metadata
     pom {
@@ -267,7 +269,13 @@ tasks.withType<Javadoc>().configureEach {
     }
 
     // Add jdk.incubator.vector module for SIMD classes (Pufferfish)
-    options.addStringOption("--add-modules", "jdk.incubator.vector")
+    // Use reflection to access jFlags for standard javadoc options (addStringOption only adds doclet options with single dash)
+    val jFlagsField = options::class.java.superclass.getDeclaredField("jFlags")
+    jFlagsField.isAccessible = true
+    @Suppress("UNCHECKED_CAST")
+    val jFlags = jFlagsField.get(options) as MutableList<String>
+    jFlags.add("--add-modules")
+    jFlags.add("jdk.incubator.vector")
 
     // workaround for https://github.com/gradle/gradle/issues/4046
     inputs.dir("../paper-api/src/main/javadoc").withPropertyName("javadoc-sourceset")
