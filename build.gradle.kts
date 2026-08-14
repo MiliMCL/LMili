@@ -88,11 +88,16 @@ subprojects {
 
     extensions.configure<PublishingExtension> {
         repositories {
-            maven("https://repo.menthamc.org/repository/maven-snapshots/") {
-                name = "MenthaMC"
-                credentials(PasswordCredentials::class) {
-                    username = System.getenv("PRIVATE_MAVEN_REPO_USERNAME")
-                    password = System.getenv("PRIVATE_MAVEN_REPO_PASSWORD")
+            // Only configure MenthaMC if credentials are available (skip in CI for publishing to Sonatype)
+            val mavenUser = System.getenv("PRIVATE_MAVEN_REPO_USERNAME")
+            val mavenPass = System.getenv("PRIVATE_MAVEN_REPO_PASSWORD")
+            if (!mavenUser.isNullOrBlank() && !mavenPass.isNullOrBlank()) {
+                maven("https://repo.menthamc.org/repository/maven-snapshots/") {
+                    name = "MenthaMC"
+                    credentials(PasswordCredentials::class) {
+                        username = mavenUser
+                        password = mavenPass
+                    }
                 }
             }
         }
