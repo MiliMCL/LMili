@@ -136,15 +136,16 @@ public final class RegionTickDispatcher {
         // This inner safety net is defense-in-depth: even if the outer TickRegions#tickRegion
         // patch is absent from the deployed jar (e.g. paperclip-launched servers), the global
         // thread can never be hijacked by the dispatcher.
-        //
-        // Diagnostic: this log fires once per global-region tick. If it never appears in the
-        // log, then the global region never reaches dispatchTick here and the dispatcher is not
-        // the cause — we need to look elsewhere (e.g. carrier pool contention).
         if (context.regionId == 0L) {
             LOGGER.info("[RegionTickPool] dispatchTick: global region id==0 -- skipping dispatcher for this tick");
             return;
         }
-        // Mili end
+        // Mili end diagnostic: log every 500th dispatch so we can see that the dispatcher
+        // is processing non-global regions at all (helps rule out outer-patch scenarios).
+        if ((this.totalTicksDispatched) % 500L == 0L) {
+            LOGGER.info("[RegionTickPool] dispatchTick #{}: non-global region id={}, owned chunks={}, thread={}",
+                this.totalTicksDispatched, context.regionId, context.getOwnedChunks().size(), Thread.currentThread().getName());
+        }
 
         var chunks = context.getOwnedChunks();
         int chunkCount = chunks.size();
