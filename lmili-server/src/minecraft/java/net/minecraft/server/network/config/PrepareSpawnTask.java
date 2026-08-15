@@ -332,7 +332,7 @@ public class PrepareSpawnTask implements ConfigurationTask {
             //this.spawnLevel.waitForEntities(spawnChunk, 3); // Not needed on Moonrise chunk system
             // Folia end - region threading
             // Mili start - diagnostic: log createPlayer start
-            LOGGER.info("[PrepareSpawnTask] createPlayer() called for {}", cookie.gameProfile().getUniqueId());
+            LOGGER.info("[PrepareSpawnTask] createPlayer() called for {}", cookie.gameProfile().id());
             // Mili end
             // Paper start - configuration api - possibly use legacy saved server player instance
             ServerPlayer player;
@@ -350,14 +350,14 @@ public class PrepareSpawnTask implements ConfigurationTask {
             PrepareSpawnTask.this.listener.paperConnection.applyPendingEntityId(player); // Paper - internal entity id api - possibly override player network id if plugins used internal API to configure it.
             // Folia start - region threading - split out createPlayer and spawn
             // Mili start - diagnostic: log createPlayer complete
-            LOGGER.info("[PrepareSpawnTask] createPlayer() complete for {}, entityId={}", cookie.gameProfile().getUniqueId(), player.getId());
+            LOGGER.info("[PrepareSpawnTask] createPlayer() complete for {}, entityId={}", cookie.gameProfile().id(), player.getId());
             // Mili end
             return player;
         }
         public ServerPlayer spawn(final Connection connection, final CommonListenerCookie cookie, final ServerPlayer player) {
             // Folia end - region threading - split out createPlayer and spawn
             // Mili start - diagnostic: log spawn start
-            LOGGER.info("[PrepareSpawnTask] spawn() called for {}, position={}", cookie.gameProfile().getUniqueId(), this.spawnPosition);
+            LOGGER.info("[PrepareSpawnTask] spawn() called for {}, position={}", cookie.gameProfile().id(), this.spawnPosition);
             // Mili end
 
             try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(player.problemPath(), PrepareSpawnTask.LOGGER)) {
@@ -388,15 +388,15 @@ public class PrepareSpawnTask implements ConfigurationTask {
                 }
                 // Paper end - Entity#getEntitySpawnReason
                 // Mili start - diagnostic: log before snapTo
-                LOGGER.info("[PrepareSpawnTask] snapTo() for {} at {}", cookie.gameProfile().getUniqueId(), this.spawnPosition);
+                LOGGER.info("[PrepareSpawnTask] snapTo() for {} at {}", cookie.gameProfile().id(), this.spawnPosition);
                 // Mili end
                 player.snapTo(this.spawnPosition, this.spawnAngle.x, this.spawnAngle.y);
                 // Mili start - diagnostic: log before placeNewPlayer
-                LOGGER.info("[PrepareSpawnTask] placeNewPlayer() for {}", cookie.gameProfile().getUniqueId());
+                LOGGER.info("[PrepareSpawnTask] placeNewPlayer() for {}", cookie.gameProfile().id());
                 // Mili end
                 PrepareSpawnTask.this.server.getPlayerList().placeNewPlayer(connection, player, cookie);
                 // Mili start - diagnostic: log after placeNewPlayer
-                LOGGER.info("[PrepareSpawnTask] placeNewPlayer() complete for {}, player is now in world", cookie.gameProfile().getUniqueId());
+                LOGGER.info("[PrepareSpawnTask] placeNewPlayer() complete for {}, player is now in world", cookie.gameProfile().id());
                 // Mili end
                 input.ifPresent(tag -> {
                     player.loadAndSpawnEnderPearls(tag);
@@ -405,7 +405,7 @@ public class PrepareSpawnTask implements ConfigurationTask {
                 return player;
             } catch (Throwable t) {
                 // Mili start - diagnostic: log any exception in spawn
-                LOGGER.error("[PrepareSpawnTask] EXCEPTION in spawn() for {}: {}", cookie.gameProfile().getUniqueId(), t.getMessage(), t);
+                LOGGER.error("[PrepareSpawnTask] EXCEPTION in spawn() for {}: {}", cookie.gameProfile().id(), t.getMessage(), t);
                 throw t;
                 // Mili end
             }
