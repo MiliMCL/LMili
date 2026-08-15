@@ -368,15 +368,19 @@ public final class RegionizedPlayerChunkLoader {
         // rate limiting
         private static final double INITIAL_ALLOCATION_FACTOR = 0.0;
 
+        // Mili start - fix: increase rate limits for faster player join during initial chunk loading.
+        // Previous limits were too restrictive, causing players to hang at "Joining World..." for 15+ seconds.
+        // New limits allow a burst of chunks during the join phase, then settle to sustainable rates.
         private static StaggeredRateLimiter createChunkLimiter() {
             // allow bursts over small intervals but keep it in check over the long interval
             return StaggeredRateLimiter.builder()
-                .add(100L, TimeUnit.MILLISECONDS, 4.0)
-                .add(500L, TimeUnit.MILLISECONDS, 2.0)
-                .add(1_000L, TimeUnit.MILLISECONDS, 1.25)
-                .add(3_000L, TimeUnit.MILLISECONDS, 1.0)
+                .add(100L, TimeUnit.MILLISECONDS, 10.0)   // was 4.0 - allow more burst per 100ms
+                .add(500L, TimeUnit.MILLISECONDS, 6.0)    // was 2.0 - faster medium-term
+                .add(1_000L, TimeUnit.MILLISECONDS, 4.0)   // was 1.25 - faster long-term
+                .add(3_000L, TimeUnit.MILLISECONDS, 2.5)   // was 1.0 - sustainable rate
                 .build();
         }
+        // Mili end
 
         private final StaggeredRateLimiter chunkSendLimiter = createChunkLimiter();
         private final StaggeredRateLimiter chunkLoadTicketLimiter = createChunkLimiter();

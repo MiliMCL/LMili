@@ -24,14 +24,20 @@ public class PlayerChunkSender {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final float MIN_CHUNKS_PER_TICK = 0.01F;
     public static final float MAX_CHUNKS_PER_TICK = 64.0F;
-    private static final float START_CHUNKS_PER_TICK = 9.0F;
+    // Mili start - fix: increase initial chunk send rate for faster player join
+    // Previously START_CHUNKS_PER_TICK was 9.0, causing slow chunk loading during join.
+    // Increased to 16.0 for a better balance between join speed and network stability.
+    private static final float START_CHUNKS_PER_TICK = 16.0F;
     private static final int MAX_UNACKNOWLEDGED_BATCHES = 10;
     private final LongSet pendingChunks = new LongOpenHashSet();
     private final boolean memoryConnection;
-    private float desiredChunksPerTick = 9.0F;
+    private float desiredChunksPerTick = 16.0F;
     private float batchQuota;
     private int unacknowledgedBatches;
-    private int maxUnacknowledgedBatches = 1;
+    // Start with higher maxUnacknowledgedBatches to skip slow-start during join.
+    // Previously was 1, requiring ack after every batch, which throttled initial chunk flood.
+    private int maxUnacknowledgedBatches = 4;
+    // Mili end
 
     public PlayerChunkSender(final boolean memoryConnection) {
         this.memoryConnection = memoryConnection;
@@ -132,7 +138,9 @@ public class PlayerChunkSender {
 
         this.desiredChunksPerTick = Double.isNaN(desiredChunksPerTick) ? 0.01F : Mth.clamp(desiredChunksPerTick, 0.01F, 64.0F);
         if (this.unacknowledgedBatches == 0) {
-            this.batchQuota = 1.0F;
+            // Mili start - fix: higher initial batchQuota when no pending acks for faster join
+            this.batchQuota = Math.min(this.desiredChunksPerTick, 8.0F);
+            // Mili end
         }
 
         this.maxUnacknowledgedBatches = 10;
