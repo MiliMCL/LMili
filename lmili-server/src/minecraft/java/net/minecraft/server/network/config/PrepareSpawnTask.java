@@ -299,6 +299,7 @@ public class PrepareSpawnTask implements ConfigurationTask {
                 PrepareSpawnTask.this.loadListener.finish(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS);
                 return PrepareSpawnTask.this.new Ready(this.spawnLevel, spawnPosition, this.spawnAngle);
                 // Mili end
+            }
         }
     }
 
