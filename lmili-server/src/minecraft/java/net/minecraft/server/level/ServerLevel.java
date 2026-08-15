@@ -832,6 +832,23 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
             }
         }
         // Mili end - Cross Region Helper
+        // Mili start - parallel region tick via RegionTickPool
+        // 当 RegionTickPool 启用时，将 world tick（chunk random tick + 实体 tick）交给 RegionTickDispatcher 并行处理。
+        // 此 hook 位于 level.tick 内部，因而仍走 MinecraftServer#tickServer → tickChildren 主路径，
+        // 不用担心 tickConnections / chunkTaskDrain 被绕过而导致登录卡住。
+        if (region != null && fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.isRunning()) {
+            final fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher dispatcher =
+                    fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
+            if (dispatcher != null) {
+                fun.bm.mili.lmili.thread.regiontick.RegionTickContext context =
+                        dispatcher.getOrCreateContext(region);
+                context.setCurrentTick(region.getCurrentTick());
+                context.refreshOwnedChunks(region.region.getOwnedChunks());
+                this.mili$tickRegion(region, context);
+                return;
+            }
+        }
+        // Mili end - parallel region tick
         final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.getCurrentWorldData(); // Folia - regionised ticking
         final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle foliaProfiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler(); // Folia - profiler
         ProfilerFiller profiler = Profiler.get();

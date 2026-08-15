@@ -503,31 +503,11 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
         protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
             final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler(); // Folia - profiler
             profiler.startTick(); try { // Folia - profiler
-            // Mili start - parallel region tick via RegionTickDispatcher
-            // Global region (id==0L) MUST use the original path: its thread also ticks config-phase
-            // connections (RegionizedServer#tickConnections). Handing it to the dispatcher starves
-            // those connections, so the player hangs on "Joining World" until keepalive times out.
-            final boolean isGlobal = this.region.id == 0L;
-            if (!isGlobal && fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.isRunning()) {
-                final fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher dispatcher =
-                        fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
-                if (dispatcher != null) {
-                    final net.minecraft.server.level.ServerLevel level = this.region.world;
-                    fun.bm.mili.lmili.thread.regiontick.RegionTickContext context =
-                            dispatcher.getOrCreateContext(this.region);
-                    context.setCurrentTick(tickCount);
-                    context.refreshOwnedChunks(this.region.region.getOwnedChunks());
-                    level.mili$tickRegion(this.region, context);
-                } else {
-                    MinecraftServer.getServer().tickServer(startTime, scheduledEnd, TimeUnit.MILLISECONDS.toMillis(10L), this.region);
-                }
-            } else {
-                if (isGlobal && fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.isRunning()) {
-                    LOGGER.info("[RegionTickPool] Skipping parallel dispatch for global region #0 — falling back to serial tick");
-                }
-                MinecraftServer.getServer().tickServer(startTime, scheduledEnd, TimeUnit.MILLISECONDS.toMillis(10L), this.region);
-            }
-            // Mili end - parallel region tick
+            // Mili: tickServer runs the normal pipeline (drainTasks, tickPackets, tickChildren, tickConnections).
+            // The parallel dispatch is hooked inside ServerLevel#tick via mili$tickRegion, so that
+            // the per-region tickConnections / chunk task draining still happen on this thread.
+            MinecraftServer.getServer().tickServer(startTime, scheduledEnd, TimeUnit.MILLISECONDS.toMillis(10L), this.region);
+            // Mili end
             } finally { profiler.stopTick(); } // Folia - profiler
         }
 
