@@ -285,32 +285,20 @@ public class PrepareSpawnTask implements ConfigurationTask {
                     this.spawnAngle = new Vec2(location.getYaw(), location.getPitch());
                 }
                 // Paper end - PlayerSpawnLocationEvent
+                // Mili start - fix: Skip trackLoadWithRadius for new player join.
+                // The trackLoadWithRadius mechanism uses moonrise$loadChunksAsync which schedules
+                // chunk loads and waits for callbacks. On Folia region scheduler threads, these
+                // callbacks may never fire, causing the player to be stuck forever at "Joining World".
+                // Since the world spawn area is pre-generated and ticked during server startup,
+                // the chunks are already at FULL status. We skip the wait and let the player join
+                // immediately; remaining chunks load naturally via RegionizedPlayerChunkLoader.
                 ChunkPos spawnChunk = ChunkPos.containing(BlockPos.containing(spawnPosition));
-                // Mili start - diagnostic: log chunk loading start
-                LOGGER.info("[PrepareSpawnTask] Starting chunk load tracking: center={}, radius={}, expected={} chunks, status=FULL",
-                    spawnChunk, PREPARE_CHUNK_RADIUS, (PREPARE_CHUNK_RADIUS * 2 + 1) * (PREPARE_CHUNK_RADIUS * 2 + 1));
+                LOGGER.info("[PrepareSpawnTask] Skipping chunk load wait — spawn area pre-generated during startup. Player will join immediately.");
+                // Add spawn ticket to keep chunks loaded
+                this.spawnLevel.getChunkSource().addTicketWithRadius(TicketType.PLAYER_SPAWN, spawnChunk, PREPARE_CHUNK_RADIUS);
+                PrepareSpawnTask.this.loadListener.finish(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS);
+                return PrepareSpawnTask.this.new Ready(this.spawnLevel, spawnPosition, this.spawnAngle);
                 // Mili end
-                this.chunkLoadFuture = ((ca.spottedleaf.moonrise.patches.chunk_system.MoonriseChunkLoadCounter)this.chunkLoadCounter).trackLoadWithRadius(this.spawnLevel, spawnChunk, PREPARE_CHUNK_RADIUS, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, ca.spottedleaf.concurrentutil.util.Priority.HIGH, () -> { Preparing.this.spawnLevel.getChunkSource().addTicketWithRadius(TicketType.PLAYER_SPAWN, spawnChunk, PREPARE_CHUNK_RADIUS); }); // Paper - rewrite chunk system // Mili - use PREPARE_CHUNK_RADIUS constant
-                PrepareSpawnTask.this.loadListener.start(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS, this.chunkLoadCounter.totalChunks());
-                PrepareSpawnTask.this.loadListener.updateFocus(this.spawnLevel.dimension(), spawnChunk);
-            }
-
-            PrepareSpawnTask.this.loadListener
-                .update(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS, this.chunkLoadCounter.readyChunks(), this.chunkLoadCounter.totalChunks());
-            // Mili start - diagnostic: log chunk loading progress
-            if (!this.chunkLoadFuture.isDone()) {
-                if (LOGGER.isDebugEnabled()) {
-                    LOGGER.debug("[PrepareSpawnTask] Waiting for chunks: {}/{} ready", this.chunkLoadCounter.readyChunks(), this.chunkLoadCounter.totalChunks());
-                }
-                return null;
-            }
-            // Mili end
-
-            // Mili start - diagnostic: log chunk loading complete
-            LOGGER.info("[PrepareSpawnTask] All {} chunks ready, player can join", this.chunkLoadCounter.totalChunks());
-            // Mili end
-            PrepareSpawnTask.this.loadListener.finish(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS);
-            return PrepareSpawnTask.this.new Ready(this.spawnLevel, spawnPosition, this.spawnAngle);
         }
     }
 
