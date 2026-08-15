@@ -110,21 +110,20 @@ public class PrepareSpawnTask implements ConfigurationTask {
                 }
             }
             // Folia start - region threading
+            // Mili fix: Use world spawn position directly for new players instead of
+            // complex async fudgeSpawnLocation/selectSpawn flow that can deadlock on
+            // Folia region scheduler threads. The world spawn is already calculated and
+            // chunks around it are pre-generated during server startup.
             CompletableFuture<Vec3> spawnPosition = new java.util.concurrent.CompletableFuture<>();
             if (loadedPosition.position().isPresent()) {
                 spawnPosition.complete(loadedPosition.position().get());
             } else {
-                ca.spottedleaf.concurrentutil.completable.CallbackCompletable<org.bukkit.Location> spawnComplete = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
-                spawnComplete.addWaiter(
-                        (final org.bukkit.Location loc, final Throwable throwable) -> {
-                            if (throwable != null) {
-                                spawnPosition.completeExceptionally(throwable);
-                            } else {
-                                spawnPosition.complete(io.papermc.paper.util.MCUtil.toVec3(loc));
-                            }
-                        }
-                );
-                ServerPlayer.fudgeSpawnLocation(spawnLevel, spawnComplete);
+                // Mili start - use world spawn directly (more reliable than fudgeSpawnLocation)
+                BlockPos sharedSpawn = spawnLevel.getLevelData().getRespawnData().pos();
+                Vec3 spawnVec = Vec3.atBottomCenterOf(sharedSpawn);
+                LOGGER.info("[PrepareSpawnTask] New player spawn set to world spawn: {} in {}", spawnVec, spawnLevel.dimension().location());
+                spawnPosition.complete(spawnVec);
+                // Mili end
             }
             // Folia end - region threading
             // Paper end - move logic in Entity to here, to use bukkit supplied world UUID & reset to main world spawn if no valid world is found
@@ -225,11 +224,19 @@ public class PrepareSpawnTask implements ConfigurationTask {
 
         public PrepareSpawnTask.@Nullable Ready tick() {
             if (!this.spawnPosition.isDone()) {
+                // Mili start - diagnostic: log waiting for spawn position calculation
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("[PrepareSpawnTask] Waiting for spawn position calculation (fudgeSpawnLocation/selectSpawn)");
+                }
+                // Mili end
                 return null;
             }
 
             Vec3 spawnPosition = this.spawnPosition.join();
             if (this.chunkLoadFuture == null) {
+                // Mili start - diagnostic: log spawn position ready
+                LOGGER.info("[PrepareSpawnTask] Spawn position calculated: {} in {}", spawnPosition, this.spawnLevel.dimension().location());
+                // Mili end
                 // Paper start - PlayerSpawnLocationEvent
                 if (false && this.eventFuture == null && org.spigotmc.event.player.PlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length != 0) { // Folia - region threading
                     ServerPlayer player;
@@ -279,6 +286,10 @@ public class PrepareSpawnTask implements ConfigurationTask {
                 }
                 // Paper end - PlayerSpawnLocationEvent
                 ChunkPos spawnChunk = ChunkPos.containing(BlockPos.containing(spawnPosition));
+                // Mili start - diagnostic: log chunk loading start
+                LOGGER.info("[PrepareSpawnTask] Starting chunk load tracking: center={}, radius={}, expected={} chunks, status=FULL",
+                    spawnChunk, PREPARE_CHUNK_RADIUS, (PREPARE_CHUNK_RADIUS * 2 + 1) * (PREPARE_CHUNK_RADIUS * 2 + 1));
+                // Mili end
                 this.chunkLoadFuture = ((ca.spottedleaf.moonrise.patches.chunk_system.MoonriseChunkLoadCounter)this.chunkLoadCounter).trackLoadWithRadius(this.spawnLevel, spawnChunk, PREPARE_CHUNK_RADIUS, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, ca.spottedleaf.concurrentutil.util.Priority.HIGH, () -> { Preparing.this.spawnLevel.getChunkSource().addTicketWithRadius(TicketType.PLAYER_SPAWN, spawnChunk, PREPARE_CHUNK_RADIUS); }); // Paper - rewrite chunk system // Mili - use PREPARE_CHUNK_RADIUS constant
                 PrepareSpawnTask.this.loadListener.start(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS, this.chunkLoadCounter.totalChunks());
                 PrepareSpawnTask.this.loadListener.updateFocus(this.spawnLevel.dimension(), spawnChunk);
@@ -286,10 +297,18 @@ public class PrepareSpawnTask implements ConfigurationTask {
 
             PrepareSpawnTask.this.loadListener
                 .update(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS, this.chunkLoadCounter.readyChunks(), this.chunkLoadCounter.totalChunks());
+            // Mili start - diagnostic: log chunk loading progress
             if (!this.chunkLoadFuture.isDone()) {
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("[PrepareSpawnTask] Waiting for chunks: {}/{} ready", this.chunkLoadCounter.readyChunks(), this.chunkLoadCounter.totalChunks());
+                }
                 return null;
             }
+            // Mili end
 
+            // Mili start - diagnostic: log chunk loading complete
+            LOGGER.info("[PrepareSpawnTask] All {} chunks ready, player can join", this.chunkLoadCounter.totalChunks());
+            // Mili end
             PrepareSpawnTask.this.loadListener.finish(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS);
             return PrepareSpawnTask.this.new Ready(this.spawnLevel, spawnPosition, this.spawnAngle);
         }
