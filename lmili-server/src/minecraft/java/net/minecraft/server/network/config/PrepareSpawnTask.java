@@ -331,6 +331,9 @@ public class PrepareSpawnTask implements ConfigurationTask {
             //ChunkPos spawnChunk = ChunkPos.containing(BlockPos.containing(this.spawnPosition));
             //this.spawnLevel.waitForEntities(spawnChunk, 3); // Not needed on Moonrise chunk system
             // Folia end - region threading
+            // Mili start - diagnostic: log createPlayer start
+            LOGGER.info("[PrepareSpawnTask] createPlayer() called for {}", cookie.gameProfile().getId());
+            // Mili end
             // Paper start - configuration api - possibly use legacy saved server player instance
             ServerPlayer player;
             if (connection.savedPlayerForLegacyEvents != null) {
@@ -346,10 +349,16 @@ public class PrepareSpawnTask implements ConfigurationTask {
             // Paper end - configuration api - possibly use legacy saved server player instance
             PrepareSpawnTask.this.listener.paperConnection.applyPendingEntityId(player); // Paper - internal entity id api - possibly override player network id if plugins used internal API to configure it.
             // Folia start - region threading - split out createPlayer and spawn
+            // Mili start - diagnostic: log createPlayer complete
+            LOGGER.info("[PrepareSpawnTask] createPlayer() complete for {}, entityId={}", cookie.gameProfile().getId(), player.getId());
+            // Mili end
             return player;
         }
         public ServerPlayer spawn(final Connection connection, final CommonListenerCookie cookie, final ServerPlayer player) {
             // Folia end - region threading - split out createPlayer and spawn
+            // Mili start - diagnostic: log spawn start
+            LOGGER.info("[PrepareSpawnTask] spawn() called for {}, position={}", cookie.gameProfile().getId(), this.spawnPosition);
+            // Mili end
 
             try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(player.problemPath(), PrepareSpawnTask.LOGGER)) {
                 Optional<ValueInput> input = PrepareSpawnTask.this.server
@@ -378,13 +387,27 @@ public class PrepareSpawnTask implements ConfigurationTask {
                     player.spawnReason = org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT; // set Player SpawnReason to DEFAULT on first login
                 }
                 // Paper end - Entity#getEntitySpawnReason
+                // Mili start - diagnostic: log before snapTo
+                LOGGER.info("[PrepareSpawnTask] snapTo() for {} at {}", cookie.gameProfile().getId(), this.spawnPosition);
+                // Mili end
                 player.snapTo(this.spawnPosition, this.spawnAngle.x, this.spawnAngle.y);
+                // Mili start - diagnostic: log before placeNewPlayer
+                LOGGER.info("[PrepareSpawnTask] placeNewPlayer() for {}", cookie.gameProfile().getId());
+                // Mili end
                 PrepareSpawnTask.this.server.getPlayerList().placeNewPlayer(connection, player, cookie);
+                // Mili start - diagnostic: log after placeNewPlayer
+                LOGGER.info("[PrepareSpawnTask] placeNewPlayer() complete for {}, player is now in world", cookie.gameProfile().getId());
+                // Mili end
                 input.ifPresent(tag -> {
                     player.loadAndSpawnEnderPearls(tag);
                     player.loadAndSpawnParentVehicle(tag);
                 });
                 return player;
+            } catch (Throwable t) {
+                // Mili start - diagnostic: log any exception in spawn
+                LOGGER.error("[PrepareSpawnTask] EXCEPTION in spawn() for {}: {}", cookie.gameProfile().getId(), t.getMessage(), t);
+                throw t;
+                // Mili end
             }
         }
     }
