@@ -181,6 +181,12 @@ public final class RegionizedServer {
 
         @Override
         protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
+            // Mili start - diagnostic: log global-region (id==0) tick invocations so we can tell
+            // whether the global tick thread is being starved when the dispatcher is enabled.
+            if (tickCount % 100L == 0L) {
+                LOGGER.info("[MILI-DIAG] GlobalTickTickHandle: tick #{} on {}", tickCount, Thread.currentThread().getName());
+            }
+            // Mili end
             this.drainTasks();
             this.server.globalTick(tickCount);
         }

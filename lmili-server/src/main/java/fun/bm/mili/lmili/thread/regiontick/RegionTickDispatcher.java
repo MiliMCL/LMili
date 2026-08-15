@@ -123,6 +123,29 @@ public final class RegionTickDispatcher {
     public void dispatchTick(@NotNull final RegionTickContext context, final long tickCount) {
         if (this.shutdown.get()) return;
 
+        // Mili start - skip the dispatcher entirely for the global region (id==0L).
+        // The global region thread is the ONLY thread that ticks config-phase connections
+        // (RegionizedServer#tickConnections → prepare_spawn / AsyncKeepalive) and runs chunk
+        // stage progression (drainGlobalChunkTasks). Handing it to the dispatcher starves both,
+        // leaving the player stuck on "Joining World" until the 30s keepalive times out.
+        //
+        // The global region also owns no chunks (Folia's private regions hold the chunks), so
+        // skipping dispatch here loses no chunk-tick work — it only restores the original
+        // MinecraftServer#tickServer path that runs on this thread for non-chunk global work.
+        //
+        // This inner safety net is defense-in-depth: even if the outer TickRegions#tickRegion
+        // patch is absent from the deployed jar (e.g. paperclip-launched servers), the global
+        // thread can never be hijacked by the dispatcher.
+        //
+        // Diagnostic: this log fires once per global-region tick. If it never appears in the
+        // log, then the global region never reaches dispatchTick here and the dispatcher is not
+        // the cause — we need to look elsewhere (e.g. carrier pool contention).
+        if (context.regionId == 0L) {
+            LOGGER.info("[RegionTickPool] dispatchTick: global region id==0 -- skipping dispatcher for this tick");
+            return;
+        }
+        // Mili end
+
         var chunks = context.getOwnedChunks();
         int chunkCount = chunks.size();
 
@@ -147,6 +170,12 @@ public final class RegionTickDispatcher {
     }
 
     private void dispatchSingleThread(final RegionTickContext context, final long tickCount) {
+        // Mili start - skip global region for the same reason as dispatchTick: its thread runs
+        // connection ticks and chunk stage progression that must never be hijacked.
+        if (context.regionId == 0L) {
+            return;
+        }
+        // Mili end
         if (context.getOwnedChunks().isEmpty()) return;
         context.beginTick(1);
         RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
