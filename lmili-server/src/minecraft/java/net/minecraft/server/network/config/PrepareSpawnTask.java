@@ -30,7 +30,12 @@ import org.slf4j.Logger;
 public class PrepareSpawnTask implements ConfigurationTask {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final ConfigurationTask.Type TYPE = new ConfigurationTask.Type("prepare_spawn");
-    public static final int PREPARE_CHUNK_RADIUS = 3;
+    // Mili start - fix: reduce preload chunk radius for faster player join.
+    // Previously radius 3 (49 chunks) needed to be at FULL status before player could join,
+    // causing 15+ second delays on "Joining World" screen. Reduced to radius 1 (9 chunks)
+    // so the player can join much faster; remaining chunks load normally via streaming.
+    public static final int PREPARE_CHUNK_RADIUS = 1;
+    // Mili end
     private final MinecraftServer server;
     private final NameAndId nameAndId;
     private final LevelLoadListener loadListener;
