@@ -121,7 +121,7 @@ public class PrepareSpawnTask implements ConfigurationTask {
                 // Mili start - use world spawn directly (more reliable than fudgeSpawnLocation)
                 BlockPos sharedSpawn = spawnLevel.getLevelData().getRespawnData().pos();
                 Vec3 spawnVec = Vec3.atBottomCenterOf(sharedSpawn);
-                LOGGER.info("[PrepareSpawnTask] New player spawn set to world spawn: {} in {}", spawnVec, spawnLevel.dimension().location());
+                LOGGER.info("[PrepareSpawnTask] New player spawn set to world spawn: {} in {}", spawnVec, spawnLevel.dimension());
                 spawnPosition.complete(spawnVec);
                 // Mili end
             }
@@ -235,7 +235,7 @@ public class PrepareSpawnTask implements ConfigurationTask {
             Vec3 spawnPosition = this.spawnPosition.join();
             if (this.chunkLoadFuture == null) {
                 // Mili start - diagnostic: log spawn position ready
-                LOGGER.info("[PrepareSpawnTask] Spawn position calculated: {} in {}", spawnPosition, this.spawnLevel.dimension().location());
+                LOGGER.info("[PrepareSpawnTask] Spawn position calculated: {} in {}", spawnPosition, this.spawnLevel.dimension());
                 // Mili end
                 // Paper start - PlayerSpawnLocationEvent
                 if (false && this.eventFuture == null && org.spigotmc.event.player.PlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length != 0) { // Folia - region threading
