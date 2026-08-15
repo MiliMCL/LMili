@@ -224,11 +224,12 @@ public final class RegionTickDispatcher {
     }
 
     /**
-     * DAG 并行化实体 + 方块实体 tick。
+     * 实体 tick 调度。
      *
-     * <p>将 region 内的 ticking 实体按所在 chunk 分组，每个 chunk 生成一个
-     * {@code ChunkScope}，连同系统 Profile 一起提交给 DAG 执行器。
-     * 不同 chunk 上的实体因 Scope 不重叠可安全并行 tick。
+     * <p>注意：实体 tick（尤其是 {@link Entity#checkDespawn()}）会调用
+     * {@code Level.getLocalPlayers()}，而该方法依赖 Folia 的线程本地 region 数据，
+     * 只在当前 region 的 tick 线程上安全。因此本类不会把实体 tick 派发到
+     * ForkJoinPool worker，而是在调用方（region tick）线程上同步执行。
      *
      * @param regionId          区域 ID
      * @param context           tick 上下文
@@ -241,53 +242,24 @@ public final class RegionTickDispatcher {
                                  @NotNull final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData) {
         if (this.shutdown.get()) return;
 
-        // 按 chunk 分组实体
-        final Long2ObjectOpenHashMap<List<Entity>> entitiesByChunk = new Long2ObjectOpenHashMap<>();
+        // 直接在当前线程（region tick 线程）上跑实体 tick，避免 ForkJoin 线程导致的
+        // Level#getLocalPlayers 等调用抛出 NPE。
         regionizedWorldData.forEachTickingEntity(entity -> {
-            long chunkKey = ChunkPos.pack(entity.blockPosition());
-            List<Entity> list = entitiesByChunk.get(chunkKey);
-            if (list == null) {
-                list = new ArrayList<>();
-                entitiesByChunk.put(chunkKey, list);
+            if (entity.isRemoved()) return;
+            if (level.tickRateManager().isEntityFrozen(entity)) return;
+            try {
+                entity.checkDespawn();
+            } catch (Throwable throwable) {
+                LOGGER.error("[RegionTickPool] Entity checkDespawn failed for {} in region #{}", entity, regionId, throwable);
             }
-            list.add(entity);
-        });
-
-        if (entitiesByChunk.isEmpty()) return;
-
-        // 构建 (SystemProfile, Scope) 对 — 每个 chunk 一个 entity_tick 系统实例
-        final List<Map.Entry<SystemProfile, Scope>> systemScopePairs = new ArrayList<>(entitiesByChunk.size());
-        for (long chunkKey : entitiesByChunk.keySet()) {
-            LongSet chunks = new LongOpenHashSet();
-            chunks.add(chunkKey);
-            Scope scope = new Scope.ChunkScope(regionId, chunks);
-            systemScopePairs.add(new AbstractMap.SimpleEntry<>(MiliGameSystems.ENTITY_TICK, scope));
-        }
-
-        // 构建 level-aware executors
-        final Map<String, java.util.function.BiConsumer<Scope, ServerLevel>> executors = new HashMap<>();
-        executors.put("entity_tick", (scope, lvl) -> {
-            if (scope instanceof Scope.ChunkScope chunkScope) {
-                for (long chunkKey : chunkScope.chunkPositions()) {
-                    List<Entity> entities = entitiesByChunk.get(chunkKey);
-                    if (entities == null) continue;
-                    for (Entity entity : entities) {
-                        if (entity.isRemoved()) continue;
-                        if (lvl.tickRateManager().isEntityFrozen(entity)) continue;
-                        entity.checkDespawn();
-                        if (entity.isRemoved()) continue;
-                        Entity vehicle = entity.getVehicle();
-                        if (vehicle != null) {
-                            if (!vehicle.isRemoved() && vehicle.hasPassenger(entity)) continue;
-                            entity.stopRiding();
-                        }
-                        lvl.guardEntityTick(lvl::tickNonPassenger, entity);
-                    }
-                }
+            if (entity.isRemoved()) return;
+            Entity vehicle = entity.getVehicle();
+            if (vehicle != null) {
+                if (!vehicle.isRemoved() && vehicle.hasPassenger(entity)) return;
+                entity.stopRiding();
             }
+            level.guardEntityTick(level::tickNonPassenger, entity);
         });
-
-        dagExecutor.executeSystems(regionId, context, systemScopePairs, level, executors);
     }
 
     public Map<String, Object> getStats() {
