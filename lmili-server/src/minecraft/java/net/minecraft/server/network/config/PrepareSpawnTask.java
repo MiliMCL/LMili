@@ -30,12 +30,7 @@ import org.slf4j.Logger;
 public class PrepareSpawnTask implements ConfigurationTask {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final ConfigurationTask.Type TYPE = new ConfigurationTask.Type("prepare_spawn");
-    // Mili start - fix: reduce preload chunk radius for faster player join.
-    // Previously radius 3 (49 chunks) needed to be at FULL status before player could join,
-    // causing 15+ second delays on "Joining World" screen. Reduced to radius 1 (9 chunks)
-    // so the player can join much faster; remaining chunks load normally via streaming.
-    public static final int PREPARE_CHUNK_RADIUS = 1;
-    // Mili end
+    public static final int PREPARE_CHUNK_RADIUS = 3;
     private final MinecraftServer server;
     private final NameAndId nameAndId;
     private final LevelLoadListener loadListener;
@@ -110,20 +105,21 @@ public class PrepareSpawnTask implements ConfigurationTask {
                 }
             }
             // Folia start - region threading
-            // Mili fix: Use world spawn position directly for new players instead of
-            // complex async fudgeSpawnLocation/selectSpawn flow that can deadlock on
-            // Folia region scheduler threads. The world spawn is already calculated and
-            // chunks around it are pre-generated during server startup.
             CompletableFuture<Vec3> spawnPosition = new java.util.concurrent.CompletableFuture<>();
             if (loadedPosition.position().isPresent()) {
                 spawnPosition.complete(loadedPosition.position().get());
             } else {
-                // Mili start - use world spawn directly (more reliable than fudgeSpawnLocation)
-                BlockPos sharedSpawn = spawnLevel.getLevelData().getRespawnData().pos();
-                Vec3 spawnVec = Vec3.atBottomCenterOf(sharedSpawn);
-                LOGGER.info("[PrepareSpawnTask] New player spawn set to world spawn: {} in {}", spawnVec, spawnLevel.dimension());
-                spawnPosition.complete(spawnVec);
-                // Mili end
+                ca.spottedleaf.concurrentutil.completable.CallbackCompletable<org.bukkit.Location> spawnComplete = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
+                spawnComplete.addWaiter(
+                        (final org.bukkit.Location loc, final Throwable throwable) -> {
+                            if (throwable != null) {
+                                spawnPosition.completeExceptionally(throwable);
+                            } else {
+                                spawnPosition.complete(io.papermc.paper.util.MCUtil.toVec3(loc));
+                            }
+                        }
+                );
+                ServerPlayer.fudgeSpawnLocation(spawnLevel, spawnComplete);
             }
             // Folia end - region threading
             // Paper end - move logic in Entity to here, to use bukkit supplied world UUID & reset to main world spawn if no valid world is found
@@ -224,80 +220,73 @@ public class PrepareSpawnTask implements ConfigurationTask {
 
         public PrepareSpawnTask.@Nullable Ready tick() {
             if (!this.spawnPosition.isDone()) {
-                // Mili start - diagnostic: log waiting for spawn position calculation
-                if (LOGGER.isDebugEnabled()) {
-                    LOGGER.debug("[PrepareSpawnTask] Waiting for spawn position calculation (fudgeSpawnLocation/selectSpawn)");
-                }
-                // Mili end
                 return null;
             }
 
             Vec3 spawnPosition = this.spawnPosition.join();
-            // Mili start - diagnostic: log spawn position ready
-            LOGGER.info("[PrepareSpawnTask] Spawn position calculated: {} in {}", spawnPosition, this.spawnLevel.dimension());
-            // Mili end
-            // Paper start - PlayerSpawnLocationEvent
-            if (false && this.eventFuture == null && org.spigotmc.event.player.PlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length != 0) { // Folia - region threading
-                ServerPlayer player;
-                if (PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents != null) {
-                    player = PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents;
-                } else {
-                    player = new ServerPlayer(
-                        PrepareSpawnTask.this.server,
-                        PrepareSpawnTask.this.server.overworld(),
-                        PrepareSpawnTask.this.profile,
-                        net.minecraft.server.level.ClientInformation.createDefault()
-                    );
-                    PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents = player;
-                }
-                org.spigotmc.event.player.PlayerSpawnLocationEvent ev = new org.spigotmc.event.player.PlayerSpawnLocationEvent(
-                    player.getBukkitEntity(),
-                    org.bukkit.craftbukkit.util.CraftLocation.toBukkit(spawnPosition, this.spawnLevel, this.spawnAngle.x, this.spawnAngle.y)
-                );
-                ev.callEvent();
-                spawnPosition = io.papermc.paper.util.MCUtil.toVec3(ev.getSpawnLocation());
-                if (ev.getSpawnLocation().getWorld() != null) this.spawnLevel = ((org.bukkit.craftbukkit.CraftWorld) ev.getSpawnLocation().getWorld()).getHandle();
-                this.spawnPosition = CompletableFuture.completedFuture(spawnPosition);
-                this.spawnAngle = new Vec2(ev.getSpawnLocation().getYaw(), ev.getSpawnLocation().getPitch());
-            }
-
-            if (this.eventFuture == null && io.papermc.paper.event.player.AsyncPlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length != 0) {
-                final Vec3 spawnPositionFinal = spawnPosition;
-                this.eventFuture = CompletableFuture.supplyAsync(() -> {
-                    io.papermc.paper.event.player.AsyncPlayerSpawnLocationEvent ev = new io.papermc.paper.event.player.AsyncPlayerSpawnLocationEvent(
-                        PrepareSpawnTask.this.listener.paperConnection,
-                        org.bukkit.craftbukkit.util.CraftLocation.toBukkit(spawnPositionFinal, this.spawnLevel, this.spawnAngle.x, this.spawnAngle.y),
-                        PrepareSpawnTask.this.newPlayer
+            if (this.chunkLoadFuture == null) {
+                // Paper start - PlayerSpawnLocationEvent
+                if (false && this.eventFuture == null && org.spigotmc.event.player.PlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length != 0) { // Folia - region threading
+                    ServerPlayer player;
+                    if (PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents != null) {
+                        player = PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents;
+                    } else {
+                        player = new ServerPlayer(
+                            PrepareSpawnTask.this.server,
+                            PrepareSpawnTask.this.server.overworld(),
+                            PrepareSpawnTask.this.profile,
+                            net.minecraft.server.level.ClientInformation.createDefault()
+                        );
+                        PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents = player;
+                    }
+                    org.spigotmc.event.player.PlayerSpawnLocationEvent ev = new org.spigotmc.event.player.PlayerSpawnLocationEvent(
+                        player.getBukkitEntity(),
+                        org.bukkit.craftbukkit.util.CraftLocation.toBukkit(spawnPosition, this.spawnLevel, this.spawnAngle.x, this.spawnAngle.y)
                     );
                     ev.callEvent();
-                    return ev.getSpawnLocation();
-                }, io.papermc.paper.connection.PaperConfigurationTask.CONFIGURATION_POOL);
-            }
-            if (this.eventFuture != null) {
-                if (!this.eventFuture.isDone()) {
-                    return null;
+                    spawnPosition = io.papermc.paper.util.MCUtil.toVec3(ev.getSpawnLocation());
+                    if (ev.getSpawnLocation().getWorld() != null) this.spawnLevel = ((org.bukkit.craftbukkit.CraftWorld) ev.getSpawnLocation().getWorld()).getHandle();
+                    this.spawnPosition = CompletableFuture.completedFuture(spawnPosition);
+                    this.spawnAngle = new Vec2(ev.getSpawnLocation().getYaw(), ev.getSpawnLocation().getPitch());
                 }
-                org.bukkit.Location location = this.eventFuture.join();
-                spawnPosition = io.papermc.paper.util.MCUtil.toVec3(location);
-                this.spawnLevel = ((org.bukkit.craftbukkit.CraftWorld) location.getWorld()).getHandle();
-                this.spawnPosition = CompletableFuture.completedFuture(spawnPosition);
-                this.spawnAngle = new Vec2(location.getYaw(), location.getPitch());
+
+                if (this.eventFuture == null && io.papermc.paper.event.player.AsyncPlayerSpawnLocationEvent.getHandlerList().getRegisteredListeners().length != 0) {
+                    final Vec3 spawnPositionFinal = spawnPosition;
+                    this.eventFuture = CompletableFuture.supplyAsync(() -> {
+                        io.papermc.paper.event.player.AsyncPlayerSpawnLocationEvent ev = new io.papermc.paper.event.player.AsyncPlayerSpawnLocationEvent(
+                            PrepareSpawnTask.this.listener.paperConnection,
+                            org.bukkit.craftbukkit.util.CraftLocation.toBukkit(spawnPositionFinal, this.spawnLevel, this.spawnAngle.x, this.spawnAngle.y),
+                            PrepareSpawnTask.this.newPlayer
+                        );
+                        ev.callEvent();
+                        return ev.getSpawnLocation();
+                    }, io.papermc.paper.connection.PaperConfigurationTask.CONFIGURATION_POOL);
+                }
+                if (this.eventFuture != null) {
+                    if (!this.eventFuture.isDone()) {
+                        return null;
+                    }
+                    org.bukkit.Location location = this.eventFuture.join();
+                    spawnPosition = io.papermc.paper.util.MCUtil.toVec3(location);
+                    this.spawnLevel = ((org.bukkit.craftbukkit.CraftWorld) location.getWorld()).getHandle();
+                    this.spawnPosition = CompletableFuture.completedFuture(spawnPosition);
+                    this.spawnAngle = new Vec2(location.getYaw(), location.getPitch());
+                }
+                // Paper end - PlayerSpawnLocationEvent
+                ChunkPos spawnChunk = ChunkPos.containing(BlockPos.containing(spawnPosition));
+                this.chunkLoadFuture = ((ca.spottedleaf.moonrise.patches.chunk_system.MoonriseChunkLoadCounter)this.chunkLoadCounter).trackLoadWithRadius(this.spawnLevel, spawnChunk, 3, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, ca.spottedleaf.concurrentutil.util.Priority.HIGH, () -> { Preparing.this.spawnLevel.getChunkSource().addTicketWithRadius(TicketType.PLAYER_SPAWN, spawnChunk, 3); }); // Paper - rewrite chunk system
+                PrepareSpawnTask.this.loadListener.start(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS, this.chunkLoadCounter.totalChunks());
+                PrepareSpawnTask.this.loadListener.updateFocus(this.spawnLevel.dimension(), spawnChunk);
             }
-            // Paper end - PlayerSpawnLocationEvent
-            // Mili start - fix: Skip trackLoadWithRadius for new player join.
-            // The trackLoadWithRadius mechanism uses moonrise$loadChunksAsync which schedules
-            // chunk loads and waits for callbacks. On Folia region scheduler threads, these
-            // callbacks may never fire, causing the player to be stuck forever at "Joining World".
-            // Since the world spawn area is pre-generated and ticked during server startup,
-            // the chunks are already at FULL status. We skip the wait and let the player join
-            // immediately; remaining chunks load naturally via RegionizedPlayerChunkLoader.
-            ChunkPos spawnChunk = ChunkPos.containing(BlockPos.containing(spawnPosition));
-            LOGGER.info("[PrepareSpawnTask] Skipping chunk load wait — spawn area pre-generated during startup. Player will join immediately.");
-            // Add spawn ticket to keep chunks loaded
-            this.spawnLevel.getChunkSource().addTicketWithRadius(TicketType.PLAYER_SPAWN, spawnChunk, PREPARE_CHUNK_RADIUS);
+
+            PrepareSpawnTask.this.loadListener
+                .update(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS, this.chunkLoadCounter.readyChunks(), this.chunkLoadCounter.totalChunks());
+            if (!this.chunkLoadFuture.isDone()) {
+                return null;
+            }
+
             PrepareSpawnTask.this.loadListener.finish(LevelLoadListener.Stage.LOAD_PLAYER_CHUNKS);
             return PrepareSpawnTask.this.new Ready(this.spawnLevel, spawnPosition, this.spawnAngle);
-            // Mili end
         }
     }
 
@@ -331,9 +320,6 @@ public class PrepareSpawnTask implements ConfigurationTask {
             //ChunkPos spawnChunk = ChunkPos.containing(BlockPos.containing(this.spawnPosition));
             //this.spawnLevel.waitForEntities(spawnChunk, 3); // Not needed on Moonrise chunk system
             // Folia end - region threading
-            // Mili start - diagnostic: log createPlayer start
-            LOGGER.info("[PrepareSpawnTask] createPlayer() called for {}", cookie.gameProfile().id());
-            // Mili end
             // Paper start - configuration api - possibly use legacy saved server player instance
             ServerPlayer player;
             if (connection.savedPlayerForLegacyEvents != null) {
@@ -349,16 +335,10 @@ public class PrepareSpawnTask implements ConfigurationTask {
             // Paper end - configuration api - possibly use legacy saved server player instance
             PrepareSpawnTask.this.listener.paperConnection.applyPendingEntityId(player); // Paper - internal entity id api - possibly override player network id if plugins used internal API to configure it.
             // Folia start - region threading - split out createPlayer and spawn
-            // Mili start - diagnostic: log createPlayer complete
-            LOGGER.info("[PrepareSpawnTask] createPlayer() complete for {}, entityId={}", cookie.gameProfile().id(), player.getId());
-            // Mili end
             return player;
         }
         public ServerPlayer spawn(final Connection connection, final CommonListenerCookie cookie, final ServerPlayer player) {
             // Folia end - region threading - split out createPlayer and spawn
-            // Mili start - diagnostic: log spawn start
-            LOGGER.info("[PrepareSpawnTask] spawn() called for {}, position={}", cookie.gameProfile().id(), this.spawnPosition);
-            // Mili end
 
             try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(player.problemPath(), PrepareSpawnTask.LOGGER)) {
                 Optional<ValueInput> input = PrepareSpawnTask.this.server
@@ -387,27 +367,13 @@ public class PrepareSpawnTask implements ConfigurationTask {
                     player.spawnReason = org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT; // set Player SpawnReason to DEFAULT on first login
                 }
                 // Paper end - Entity#getEntitySpawnReason
-                // Mili start - diagnostic: log before snapTo
-                LOGGER.info("[PrepareSpawnTask] snapTo() for {} at {}", cookie.gameProfile().id(), this.spawnPosition);
-                // Mili end
                 player.snapTo(this.spawnPosition, this.spawnAngle.x, this.spawnAngle.y);
-                // Mili start - diagnostic: log before placeNewPlayer
-                LOGGER.info("[PrepareSpawnTask] placeNewPlayer() for {}", cookie.gameProfile().id());
-                // Mili end
                 PrepareSpawnTask.this.server.getPlayerList().placeNewPlayer(connection, player, cookie);
-                // Mili start - diagnostic: log after placeNewPlayer
-                LOGGER.info("[PrepareSpawnTask] placeNewPlayer() complete for {}, player is now in world", cookie.gameProfile().id());
-                // Mili end
                 input.ifPresent(tag -> {
                     player.loadAndSpawnEnderPearls(tag);
                     player.loadAndSpawnParentVehicle(tag);
                 });
                 return player;
-            } catch (Throwable t) {
-                // Mili start - diagnostic: log any exception in spawn
-                LOGGER.error("[PrepareSpawnTask] EXCEPTION in spawn() for {}: {}", cookie.gameProfile().id(), t.getMessage(), t);
-                throw t;
-                // Mili end
             }
         }
     }
