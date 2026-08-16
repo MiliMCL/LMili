@@ -256,42 +256,57 @@ public final class RegionTickDispatcher {
         }
         // Mili end
 
-        for (int i = 0; i < sliceCount; i++) {
-            int from = i * sliceSize;
-            int to = Math.min(from + sliceSize, total);
-            long[] sliceArray = java.util.Arrays.copyOfRange(chunkArray, from, to);
-            RegionTickSlice slice = new RegionTickSlice(context, sliceArray, i);
-            final int sliceIndex = i;
-
-            workerPool.submit(() -> {
-                // Mili start: 在虚拟线程中设置 region data 回退
-                RegionDataThreadLocal.setCurrent(regionData);
-                try {
-                    RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
-                    if (executor != null) {
-                        executor.executeSlice(null, slice, context);
-                    }
-                } catch (Throwable throwable) {
-                    hasError.set(true);
-                    LOGGER.error("[RegionTickPool] Virtual slice #{} failed for region #{}",
-                            sliceIndex, context.regionId, throwable);
-                } finally {
-                    RegionDataThreadLocal.clear();
-                    latch.countDown();
-                }
-                // Mili end
-            });
+        // Mili start: disable async catcher for all virtual threads in this region
+        final boolean miliAsyncCatcher = fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled;
+        if (!miliAsyncCatcher) {
+            fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = true;
         }
+        // Mili end
 
         try {
-            // 等待所有 slice 完成（超时 4.5s，留给 watchdog 余量）
-            if (!latch.await(4500, TimeUnit.MILLISECONDS)) {
-                LOGGER.warn("[RegionTickPool] Virtual tick timed out for region #{} (remaining: {})",
-                        context.regionId, latch.getCount());
+            for (int i = 0; i < sliceCount; i++) {
+                int from = i * sliceSize;
+                int to = Math.min(from + sliceSize, total);
+                long[] sliceArray = java.util.Arrays.copyOfRange(chunkArray, from, to);
+                RegionTickSlice slice = new RegionTickSlice(context, sliceArray, i);
+                final int sliceIndex = i;
+
+                workerPool.submit(() -> {
+                    // Mili start: 在虚拟线程中设置 region data 回退
+                    RegionDataThreadLocal.setCurrent(regionData);
+                    try {
+                        RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
+                        if (executor != null) {
+                            executor.executeSlice(null, slice, context);
+                        }
+                    } catch (Throwable throwable) {
+                        hasError.set(true);
+                        LOGGER.error("[RegionTickPool] Virtual slice #{} failed for region #{}",
+                                sliceIndex, context.regionId, throwable);
+                    } finally {
+                        RegionDataThreadLocal.clear();
+                        latch.countDown();
+                    }
+                    // Mili end
+                });
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOGGER.warn("[RegionTickPool] Virtual tick interrupted for region #{}", context.regionId);
+
+            try {
+                // 等待所有 slice 完成（超时 4.5s，留给 watchdog 余量）
+                if (!latch.await(4500, TimeUnit.MILLISECONDS)) {
+                    LOGGER.warn("[RegionTickPool] Virtual tick timed out for region #{} (remaining: {})",
+                            context.regionId, latch.getCount());
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                LOGGER.warn("[RegionTickPool] Virtual tick interrupted for region #{}", context.regionId);
+            }
+        } finally {
+            // Mili start: restore async catcher config after all virtual threads completed
+            if (!miliAsyncCatcher) {
+                fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = false;
+            }
+            // Mili end
         }
 
         if (hasError.get()) {
