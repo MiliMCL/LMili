@@ -3,14 +3,6 @@ From: Mili <dev@mili.dev>
 Date: Mon, 16 Aug 2026 00:00:00 +0000
 Subject: [PATCH] Mili: TickThread considers virtual threads with region context
 
-Mili's RegionTickPool uses virtual threads for parallel chunk ticking.
-Virtual threads are not TickThread instances, so Moonrise's
-TickThread.ensureTickThread() and isTickThread() checks fail.
-
-This patch makes isTickThread() and all isTickThreadFor() overloads return
-true when RegionDataThreadLocal is set (i.e., the virtual thread is operating
-within a valid region context). This eliminates the need to patch every
-individual ensureTickThread call site.
 ---
  src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java | 19 +++++++++++++++++++
  1 file changed, 19 insertions(+)
@@ -19,7 +11,7 @@ diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b
 index 32a61c913..76b7e4257 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
-@@ -145,6 +145,11 @@ public static TickThread getCurrentTickThread() {
+@@ -145,6 +145,11 @@ public class TickThread extends Thread {
      public static boolean isTickThread() {
 +        // Mili start - virtual threads with region context are considered tick threads
 +        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() != null) {
@@ -29,8 +21,7 @@ index 32a61c913..76b7e4257 100644
          return Thread.currentThread() instanceof TickThread;
      }
 
-     public static boolean isShutdownThread() {
-@@ -178,6 +183,11 @@ public static boolean isTickThreadFor(final Level world, final Vec3 pos) {
+@@ -178,6 +183,11 @@ public class TickThread extends Thread {
      public static boolean isTickThreadFor(final Level world, final int chunkX, final int chunkZ) {
 +        // Mili start - virtual threads with region context are considered tick threads for their region
 +        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() != null) {
@@ -38,8 +29,7 @@ index 32a61c913..76b7e4257 100644
 +        }
 +        // Mili end
          final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
-             TickRegionScheduler.getCurrentRegion();
-@@ -242,6 +252,11 @@ public static boolean isTickThreadFor(final Entity entity) {
+@@ -242,6 +252,11 @@ public class TickThread extends Thread {
          if (entity == null) {
              return true;
          }
@@ -49,6 +39,5 @@ index 32a61c913..76b7e4257 100644
 +        }
 +        // Mili end
          final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
-             TickRegionScheduler.getCurrentRegion();
 --
 2.55.0.windows.3
