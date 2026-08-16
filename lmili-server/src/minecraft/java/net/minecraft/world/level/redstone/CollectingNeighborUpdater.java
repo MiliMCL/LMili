@@ -22,6 +22,9 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
     private final List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
     private int count = 0;
     private @Nullable Consumer<BlockPos> debugListener;
+    // Mili start - 保护并行 chunk tick 下的邻居更新处理（虚拟线程共享同一个 RegionizedWorldData）
+    private final Object lock = new Object();
+    // Mili end
 
     public CollectingNeighborUpdater(final Level level, final int maxChainedNeighborUpdates) {
         this.level = level;
@@ -71,6 +74,12 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
             ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, pos, "Adding block without owning region"); // Folia - region threading
         }
         // Mili end
+        synchronized (this.lock) {
+            this.addAndRunLocked(pos, update);
+        }
+    }
+
+    private void addAndRunLocked(final BlockPos pos, final CollectingNeighborUpdater.NeighborUpdates update) {
         boolean runningAlready = this.count > 0;
         boolean tooManyUpdates = this.maxChainedNeighborUpdates >= 0 && this.count >= this.maxChainedNeighborUpdates;
         this.count++;
