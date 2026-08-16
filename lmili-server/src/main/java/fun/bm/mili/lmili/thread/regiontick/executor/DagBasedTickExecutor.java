@@ -16,36 +16,71 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.function.BiConsumer;
 
+/**
+ * DAG-based tick executor —— 基于冲突检测的并行 tick 调度。
+ *
+ * <p>核心设计：
+ * <ul>
+ *   <li>系统被定义为 {@link SystemProfile}，声明其读写的资源类型。</li>
+ *   <li>每 tick 根据系统间的资源冲突关系构建 DAG（有向无环图），确定执行顺序。</li>
+ *   <li>无冲突的系统可以并行执行（通过 ForkJoinPool）。</li>
+ *   <li>DAG 结构在系统列表不变时可缓存复用。</li>
+ * </ul>
+ *
+ * <h3>线程安全</h3>
+ * <p>本类方法设计为只在 Folia region tick 线程上调用。系统注册/注销通过 {@link #registerSystem} /
+ * {@link #unregisterSystem} 操作，需在 server 启动阶段完成（非热路径）。
+ */
 public final class DagBasedTickExecutor implements RegionTickExecutor {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    // Mili start - fix: Shared long-lived ForkJoinPool to avoid creating/destroying
-    // a new pool on every tick (which wastes threads and causes thread churn).
+    // 共享的 ForkJoinPool —— 长生命周期，覆盖整个 server 运行周期。
     private static final ForkJoinPool SHARED_DAG_POOL = new ForkJoinPool(
             Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
             ForkJoinPool.defaultForkJoinWorkerThreadFactory,
             (t, e) -> LOGGER.error("[DagBasedTickExecutor] Uncaught exception in worker", e),
             true // asyncMode for better throughput with independent tasks
     );
-    // Mili end
 
     private final FoliaTickExecutor foliaExecutor = new FoliaTickExecutor();
-    private final Map<String, BiConsumer<SystemProfile, Scope>> systemExecutors = new ConcurrentHashMap<>();
+
+    // 系统执行器注册表 —— 启动后基本不变，tick 期间只读
+    private final Map<String, RegisteredSystem> registeredSystems = new LinkedHashMap<>();
+
+    // DAG 缓存
     private volatile RegionDag cachedDag;
+    private volatile DagCacheKey cacheKey;
     private volatile long dagBuildNanos;
 
-    // Mili start - 复用 RegionDagExecutor 实例，避免每 tick 创建新对象
-    // RegionDagExecutor 本身无状态（状态都在调用时传入），可安全复用
-    private final RegionDagExecutor reusableDagExecutor = new RegionDagExecutor(
-            Math.max(2, Runtime.getRuntime().availableProcessors() / 2), SHARED_DAG_POOL);
-    // Mili end
+    /**
+     * 注册的系统信息。
+     */
+    private record RegisteredSystem(String name, SystemProfile profile, Scope scope,
+                                     BiConsumer<SystemProfile, Scope> executor) {}
 
-    // Mili start - fix: Use content-based cache key instead of reference equality (==)
-    // The old implementation used == to compare pairs list, which means a new ArrayList
-    // with the same content would invalidate the cache every tick.
-    private volatile long cachedVersion = -1;
-    // Mili end
+    /**
+     * DAG 缓存键 —— 基于系统名称排序后的列表。如果系统集合不变，DAG 结构不变。
+     */
+    private record DagCacheKey(String[] systemNames) {
+        static DagCacheKey from(Map<String, RegisteredSystem> systems) {
+            String[] names = systems.keySet().toArray(new String[0]);
+            Arrays.sort(names);
+            return new DagCacheKey(names);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof DagCacheKey that)) return false;
+            return Arrays.equals(systemNames, that.systemNames);
+        }
+
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(systemNames);
+        }
+    }
 
     public void registerSystem(@NotNull final String name,
                                 @NotNull final SystemProfile profile,
@@ -56,17 +91,18 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(executor, "executor");
 
-        systemExecutors.put(name, executor);
+        registeredSystems.put(name, new RegisteredSystem(name, profile, scope, executor));
+        // 清空缓存 —— 系统集合变化后 DAG 需重建
         this.cachedDag = null;
-        this.cachedVersion = -1;
-        LOGGER.debug("[DagBasedTickExecutor] Registered system '{}' (resource reads={}, writes={})",
-                name, profile.readBits().length, profile.writeBits().length);
+        this.cacheKey = null;
+        LOGGER.info("[DagBasedTickExecutor] Registered system '{}' (systems={})", name, registeredSystems.size());
     }
 
     public void unregisterSystem(@NotNull final String name) {
-        if (systemExecutors.remove(name) != null) {
+        if (registeredSystems.remove(name) != null) {
             this.cachedDag = null;
-            this.cachedVersion = -1;
+            this.cacheKey = null;
+            LOGGER.info("[DagBasedTickExecutor] Unregistered system '{}' (systems={})", name, registeredSystems.size());
         }
     }
 
@@ -74,86 +110,96 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
     public void executeSlice(@NotNull final RegionTickWorker worker,
                               @NotNull final RegionTickSlice slice,
                               @NotNull final RegionTickContext context) {
-        foliaExecutor.executeSlice(worker, slice, context);
+        // 当注册的系统 > 0 时走 DAG 路径，否则回退到 FoliaTickExecutor
+        if (registeredSystems.isEmpty()) {
+            foliaExecutor.executeSlice(worker, slice, context);
+            return;
+        }
+        executeSystemsInternal(context.regionId, context, null, null);
     }
 
     /**
-     * 使用给定的 level-aware executors 执行系统 DAG。
-     *
-     * <p>与 {@link #executeSystems(long, RegionTickContext, List)} 不同，此方法接受一个
-     * {@code Map<systemName, executor>} 用于本次 tick 的实际执行逻辑。
-     * 这允许调用者在每次 tick 传入基于当前 level 状态的闭包。
-     *
-     * @param regionId       区域 ID
-     * @param context        tick 上下文
-     * @param systemScopePairs 系统-Scope 对列表
-     * @param level          当前 ServerLevel
-     * @param executors      系统名称到执行器的映射（接收 Scope + ServerLevel）
+     * 执行系统 DAG（无 level-aware executors 的简单路径）。
+     * 只在 region tick 线程上调用。
+     */
+    public void executeSystems(final long regionId,
+                                @NotNull final RegionTickContext context,
+                                @NotNull final List<Map.Entry<SystemProfile, Scope>> systemScopePairs) {
+        executeSystemsInternal(regionId, context, null, null);
+    }
+
+    /**
+     * 执行系统 DAG（level-aware executors 路径）。
+     * 只在 region tick 线程上调用。
      */
     public void executeSystems(final long regionId,
                                 @NotNull final RegionTickContext context,
                                 @NotNull final List<Map.Entry<SystemProfile, Scope>> systemScopePairs,
                                 @NotNull final ServerLevel level,
                                 @NotNull final Map<String, BiConsumer<Scope, ServerLevel>> executors) {
-        if (systemScopePairs.isEmpty()) return;
+        executeSystemsInternal(regionId, context, level, executors);
+    }
 
-        RegionDag dag = getOrBuildDag(regionId, systemScopePairs);
+    /**
+     * DAG 执行主逻辑。
+     *
+     * <p>核心改进：
+     * <ol>
+     *   <li>使用构建时一次性注册所有执行器，tick 期间不变。</li>
+     *   <li>DAG 结构基于系统名称集合缓存，只在系统注册/注销时重建。</li>
+     *   <li>每个 RegionDagExecutor 实例为局部变量，不跨 tick 共用。</li>
+     * </ol>
+     */
+    private void executeSystemsInternal(final long regionId,
+                                         @NotNull final RegionTickContext context,
+                                         @Nullable final ServerLevel level,
+                                         @Nullable final Map<String, BiConsumer<Scope, ServerLevel>> levelExecutors) {
+        // 构建当前 tick 的系统-scope 列表
+        List<Map.Entry<SystemProfile, Scope>> pairs = new ArrayList<>(registeredSystems.size());
+        for (RegisteredSystem rs : registeredSystems.values()) {
+            pairs.add(Map.entry(rs.profile, rs.scope));
+        }
+        if (pairs.isEmpty()) return;
+
+        // 构建或获取缓存的 DAG
+        RegionDag dag = getOrBuildDag(regionId, pairs);
         if (dag == null) return;
 
-        // Mili start - 复用 reusableDagExecutor，仅为本次 tick 注册 executors
-        for (Map.Entry<SystemProfile, Scope> entry : systemScopePairs) {
-            final SystemProfile profile = entry.getKey();
-            final Scope scope = entry.getValue();
-            final BiConsumer<Scope, ServerLevel> sysExec = executors.get(profile.name());
-            reusableDagExecutor.registerSystemExecutor(profile.name(), (node, ctx) -> {
-                if (sysExec != null) sysExec.accept(scope, level);
-            });
+        // 为本次 tick 构建节点级别的执行器映射
+        Map<String, BiConsumer<DagNode, RegionTickContext>> tickExecutors = new HashMap<>(pairs.size());
+        for (RegisteredSystem rs : registeredSystems.values()) {
+            if (level != null && levelExecutors != null) {
+                BiConsumer<Scope, ServerLevel> sysExec = levelExecutors.get(rs.name);
+                if (sysExec != null) {
+                    Scope scope = rs.scope;
+                    tickExecutors.put(rs.name, (node, ctx) -> sysExec.accept(scope, level));
+                    continue;
+                }
+            }
+            // 回退到注册时的 executor
+            tickExecutors.put(rs.name, (node, ctx) -> rs.executor.accept(node.profile(), node.scope()));
         }
 
+        // 创建本次 tick 专用的 executor 并执行
+        RegionDagExecutor tickExecutor = new RegionDagExecutor(
+                Math.max(2, Runtime.getRuntime().availableProcessors() / 2), SHARED_DAG_POOL);
+        tickExecutor.registerAll(tickExecutors);
+
         try {
-            reusableDagExecutor.executeDag(dag, context);
+            tickExecutor.executeDag(dag, context);
         } catch (Throwable throwable) {
             LOGGER.error("[DagBasedTickExecutor] DAG execution failed for region #{}", regionId, throwable);
         }
-        // Mili end
     }
 
-    public void executeSystems(final long regionId,
-                                @NotNull final RegionTickContext context,
-                                @NotNull final List<Map.Entry<SystemProfile, Scope>> systemScopePairs) {
-        if (systemScopePairs.isEmpty()) return;
-
-        RegionDag dag = getOrBuildDag(regionId, systemScopePairs);
-        if (dag == null) return;
-
-        // Mili start - 复用 reusableDagExecutor
-        for (Map.Entry<SystemProfile, Scope> entry : systemScopePairs) {
-            final SystemProfile profile = entry.getKey();
-            final Scope scope = entry.getValue();
-            reusableDagExecutor.registerSystemExecutor(profile.name(), (node, ctx) -> {
-                BiConsumer<SystemProfile, Scope> sysExec = systemExecutors.get(node.profile().name());
-                if (sysExec != null) sysExec.accept(profile, scope);
-            });
-        }
-
-        try {
-            reusableDagExecutor.executeDag(dag, context);
-        } catch (Throwable throwable) {
-            LOGGER.error("[DagBasedTickExecutor] DAG execution failed for region #{}", regionId, throwable);
-        }
-        // Mili end
-    }
-
-    private RegionDag getOrBuildDag(final long regionId, final List<Map.Entry<SystemProfile, Scope>> pairs) {
-        // Mili start - fix: content-based cache - compute a simple hash of the pairs
-        long version = computeVersion(pairs);
-        if (this.cachedDag != null && this.cachedVersion == version) return this.cachedDag;
-        // Mili end
+    private RegionDag getOrBuildDag(final long regionId, List<Map.Entry<SystemProfile, Scope>> pairs) {
+        DagCacheKey newKey = DagCacheKey.from(registeredSystems);
+        if (this.cachedDag != null && newKey.equals(this.cacheKey)) return this.cachedDag;
 
         long start = System.nanoTime();
         try {
             this.cachedDag = RegionDag.build(regionId, pairs);
-            this.cachedVersion = version;
+            this.cacheKey = newKey;
             this.dagBuildNanos = System.nanoTime() - start;
             return this.cachedDag;
         } catch (Throwable throwable) {
@@ -162,23 +208,13 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
         }
     }
 
-    // Mili start - Compute a content-based version hash for the system-scope pairs list.
-    // Uses name hashCode + scope identity hash to detect content changes.
-    // The previous identityHashCode alone could cause collisions; combining with name hashCode
-    // provides better distribution while remaining O(n).
-    private static long computeVersion(List<Map.Entry<SystemProfile, Scope>> pairs) {
-        long hash = 0;
-        for (Map.Entry<SystemProfile, Scope> entry : pairs) {
-            // Mix name-based hash with scope identity for better distribution
-            long nameHash = entry.getKey().name().hashCode() & 0xFFFFFFFFL;
-            long scopeHash = System.identityHashCode(entry.getValue()) & 0xFFFFFFFFL;
-            hash = hash * 31L + (nameHash ^ (scopeHash << 1));
-        }
-        return hash;
+    @SuppressWarnings("unused")
+    private RegionDag getOrBuildDagFromPairs(final long regionId, final List<Map.Entry<SystemProfile, Scope>> pairs) {
+        // 保留用于可能需要的外部调用
+        return getOrBuildDag(regionId, pairs);
     }
-    // Mili end
 
-    public int getSystemCount() { return systemExecutors.size(); }
+    public int getSystemCount() { return registeredSystems.size(); }
     public long getDagBuildNanos() { return this.dagBuildNanos; }
     public RegionDag getCachedDag() { return this.cachedDag; }
 }

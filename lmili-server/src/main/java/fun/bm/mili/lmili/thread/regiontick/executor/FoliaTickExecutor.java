@@ -10,9 +10,21 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
+/**
+ * Folia 兼容的 tick 执行器 —— 在 region tick 线程上直接执行 chunk tick。
+ *
+ * <p>核心设计：
+ * <ul>
+ *   <li>所有 tick 操作在 Folia region tick 线程上同步完成，确保 watchdog 安全。</li>
+ *   <li>chunk 访问通过 {@link AsyncChunkAccessor} 安全处理跨线程访问。</li>
+ *   <li>每个 chunk tick 单独捕获异常，避免一个 chunk 失败影响同 slice 其他 chunk。</li>
+ * </ul>
+ */
 public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiontick.RegionTickExecutor {
 
     private static final Logger LOGGER = LogUtils.getLogger();
+    private static final long SLOW_CHUNK_TICK_MS = 10;
+
     private volatile int tickSpeed;
 
     public FoliaTickExecutor() { this.tickSpeed = 3; }
@@ -33,15 +45,34 @@ public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiont
         }
 
         int tickSpeed = this.tickSpeed;
+        long slowChunkCount = 0;
+
         for (int i = 0; i < sliceSize; i++) {
-            LevelChunk chunk = AsyncChunkAccessor.getLoadedChunk(level, slice.getChunkPos(i));
+            long chunkPos = slice.getChunkPos(i);
+            LevelChunk chunk = AsyncChunkAccessor.getLoadedChunk(level, chunkPos);
             if (chunk == null) continue;
+
+            long startNanos = System.nanoTime();
             try {
                 level.tickChunk(chunk, tickSpeed);
             } catch (Throwable throwable) {
                 LOGGER.error("[FoliaTickExecutor] Failed to tick chunk {} in region #{}",
                         chunk.getPos(), context.regionId, throwable);
+            } finally {
+                long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
+                if (elapsedMs > SLOW_CHUNK_TICK_MS) {
+                    slowChunkCount++;
+                    if (slowChunkCount <= 3) {
+                        LOGGER.warn("[FoliaTickExecutor] Slow chunk tick: {} took {}ms in region #{}",
+                                chunk.getPos(), elapsedMs, context.regionId);
+                    }
+                }
             }
+        }
+
+        if (slowChunkCount > 3) {
+            LOGGER.warn("[FoliaTickExecutor] Total {} slow chunks in region #{} (slice size={})",
+                    slowChunkCount, context.regionId, sliceSize);
         }
     }
 

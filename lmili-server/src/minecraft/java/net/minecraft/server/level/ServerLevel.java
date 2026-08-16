@@ -1132,7 +1132,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                     fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
             if (dispatcher != null) {
                 profiler.push("miliDagTick");
-                dispatcher.dispatchDagTick(region.id, context, this, regionizedWorldData);
+                dispatcher.dispatchEntityTick(region.id, context, this, regionizedWorldData);
                 profiler.pop();
                 dagResult = true;
             } else {
