@@ -11,32 +11,29 @@ This patch makes isTickThread() and all isTickThreadFor() overloads return
 true when RegionDataThreadLocal is set (i.e., the virtual thread is operating
 within a valid region context). This eliminates the need to patch every
 individual ensureTickThread call site.
-
-With this patch, all existing ensureTickThread/isTickThreadFor checks across
-the codebase automatically pass for virtual threads in the region tick context.
 ---
- .../common/util/TickThread.java                    | 24 ++++++++++++++++++++--
- .../threadedregions/TickRegionScheduler.java       |  6 ++++++
- 2 files changed, 30 insertions(+), 2 deletions(-)
+ src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
 
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
-index abcdef1..1234567 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
-@@ -145,7 +145,12 @@ public class TickThread extends Thread {
+@@ -142,9 +142,14 @@ public class TickThread extends Thread {
+         return (TickThread)Thread.currentThread();
+     }
 
      public static boolean isTickThread() {
--        return Thread.currentThread() instanceof TickThread;
 +        // Mili start - virtual threads with region context are considered tick threads
-+        if (Thread.currentThread() instanceof TickThread) {
++        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() != null) {
 +            return true;
 +        }
-+        return fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() != null;
 +        // Mili end
+         return Thread.currentThread() instanceof TickThread;
      }
 
      public static boolean isShutdownThread() {
-@@ -173,6 +178,11 @@ public class TickThread extends Thread {
+         return Thread.currentThread().getClass() == RegionShutdownThread.class;
+@@ -175,6 +180,11 @@ public class TickThread extends Thread {
 
      public static boolean isTickThreadFor(final Level world, final int chunkX, final int chunkZ) {
 +        // Mili start - virtual threads with region context are considered tick threads for their region
@@ -47,7 +44,7 @@ index abcdef1..1234567 100644
          final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
              TickRegionScheduler.getCurrentRegion();
          if (region == null) {
-@@ -245,6 +255,11 @@ public class TickThread extends Thread {
+@@ -248,6 +258,11 @@ public class TickThread extends Thread {
          if (entity == null) {
              return true;
          }
@@ -61,21 +58,3 @@ index abcdef1..1234567 100644
          if (region == null) {
 --
 2.55.0.windows.3
-
-diff --git a/src/main/java/io/papermc/paper/threadedregions/TickRegionScheduler.java b/src/main/java/io/papermc/paper/threadedregions/TickRegionScheduler.java
-index abcdef1..1234567 100644
---- a/src/main/java/io/papermc/paper/threadedregions/TickRegionScheduler.java
-+++ b/src/main/java/io/papermc/paper/threadedregions/TickRegionScheduler.java
-@@ -204,6 +204,12 @@ public final class TickRegionScheduler {
-     public static RegionizedWorldData getCurrentRegionizedWorldData() {
-         final Thread currThread = Thread.currentThread();
-         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
-+            // Mili start - fallback for virtual threads in RegionTickPool
-+            final io.papermc.paper.threadedregions.RegionizedWorldData miliFallback = fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent();
-+            if (miliFallback != null) {
-+                return miliFallback;
-+            }
-+            // Mili end
-             return RegionShutdownThread.getWorldData();
-         }
-         return tickThreadRunner.currentTickingWorldRegionizedData;
