@@ -16,7 +16,7 @@ individual ensureTickThread call site.
  1 file changed, 19 insertions(+)
 
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
-index 11efb43a8..76b7e425 100644
+index 32a61c913..76b7e4257 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
 @@ -145,6 +145,11 @@ public static TickThread getCurrentTickThread() {
