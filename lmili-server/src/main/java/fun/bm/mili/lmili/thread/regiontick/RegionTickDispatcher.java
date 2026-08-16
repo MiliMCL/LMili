@@ -224,12 +224,37 @@ public final class RegionTickDispatcher {
     /**
      * Virtual Thread 并行模式 —— 将 chunks 拆分为多个 slice，
      * 每个 slice 作为一个 virtual thread 并行执行，使用 CountDownLatch 等待全部完成。
+     *
+     * <p>兼容性说明：Folia 通过 {@code TickThreadRunner.currentTickingWorldRegionizedData} 跟踪 region data，
+     * 虚拟线程不在该体系中。本方法通过 {@link RegionDataThreadLocal} 将当前 region data 传播到每个虚拟线程，
+     * 确保 chunk tick 内的 {@code getCurrentWorldData()} / {@code getLocalPlayers()} 等调用不返回 null。
      */
     private void dispatchParallelVirtual(@NotNull final RegionTickContext context, final long[] chunkArray) {
         int total = chunkArray.length;
         int sliceCount = Math.max(1, (total + sliceSize - 1) / sliceSize);
         CountDownLatch latch = new CountDownLatch(sliceCount);
         AtomicBoolean hasError = new AtomicBoolean(false);
+
+        // Mili start: 捕获当前 region 的 RegionizedWorldData，传递给每个虚拟线程
+        io.papermc.paper.threadedregions.RegionizedWorldData currentRegionData = null;
+        try {
+            net.minecraft.world.level.Level world = context.region.getData().world;
+            if (world instanceof net.minecraft.server.level.ServerLevel) {
+                currentRegionData = world.getCurrentWorldData();
+            }
+        } catch (Exception e) {
+            LOGGER.warn("[RegionTickPool] Failed to capture region data for virtual dispatch", e);
+        }
+        final io.papermc.paper.threadedregions.RegionizedWorldData regionData = currentRegionData;
+
+        if (regionData == null) {
+            // 无法获取 region data 时回退到单线程执行
+            LOGGER.warn("[RegionTickPool] No region data for virtual dispatch in region #{} — falling back to single-slice",
+                    context.regionId);
+            dispatchSingleSlice(context, chunkArray);
+            return;
+        }
+        // Mili end
 
         for (int i = 0; i < sliceCount; i++) {
             int from = i * sliceSize;
@@ -239,6 +264,8 @@ public final class RegionTickDispatcher {
             final int sliceIndex = i;
 
             workerPool.submit(() -> {
+                // Mili start: 在虚拟线程中设置 region data 回退
+                RegionDataThreadLocal.setCurrent(regionData);
                 try {
                     RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
                     if (executor != null) {
@@ -249,8 +276,10 @@ public final class RegionTickDispatcher {
                     LOGGER.error("[RegionTickPool] Virtual slice #{} failed for region #{}",
                             sliceIndex, context.regionId, throwable);
                 } finally {
+                    RegionDataThreadLocal.clear();
                     latch.countDown();
                 }
+                // Mili end
             });
         }
 

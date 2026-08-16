@@ -829,6 +829,12 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
     public io.papermc.paper.threadedregions.RegionizedWorldData getCurrentWorldData() {
         final io.papermc.paper.threadedregions.RegionizedWorldData ret = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
         if (ret == null) {
+            // Mili start - fallback for virtual threads in RegionTickPool
+            final io.papermc.paper.threadedregions.RegionizedWorldData fallback = fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent();
+            if (fallback != null) {
+                return fallback;
+            }
+            // Mili end
             return ret;
         }
         Level world = ret.world;
