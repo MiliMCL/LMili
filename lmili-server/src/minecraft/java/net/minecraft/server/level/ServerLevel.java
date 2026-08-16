@@ -1293,43 +1293,58 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         final io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource simpleRandom = this.simpleRandom; // Folia - region threading
         final boolean doubleTickFluids = !ca.spottedleaf.moonrise.common.PlatformHooks.get().configFixMC224294();
 
-        final ChunkPos cpos = chunk.getPos();
-        final int offsetX = cpos.x() << 4;
-        final int offsetZ = cpos.z() << 4;
+        // Mili start - disable async catcher for virtual threads with region context
+        final boolean miliAsyncCatcher = fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled;
+        if (!miliAsyncCatcher && fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() != null) {
+            fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = true;
+        }
+        // Mili end
 
-        for (int sectionIndex = 0, sectionsLen = sections.length; sectionIndex < sectionsLen; sectionIndex++) {
-            final int offsetY = (sectionIndex + minSection) << 4;
-            final LevelChunkSection section = sections[sectionIndex];
-            final net.minecraft.world.level.chunk.PalettedContainer<net.minecraft.world.level.block.state.BlockState> states = section.getStates();
-            if (!section.isRandomlyTickingBlocks()) {
-                continue;
-            }
+        try {
+            final ChunkPos cpos = chunk.getPos();
+            final int offsetX = cpos.x() << 4;
+            final int offsetZ = cpos.z() << 4;
 
-            final ca.spottedleaf.moonrise.common.list.ShortList tickList = ((ca.spottedleaf.moonrise.patches.block_counting.BlockCountingChunkSection)section).moonrise$getTickingBlockList();
-
-            for (int i = 0; i < tickSpeed; ++i) {
-                final int tickingBlocks = tickList.size();
-                final int index = simpleRandom.nextInt() & ((16 * 16 * 16) - 1);
-
-                if (index >= tickingBlocks) {
-                    // most of the time we fall here
+            for (int sectionIndex = 0, sectionsLen = sections.length; sectionIndex < sectionsLen; sectionIndex++) {
+                final int offsetY = (sectionIndex + minSection) << 4;
+                final LevelChunkSection section = sections[sectionIndex];
+                final net.minecraft.world.level.chunk.PalettedContainer<net.minecraft.world.level.block.state.BlockState> states = section.getStates();
+                if (!section.isRandomlyTickingBlocks()) {
                     continue;
                 }
 
-                final int location = (int)tickList.getRaw(index) & 0xFFFF;
-                final BlockState state = states.get(location);
+                final ca.spottedleaf.moonrise.common.list.ShortList tickList = ((ca.spottedleaf.moonrise.patches.block_counting.BlockCountingChunkSection)section).moonrise$getTickingBlockList();
 
-                // do not use a mutable pos, as some random tick implementations store the input without calling immutable()!
-                final BlockPos pos = new BlockPos((location & 15) | offsetX, ((location >>> (4 + 4)) & 15) | offsetY, ((location >>> 4) & 15) | offsetZ);
+                for (int i = 0; i < tickSpeed; ++i) {
+                    final int tickingBlocks = tickList.size();
+                    final int index = simpleRandom.nextInt() & ((16 * 16 * 16) - 1);
 
-                state.randomTick((ServerLevel)(Object)this, pos, simpleRandom);
-                if (doubleTickFluids) {
-                    final FluidState fluidState = state.getFluidState();
-                    if (fluidState.isRandomlyTicking()) {
-                        fluidState.randomTick((ServerLevel)(Object)this, pos, simpleRandom);
+                    if (index >= tickingBlocks) {
+                        // most of the time we fall here
+                        continue;
+                    }
+
+                    final int location = (int)tickList.getRaw(index) & 0xFFFF;
+                    final BlockState state = states.get(location);
+
+                    // do not use a mutable pos, as some random tick implementations store the input without calling immutable()!
+                    final BlockPos pos = new BlockPos((location & 15) | offsetX, ((location >>> (4 + 4)) & 15) | offsetY, ((location >>> 4) & 15) | offsetZ);
+
+                    state.randomTick((ServerLevel)(Object)this, pos, simpleRandom);
+                    if (doubleTickFluids) {
+                        final FluidState fluidState = state.getFluidState();
+                        if (fluidState.isRandomlyTicking()) {
+                            fluidState.randomTick((ServerLevel)(Object)this, pos, simpleRandom);
+                        }
                     }
                 }
             }
+        } finally {
+            // Mili start - restore async catcher config
+            if (!miliAsyncCatcher && fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() != null) {
+                fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = false;
+            }
+            // Mili end
         }
 
         return;
