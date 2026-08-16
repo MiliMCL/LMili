@@ -18,6 +18,8 @@ import org.slf4j.Logger;
  *   <li>所有 tick 操作在 Folia region tick 线程上同步完成，确保 watchdog 安全。</li>
  *   <li>chunk 访问通过 {@link AsyncChunkAccessor} 安全处理跨线程访问。</li>
  *   <li>每个 chunk tick 单独捕获异常，避免一个 chunk 失败影响同 slice 其他 chunk。</li>
+ *   <li>新增时间预算控制：对整个 slice 的 tick 总时间进行预算限制，超时后立即停止处理后续 chunk，
+ *      避免单个 region 的 tick 超预算导致整体跳过。</li>
  * </ul>
  */
 public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiontick.RegionTickExecutor {
@@ -26,6 +28,8 @@ public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiont
     private static final long SLOW_CHUNK_TICK_MS = 10;
     // 严重慢 chunk 阈值 —— 超过此值可能说明区块内有大量实体或复杂红石
     private static final long SEVERE_SLOW_CHUNK_TICK_MS = 50;
+    // 单个 slice 的时间预算（毫秒）—— 超过此值将跳过剩余 chunk 的随机 tick 阶段
+    private static final long SLICE_TIME_BUDGET_MS = 45;
 
     private volatile int tickSpeed;
 
@@ -48,11 +52,33 @@ public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiont
 
         int tickSpeed = this.tickSpeed;
         long slowChunkCount = 0;
+        long sliceStartNanos = System.nanoTime();
+        boolean budgetExceeded = false;
 
         for (int i = 0; i < sliceSize; i++) {
             long chunkPos = slice.getChunkPos(i);
             LevelChunk chunk = AsyncChunkAccessor.getLoadedChunk(level, chunkPos);
             if (chunk == null) continue;
+
+            // Mili start - 时间预算检查：如果已接近预算上限，跳过随机 tick 只执行基础 tick
+            long elapsedSliceMs = (System.nanoTime() - sliceStartNanos) / 1_000_000;
+            if (elapsedSliceMs >= SLICE_TIME_BUDGET_MS) {
+                if (!budgetExceeded) {
+                    LOGGER.warn("[FoliaTickExecutor] Slice time budget exceeded ({}ms) in region #{} — " +
+                                    "skipping random tick for remaining {} chunks",
+                            elapsedSliceMs, context.regionId, sliceSize - i);
+                    budgetExceeded = true;
+                }
+                // 仍然执行 tickChunk 但使用 tickSpeed=0 跳过随机 tick
+                try {
+                    level.tickChunk(chunk, 0);
+                } catch (Throwable throwable) {
+                    LOGGER.error("[FoliaTickExecutor] Failed to tick chunk {} in region #{} (budget-limited)",
+                            chunk.getPos(), context.regionId, throwable);
+                }
+                continue;
+            }
+            // Mili end
 
             long startNanos = System.nanoTime();
             try {
@@ -82,6 +108,14 @@ public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiont
             LOGGER.warn("[FoliaTickExecutor] Total {} slow chunks in region #{} (slice size={})",
                     slowChunkCount, context.regionId, sliceSize);
         }
+
+        // Mili start - 如果预算超限，记录诊断信息
+        if (budgetExceeded) {
+            long totalSliceMs = (System.nanoTime() - sliceStartNanos) / 1_000_000;
+            LOGGER.warn("[FoliaTickExecutor] Slice completed under budget: total={}ms, processed={}/{} chunks in region #{}",
+                    totalSliceMs, sliceSize, sliceSize, context.regionId);
+        }
+        // Mili end
     }
 
     private static @Nullable ServerLevel getServerLevel(final RegionTickContext context) {

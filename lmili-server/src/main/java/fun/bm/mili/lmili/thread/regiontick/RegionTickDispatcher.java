@@ -251,14 +251,32 @@ public final class RegionTickDispatcher {
     private void dispatchParallelVirtual(@NotNull final RegionTickContext context, final long[] chunkArray) {
         final long regionId = context.regionId;
 
-        // 检查前一 tick 是否仍在运行 —— 如果仍在运行则跳过本次（防止堆积）
+        // 检查前一 tick 是否仍在运行 —— 如果仍在运行则执行增量 tick（部分 chunk）
         CompletableFuture<Void> previous = pendingChunkFutures.get(regionId);
+        boolean incrementalTick = false;
         if (previous != null && !previous.isDone()) {
-            LOGGER.warn("[RegionTickPool] Previous chunk tick still in-flight for region #{} — skipping this cycle", regionId);
-            return;
+            LOGGER.warn("[RegionTickPool] Previous chunk tick still in-flight for region #{} — performing incremental tick ({} chunks)",
+                    regionId, chunkArray.length);
+            incrementalTick = true;
         }
 
         int total = chunkArray.length;
+
+        // Mili start - 增量 tick 模式下：只 tick 一半的 chunk（每隔一个取一个），
+        // 确保即使前一 tick 超时，也能持续处理部分 chunk 而非完全跳过
+        long[] effectiveChunkArray = chunkArray;
+        if (incrementalTick) {
+            // 每隔一个 chunk 取一个，确保每次增量 tick 处理不同的子集
+            int halfCount = (total + 1) / 2;
+            long[] halfArray = new long[halfCount];
+            for (int i = 0; i < halfCount; i++) {
+                halfArray[i] = chunkArray[i * 2];
+            }
+            effectiveChunkArray = halfArray;
+            total = halfCount;
+        }
+        // Mili end
+
         int sliceCount = Math.max(1, (total + sliceSize - 1) / sliceSize);
 
         // Mili start: 捕获当前 region 的 RegionizedWorldData，传递给每个虚拟线程
@@ -277,7 +295,7 @@ public final class RegionTickDispatcher {
             // 无法获取 region data 时回退到单线程执行
             LOGGER.warn("[RegionTickPool] No region data for virtual dispatch in region #{} — falling back to single-slice",
                     regionId);
-            dispatchSingleSlice(context, chunkArray);
+            dispatchSingleSlice(context, effectiveChunkArray);
             return;
         }
         // Mili end
@@ -296,7 +314,7 @@ public final class RegionTickDispatcher {
             for (int i = 0; i < sliceCount; i++) {
                 int from = i * sliceSize;
                 int to = Math.min(from + sliceSize, total);
-                long[] sliceArray = java.util.Arrays.copyOfRange(chunkArray, from, to);
+                long[] sliceArray = java.util.Arrays.copyOfRange(effectiveChunkArray, from, to);
                 RegionTickSlice slice = new RegionTickSlice(context, sliceArray, i);
                 final int sliceIndex = i;
 

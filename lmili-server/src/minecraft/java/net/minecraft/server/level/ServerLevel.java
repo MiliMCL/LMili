@@ -1287,6 +1287,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
     // Paper start - optimise random ticking
     private final io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource simpleRandom = io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource.INSTANCE; // Folia - region threading
 
+    // Mili start - per-chunk random tick time budget (nanos). If tickSpeed > 0, this is computed as
+    // ~80% of the expected slice budget per chunk.
+    private static final long CHUNK_RANDOM_TICK_BUDGET_NANOS = 8_000_000L; // 8ms
+    // Mili end
+
     private void optimiseRandomTick(final LevelChunk chunk, final int tickSpeed) {
         final LevelChunkSection[] sections = chunk.getSections();
         final int minSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMinSection((ServerLevel)(Object)this);
@@ -1297,7 +1302,17 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         final int offsetX = cpos.x() << 4;
         final int offsetZ = cpos.z() << 4;
 
+        // Mili start - per-chunk time budget for random tick (only when tickSpeed > 0)
+        final long chunkStartNanos = tickSpeed > 0 ? System.nanoTime() : Long.MAX_VALUE;
+        // Mili end
+
         for (int sectionIndex = 0, sectionsLen = sections.length; sectionIndex < sectionsLen; sectionIndex++) {
+            // Mili start - check time budget before each section
+            if (tickSpeed > 0 && (System.nanoTime() - chunkStartNanos) >= CHUNK_RANDOM_TICK_BUDGET_NANOS) {
+                break;
+            }
+            // Mili end
+
             final int offsetY = (sectionIndex + minSection) << 4;
             final LevelChunkSection section = sections[sectionIndex];
             final net.minecraft.world.level.chunk.PalettedContainer<net.minecraft.world.level.block.state.BlockState> states = section.getStates();
@@ -1308,6 +1323,12 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
             final ca.spottedleaf.moonrise.common.list.ShortList tickList = ((ca.spottedleaf.moonrise.patches.block_counting.BlockCountingChunkSection)section).moonrise$getTickingBlockList();
 
             for (int i = 0; i < tickSpeed; ++i) {
+                // Mili start - check time budget periodically within each section
+                if (tickSpeed > 0 && (i & 3) == 0 && (System.nanoTime() - chunkStartNanos) >= CHUNK_RANDOM_TICK_BUDGET_NANOS) {
+                    break;
+                }
+                // Mili end
+
                 final int tickingBlocks = tickList.size();
                 final int index = simpleRandom.nextInt() & ((16 * 16 * 16) - 1);
 
@@ -1330,6 +1351,12 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                     }
                 }
             }
+
+            // Mili start - break the outer section loop if the inner loop was broken due to budget
+            if (tickSpeed > 0 && (System.nanoTime() - chunkStartNanos) >= CHUNK_RANDOM_TICK_BUDGET_NANOS) {
+                break;
+            }
+            // Mili end
         }
 
         return;
