@@ -369,7 +369,11 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource, ca.spot
 
     @Override
     public @Nullable BlockState setBlockState(final BlockPos pos, final BlockState state, final @Block.UpdateFlags int flags) {
-        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, pos, "Updating block asynchronously"); // Folia - region threading
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, pos, "Updating block asynchronously"); // Folia - region threading
+        }
+        // Mili end
         int y = pos.getY();
         LevelChunkSection section = this.getSection(this.getSectionIndex(y));
         boolean wasEmpty = section.hasOnlyAir();

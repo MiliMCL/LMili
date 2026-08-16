@@ -66,7 +66,11 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
     }
 
     private void addAndRun(final BlockPos pos, final CollectingNeighborUpdater.NeighborUpdates update) {
-        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, pos, "Adding block without owning region"); // Folia - region threading
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, pos, "Adding block without owning region"); // Folia - region threading
+        }
+        // Mili end
         boolean runningAlready = this.count > 0;
         boolean tooManyUpdates = this.maxChainedNeighborUpdates >= 0 && this.count >= this.maxChainedNeighborUpdates;
         this.count++;
