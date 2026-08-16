@@ -374,7 +374,11 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
         final int x, final int z, final ChunkStatus targetStatus, final boolean loadOrGenerate
     ) {
         // Paper start - rewrite chunk system
-        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, x, z, "Scheduling chunk load off-main");
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, x, z, "Scheduling chunk load off-main");
+        }
+        // Mili end
 
         final int minLevel = ChunkLevel.byStatus(targetStatus);
         final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder chunkHolder = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(x, z);

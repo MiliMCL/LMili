@@ -739,7 +739,11 @@ public final class RegionizedWorldData {
     // Note that we can only ever not own the event data when the chunk unloads, and so I've decided to
     // make the code easier by simply discarding it in such an event
     public void pushBlockEvent(final BlockEventData blockEventData) {
-        TickThread.ensureTickThread(this.world, blockEventData.pos(), "Cannot queue block even data async");
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            TickThread.ensureTickThread(this.world, blockEventData.pos(), "Cannot queue block even data async");
+        }
+        // Mili end
         this.blockEvents.add(blockEventData);
     }
 
@@ -780,7 +784,11 @@ public final class RegionizedWorldData {
 
     // tile entity ticking
     public void addBlockEntityTicker(final TickingBlockEntity ticker) {
-        TickThread.ensureTickThread(this.world, ticker.getPos(), "Tile entity must be owned by current region");
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            TickThread.ensureTickThread(this.world, ticker.getPos(), "Tile entity must be owned by current region");
+        }
+        // Mili end
 
         (this.tickingBlockEntities ? this.pendingBlockEntityTickers : this.blockEntityTickers).add(ticker);
     }

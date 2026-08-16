@@ -1718,7 +1718,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
 
     public void tickNonPassenger(final Entity entity) {
         // Paper start - log detailed entity tick information
-        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread("Cannot tick an entity off-main");
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread("Cannot tick an entity off-main");
+        }
+        // Mili end
         LevelChunk levelChunk = entity.shouldTickHot() ? this.getChunkIfLoaded(entity.moonrise$getSectionX(),entity.moonrise$getSectionZ()) : null; // KioCG
         if (levelChunk != null) levelChunk.getChunkHot().startTicking(); try { // KioCG
         try {

@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Mili <dev@mili.dev>
+From: xucy10 <xucy0609@gmail.com>
 Date: Mon, 16 Aug 2026 00:00:00 +0000
 Subject: [PATCH] Mili: Skip TickThread check for virtual threads
 
