@@ -136,7 +136,11 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
 
     @Override
     public void schedule(final ScheduledTick<T> tick) {
-        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, tick.pos(), "Cannot schedule tick for another region!"); // Folia - region threading
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.world, tick.pos(), "Cannot schedule tick for another region!"); // Folia - region threading
+        }
+        // Mili end
         long chunkKey = ChunkPos.pack(tick.pos());
         LevelChunkTicks<T> tickContainer = this.allContainers.get(chunkKey);
         if (tickContainer == null) {

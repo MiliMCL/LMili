@@ -46,12 +46,20 @@ public final class ServerEntityLookup extends EntityLookup {
 
     @Override
     protected void checkThread(final int chunkX, final int chunkZ, final String reason) {
-        TickThread.ensureTickThread(this.serverWorld, chunkX, chunkZ, reason);
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            TickThread.ensureTickThread(this.serverWorld, chunkX, chunkZ, reason);
+        }
+        // Mili end
     }
 
     @Override
     protected void checkThread(final Entity entity, final String reason) {
-        TickThread.ensureTickThread(entity, reason);
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            TickThread.ensureTickThread(entity, reason);
+        }
+        // Mili end
     }
 
     @Override

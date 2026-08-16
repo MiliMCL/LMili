@@ -1083,7 +1083,11 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
 
     @Override
     public boolean setBlock(final BlockPos pos, final BlockState blockState, final @Block.UpdateFlags int updateFlags, final int updateLimit) {
-        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, pos, "Updating block asynchronously"); // Folia - region threading
+        // Mili start - skip tick thread check for virtual threads with proper region context
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, pos, "Updating block asynchronously"); // Folia - region threading
+        }
+        // Mili end
         final io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.getCurrentWorldData(); // Folia - region threading
         // CraftBukkit start - tree generation
         if (worldData.captureTreeGeneration) { // Folia - region threading
@@ -1851,7 +1855,11 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
 
     @Override
     public List<Entity> getEntities(final @Nullable Entity except, final AABB bb, final Predicate<? super Entity> selector) {
-        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, bb, "Cannot getEntities asynchronously"); // Folia - region threading
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, bb, "Cannot getEntities asynchronously"); // Folia - region threading
+        }
+        // Mili end
         Profiler.get().incrementCounter("getEntities");
         // Paper start - rewrite chunk system
         final List<Entity> ret = new java.util.ArrayList<>();
@@ -1881,7 +1889,11 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
     public <T extends Entity> void getEntities(final EntityTypeTest<Entity, T> entityTypeTest,
                                                final AABB boundingBox, final Predicate<? super T> predicate,
                                                final List<? super T> into, final int maxCount) {
-        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, boundingBox, "Cannot getEntities asynchronously"); // Folia - region threading
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, boundingBox, "Cannot getEntities asynchronously"); // Folia - region threading
+        }
+        // Mili end
         Profiler.get().incrementCounter("getEntities");
 
         if (entityTypeTest instanceof net.minecraft.world.entity.EntityType<T> byType) {
