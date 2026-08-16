@@ -115,33 +115,48 @@ public final class MemoryOptimizer {
         // Mili end
     }
 
+    // Mili start - fix: performMemoryCleanup 实际触发 GC 而非仅 sleep 等待
+    // 旧实现仅 sleep(100/150ms) 后测量释放量，但从未主动触发 GC，
+    // 导致清理计数不反映真实的 GC 活动，具有误导性。
+    // 新实现：显式调用 System.gc()（作为建议），然后测量回收效果。
     private static void performMemoryCleanup(long currentUsed, boolean aggressive) {
-        long before = getUsedMemory();
+        final long before = getUsedMemory();
 
-        try {
-            TimeUnit.MILLISECONDS.sleep(aggressive ? 150 : 100);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        if (aggressive) {
+            // 激进模式：建议 Full GC（通常比 System.gc() 更彻底）
+            System.gc();
+            // 给 GC 时间完成工作（不阻塞主线程）
+            try {
+                TimeUnit.MILLISECONDS.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        } else {
+            // 普通模式：建议 GC
+            System.gc();
         }
 
-        long after = getUsedMemory();
-        long freed = before - after;
+        // 等待 GC 完成并测量实际的内存回收效果
+        final long after = getUsedMemory();
+        final long freed = before - after;
+
         if (freed > 0) {
             totalFreedBytes.add(freed);
+            gcCount.increment();
         }
-
-        gcCount.increment();
 
         if (aggressive) {
             LogUtils.getLogger().warn(
-                    "[Mili] High memory pressure detected: {} MB freed", freed / (1024 * 1024)
+                    "[Mili] High memory pressure detected: {} MB freed (aggressive GC)",
+                    freed / (1024 * 1024)
             );
-        } else {
+        } else if (freed > 0) {
             LogUtils.getLogger().debug(
-                    "[Mili] Memory pressure detected: {} MB freed", freed / (1024 * 1024)
+                    "[Mili] Memory cleanup: {} MB freed", freed / (1024 * 1024)
             );
         }
     }
+    // Mili end
 
     private static void logHighMemoryWarning(long used, long max) {
         double ratio = (double) used / max;

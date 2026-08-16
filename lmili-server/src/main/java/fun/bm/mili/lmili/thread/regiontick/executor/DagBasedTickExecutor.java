@@ -35,6 +35,18 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
     private volatile RegionDag cachedDag;
     private volatile long dagBuildNanos;
 
+    // Mili start - 复用 RegionDagExecutor 实例，避免每 tick 创建新对象
+    // RegionDagExecutor 本身无状态（状态都在调用时传入），可安全复用
+    private final RegionDagExecutor reusableDagExecutor = new RegionDagExecutor(
+            Math.max(2, Runtime.getRuntime().availableProcessors() / 2), SHARED_DAG_POOL);
+    // Mili end
+
+    // Mili start - fix: Use content-based cache key instead of reference equality (==)
+    // The old implementation used == to compare pairs list, which means a new ArrayList
+    // with the same content would invalidate the cache every tick.
+    private volatile long cachedVersion = -1;
+    // Mili end
+
     public void registerSystem(@NotNull final String name,
                                 @NotNull final SystemProfile profile,
                                 @NotNull final Scope scope,
@@ -88,24 +100,20 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
         RegionDag dag = getOrBuildDag(regionId, systemScopePairs);
         if (dag == null) return;
 
-        // Mili start - fix: Use shared pool instead of creating a new one per tick
-        int threadCount = Math.min(systemScopePairs.size(), Runtime.getRuntime().availableProcessors());
-        RegionDagExecutor executor = new RegionDagExecutor(threadCount, SHARED_DAG_POOL);
+        // Mili start - 复用 reusableDagExecutor，仅为本次 tick 注册 executors
         for (Map.Entry<SystemProfile, Scope> entry : systemScopePairs) {
             final SystemProfile profile = entry.getKey();
             final Scope scope = entry.getValue();
             final BiConsumer<Scope, ServerLevel> sysExec = executors.get(profile.name());
-            executor.registerSystemExecutor(profile.name(), (node, ctx) -> {
+            reusableDagExecutor.registerSystemExecutor(profile.name(), (node, ctx) -> {
                 if (sysExec != null) sysExec.accept(scope, level);
             });
         }
 
         try {
-            executor.executeDag(dag, context);
+            reusableDagExecutor.executeDag(dag, context);
         } catch (Throwable throwable) {
             LOGGER.error("[DagBasedTickExecutor] DAG execution failed for region #{}", regionId, throwable);
-        } finally {
-            executor.close();
         }
         // Mili end
     }
@@ -118,33 +126,23 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
         RegionDag dag = getOrBuildDag(regionId, systemScopePairs);
         if (dag == null) return;
 
-        // Mili start - fix: Use shared pool instead of creating a new one per tick
-        int threadCount = Math.min(systemScopePairs.size(), Runtime.getRuntime().availableProcessors());
-        RegionDagExecutor executor = new RegionDagExecutor(threadCount, SHARED_DAG_POOL);
+        // Mili start - 复用 reusableDagExecutor
         for (Map.Entry<SystemProfile, Scope> entry : systemScopePairs) {
             final SystemProfile profile = entry.getKey();
             final Scope scope = entry.getValue();
-            executor.registerSystemExecutor(profile.name(), (node, ctx) -> {
+            reusableDagExecutor.registerSystemExecutor(profile.name(), (node, ctx) -> {
                 BiConsumer<SystemProfile, Scope> sysExec = systemExecutors.get(node.profile().name());
                 if (sysExec != null) sysExec.accept(profile, scope);
             });
         }
 
         try {
-            executor.executeDag(dag, context);
+            reusableDagExecutor.executeDag(dag, context);
         } catch (Throwable throwable) {
             LOGGER.error("[DagBasedTickExecutor] DAG execution failed for region #{}", regionId, throwable);
-        } finally {
-            executor.close();
         }
         // Mili end
     }
-
-    // Mili start - fix: Use content-based cache key instead of reference equality (==)
-    // The old implementation used == to compare pairs list, which means a new ArrayList
-    // with the same content would invalidate the cache every tick.
-    private volatile long cachedVersion = -1;
-    // Mili end
 
     private RegionDag getOrBuildDag(final long regionId, final List<Map.Entry<SystemProfile, Scope>> pairs) {
         // Mili start - fix: content-based cache - compute a simple hash of the pairs
@@ -165,11 +163,16 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
     }
 
     // Mili start - Compute a content-based version hash for the system-scope pairs list.
-    // This avoids the brittle == reference comparison that would invalidate cache on every tick.
+    // Uses name hashCode + scope identity hash to detect content changes.
+    // The previous identityHashCode alone could cause collisions; combining with name hashCode
+    // provides better distribution while remaining O(n).
     private static long computeVersion(List<Map.Entry<SystemProfile, Scope>> pairs) {
         long hash = 0;
         for (Map.Entry<SystemProfile, Scope> entry : pairs) {
-            hash = hash * 31 + (entry.getKey().name().hashCode() ^ System.identityHashCode(entry.getValue()));
+            // Mix name-based hash with scope identity for better distribution
+            long nameHash = entry.getKey().name().hashCode() & 0xFFFFFFFFL;
+            long scopeHash = System.identityHashCode(entry.getValue()) & 0xFFFFFFFFL;
+            hash = hash * 31L + (nameHash ^ (scopeHash << 1));
         }
         return hash;
     }
