@@ -205,6 +205,12 @@ public final class TickRegionScheduler {
     public static RegionizedWorldData getCurrentRegionizedWorldData() {
         final Thread currThread = Thread.currentThread();
         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
+            // Mili start - fallback for virtual threads in RegionTickPool
+            final io.papermc.paper.threadedregions.RegionizedWorldData miliFallback = fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent();
+            if (miliFallback != null) {
+                return miliFallback;
+            }
+            // Mili end
             return RegionShutdownThread.getWorldData();
         }
         return tickThreadRunner.currentTickingWorldRegionizedData;
