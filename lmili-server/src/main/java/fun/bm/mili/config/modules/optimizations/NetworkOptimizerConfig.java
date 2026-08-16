@@ -47,4 +47,9 @@ public class NetworkOptimizerConfig implements IConfigModule {
 
     @ConfigInfo(name = "entity-track-cache-max-size", comments = "Max entries in entity track cache before forced cleanup (0=unlimited)")
     public static int entityTrackCacheMaxSize = 5000;
+
+    // --- Join-phase burst control ---
+
+    @ConfigInfo(name = "max-join-burst-packets", comments = "Max packets sent during player join phase before throttling (0=unlimited)")
+    public static int maxJoinBurstPackets = 0;
 }

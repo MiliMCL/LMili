@@ -95,33 +95,30 @@ public class EntityDirtyTracker {
         states.remove(entity.getId());
     }
 
-    // Mili start - fix: Periodically remove entries for entities no longer in the world.
+    // Mili start - optimize: Periodically remove entries for entities no longer in the world.
     // Entity IDs are not reused by Minecraft, so without cleanup this map grows forever.
+    // Optimized: use removeReason check to detect dead entities without scanning the whole world.
     private static void maybeCleanupStaleEntries(Entity currentEntity) {
         long now = System.currentTimeMillis();
         long last = lastCleanupTime.get();
         if (now - last < CLEANUP_INTERVAL_MS) return;
         if (!lastCleanupTime.compareAndSet(last, now)) return; // only one thread cleans
 
-        // Access the entity's level to check which entities are still alive
-        if (currentEntity.level() == null) return;
-        org.bukkit.World world = currentEntity.level().getWorld();
-        if (world == null) return;
-
-        // Build set of currently alive entity IDs
-        java.util.Set<Integer> aliveIds = new java.util.HashSet<>();
-        for (org.bukkit.entity.Entity e : world.getEntities()) {
-            aliveIds.add(e.getEntityId());
-        }
-
-        // Remove entries not in alive set
+        // Optimized cleanup: check if entity is still alive by querying its removeReason.
+        // This avoids building a full world entity set (which is O(n) world scan).
         int removed = 0;
         java.util.Iterator<Map.Entry<Integer, EntityState>> it = states.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<Integer, EntityState> entry = it.next();
-            if (!aliveIds.contains(entry.getKey())) {
-                it.remove();
-                removed++;
+            int entityId = entry.getKey();
+            // Check if entity is still valid via the level's entity lookup
+            if (currentEntity.level() != null) {
+                net.minecraft.world.entity.Entity entity = currentEntity.level().getEntity(entityId);
+                // Entity is null (removed) or has been removed (removeReason != null)
+                if (entity == null || entity.isRemoved()) {
+                    it.remove();
+                    removed++;
+                }
             }
         }
         if (removed > 0) {
