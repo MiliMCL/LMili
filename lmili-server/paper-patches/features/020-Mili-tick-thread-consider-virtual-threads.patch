@@ -16,12 +16,10 @@ individual ensureTickThread call site.
  1 file changed, 19 insertions(+)
 
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+index 11efb43a8..76b7e425 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
-@@ -142,9 +142,14 @@ public class TickThread extends Thread {
-         return (TickThread)Thread.currentThread();
-     }
-
+@@ -145,6 +145,11 @@ public static TickThread getCurrentTickThread() {
      public static boolean isTickThread() {
 +        // Mili start - virtual threads with region context are considered tick threads
 +        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() != null) {
@@ -32,9 +30,7 @@ diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b
      }
 
      public static boolean isShutdownThread() {
-         return Thread.currentThread().getClass() == RegionShutdownThread.class;
-@@ -175,6 +180,11 @@ public class TickThread extends Thread {
-
+@@ -178,6 +183,11 @@ public static boolean isTickThreadFor(final Level world, final Vec3 pos) {
      public static boolean isTickThreadFor(final Level world, final int chunkX, final int chunkZ) {
 +        // Mili start - virtual threads with region context are considered tick threads for their region
 +        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() != null) {
@@ -43,8 +39,7 @@ diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b
 +        // Mili end
          final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
              TickRegionScheduler.getCurrentRegion();
-         if (region == null) {
-@@ -248,6 +258,11 @@ public class TickThread extends Thread {
+@@ -242,6 +252,11 @@ public static boolean isTickThreadFor(final Entity entity) {
          if (entity == null) {
              return true;
          }
@@ -55,6 +50,5 @@ diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b
 +        // Mili end
          final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
              TickRegionScheduler.getCurrentRegion();
-         if (region == null) {
 --
 2.55.0.windows.3
