@@ -24,6 +24,8 @@ public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiont
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final long SLOW_CHUNK_TICK_MS = 10;
+    // 严重慢 chunk 阈值 —— 超过此值可能说明区块内有大量实体或复杂红石
+    private static final long SEVERE_SLOW_CHUNK_TICK_MS = 50;
 
     private volatile int tickSpeed;
 
@@ -62,7 +64,13 @@ public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiont
                 long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
                 if (elapsedMs > SLOW_CHUNK_TICK_MS) {
                     slowChunkCount++;
-                    if (slowChunkCount <= 3) {
+                    // 严重慢 chunk 提供详细信息
+                    if (elapsedMs >= SEVERE_SLOW_CHUNK_TICK_MS) {
+                        LOGGER.warn("[FoliaTickExecutor] Severe slow chunk tick: {} took {}ms in region #{} " +
+                                        "(sections={})",
+                                chunk.getPos(), elapsedMs, context.regionId,
+                                chunk.getSectionsCount());
+                    } else if (slowChunkCount <= 3) {
                         LOGGER.warn("[FoliaTickExecutor] Slow chunk tick: {} took {}ms in region #{}",
                                 chunk.getPos(), elapsedMs, context.regionId);
                     }

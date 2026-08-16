@@ -14,13 +14,15 @@ import net.minecraft.world.entity.Entity;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Region tick 调度器 —— 管理 region tick 的 worker 线程池和任务分派。
@@ -58,6 +60,15 @@ public final class RegionTickDispatcher {
     private final LongAdder totalTickErrors = new LongAdder();
     private final AtomicLong maxTickDurationNanos = new AtomicLong(0);
     private static final long SLOW_TICK_THRESHOLD_MS = 50;
+
+    // 实体 tick 诊断队列 —— 记录最近 20 个慢实体信息（用于运维排查）
+    private final ConcurrentLinkedQueue<String> slowEntities = new ConcurrentLinkedQueue<>();
+
+    // 并行 chunk tick 追踪 —— 防止 tick 重叠（前一 tick 未完成时跳过下一 tick）
+    private final ConcurrentHashMap<Long, CompletableFuture<Void>> pendingChunkFutures = new ConcurrentHashMap<>();
+
+    // Async Catcher 引用计数 —— 防止多 region 并发修改导致的竞态条件
+    private final AtomicInteger asyncCatcherRefCount = new AtomicInteger(0);
 
     private RegionTickDispatcher(final int workerCount, final int maxWorkersPerRegion,
                                   final int minWorkersPerRegion, final int parallelismThreshold,
@@ -132,7 +143,10 @@ public final class RegionTickDispatcher {
         return context;
     }
 
-    public void unregisterRegion(final long regionId) { this.activeContexts.remove(regionId); }
+    public void unregisterRegion(final long regionId) {
+        this.activeContexts.remove(regionId);
+        this.pendingChunkFutures.remove(regionId);
+    }
 
     public RegionTickContext getOrCreateContext(
             final io.papermc.paper.threadedregions.TickRegions.TickRegionData regionData) {
@@ -223,17 +237,28 @@ public final class RegionTickDispatcher {
 
     /**
      * Virtual Thread 并行模式 —— 将 chunks 拆分为多个 slice，
-     * 每个 slice 作为一个 virtual thread 并行执行，使用 CountDownLatch 等待全部完成。
+     * 每个 slice 作为一个 virtual thread 并行执行。
+     *
+     * <p><b>非阻塞设计</b>：chunk tick 提交后立即返回，不阻塞 region tick thread。
+     * 使用 CompletableFuture 追踪完成状态，下一 tick 如果检测到前一 tick 仍在运行，
+     * 则跳过本次 chunk tick（避免堆积）。
      *
      * <p>兼容性说明：Folia 通过 {@code TickThreadRunner.currentTickingWorldRegionizedData} 跟踪 region data，
      * 虚拟线程不在该体系中。本方法通过 {@link RegionDataThreadLocal} 将当前 region data 传播到每个虚拟线程，
      * 确保 chunk tick 内的 {@code getCurrentWorldData()} / {@code getLocalPlayers()} 等调用不返回 null。
      */
     private void dispatchParallelVirtual(@NotNull final RegionTickContext context, final long[] chunkArray) {
+        final long regionId = context.regionId;
+
+        // 检查前一 tick 是否仍在运行 —— 如果仍在运行则跳过本次（防止堆积）
+        CompletableFuture<Void> previous = pendingChunkFutures.get(regionId);
+        if (previous != null && !previous.isDone()) {
+            LOGGER.warn("[RegionTickPool] Previous chunk tick still in-flight for region #{} — skipping this cycle", regionId);
+            return;
+        }
+
         int total = chunkArray.length;
         int sliceCount = Math.max(1, (total + sliceSize - 1) / sliceSize);
-        CountDownLatch latch = new CountDownLatch(sliceCount);
-        AtomicBoolean hasError = new AtomicBoolean(false);
 
         // Mili start: 捕获当前 region 的 RegionizedWorldData，传递给每个虚拟线程
         io.papermc.paper.threadedregions.RegionizedWorldData currentRegionData = null;
@@ -250,18 +275,21 @@ public final class RegionTickDispatcher {
         if (regionData == null) {
             // 无法获取 region data 时回退到单线程执行
             LOGGER.warn("[RegionTickPool] No region data for virtual dispatch in region #{} — falling back to single-slice",
-                    context.regionId);
+                    regionId);
             dispatchSingleSlice(context, chunkArray);
             return;
         }
         // Mili end
 
-        // Mili start: disable async catcher for all virtual threads in this region
-        final boolean miliAsyncCatcher = fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled;
-        if (!miliAsyncCatcher) {
+        // 创建 CompletableFuture 追踪本次 tick 的所有 slice
+        CompletableFuture<Void>[] sliceFutures = new CompletableFuture[sliceCount];
+
+        // Async Catcher 引用计数 —— 防止多 region 并发修改导致竞态条件
+        // 第一个需要禁用的 region 启用禁用，最后一个完成的 region 恢复
+        final boolean needDisableAsyncCatcher = !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled;
+        if (needDisableAsyncCatcher && asyncCatcherRefCount.getAndIncrement() == 0) {
             fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = true;
         }
-        // Mili end
 
         try {
             for (int i = 0; i < sliceCount; i++) {
@@ -271,7 +299,7 @@ public final class RegionTickDispatcher {
                 RegionTickSlice slice = new RegionTickSlice(context, sliceArray, i);
                 final int sliceIndex = i;
 
-                workerPool.submit(() -> {
+                sliceFutures[i] = CompletableFuture.runAsync(() -> {
                     // Mili start: 在虚拟线程中设置 region data 回退
                     RegionDataThreadLocal.setCurrent(regionData);
                     try {
@@ -280,42 +308,54 @@ public final class RegionTickDispatcher {
                             executor.executeSlice(null, slice, context);
                         }
                     } catch (Throwable throwable) {
-                        hasError.set(true);
                         LOGGER.error("[RegionTickPool] Virtual slice #{} failed for region #{}",
-                                sliceIndex, context.regionId, throwable);
+                                sliceIndex, regionId, throwable);
                     } finally {
                         RegionDataThreadLocal.clear();
-                        latch.countDown();
                     }
                     // Mili end
-                });
+                }, workerPool);
             }
 
-            try {
-                // 等待所有 slice 完成（超时 4.5s，留给 watchdog 余量）
-                if (!latch.await(4500, TimeUnit.MILLISECONDS)) {
-                    LOGGER.warn("[RegionTickPool] Virtual tick timed out for region #{} (remaining: {})",
-                            context.regionId, latch.getCount());
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                LOGGER.warn("[RegionTickPool] Virtual tick interrupted for region #{}", context.regionId);
-            }
-        } finally {
-            // Mili start: restore async catcher config after all virtual threads completed
-            if (!miliAsyncCatcher) {
+            // 创建组合 future 追踪所有 slice 完成，但不阻塞当前线程
+            CompletableFuture<Void> allSlices = CompletableFuture.allOf(sliceFutures);
+            // 保存引用以便下一 tick 检查
+            pendingChunkFutures.put(regionId, allSlices);
+
+            // 设置超时和完成处理（使用 handle 避免双重异常处理）
+            allSlices.orTimeout(RegionTickPoolConfig.virtualThreadTimeoutMs, TimeUnit.MILLISECONDS)
+                    .handle((result, throwable) -> {
+                        // 清理 pending 状态
+                        pendingChunkFutures.remove(regionId);
+                        if (throwable instanceof TimeoutException) {
+                            LOGGER.warn("[RegionTickPool] Virtual tick timed out for region #{} after {}ms",
+                                    regionId, RegionTickPoolConfig.virtualThreadTimeoutMs);
+                        } else if (throwable != null) {
+                            totalTickErrors.increment();
+                            LOGGER.error("[RegionTickPool] Virtual tick completed with error for region #{}", regionId, throwable);
+                        }
+                        // 恢复 async catcher（引用计数归零时）
+                        if (needDisableAsyncCatcher && asyncCatcherRefCount.decrementAndGet() == 0) {
+                            fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = false;
+                        }
+                        return null;
+                    });
+        } catch (Exception e) {
+            // 异常时恢复 async catcher
+            if (needDisableAsyncCatcher && asyncCatcherRefCount.decrementAndGet() == 0) {
                 fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = false;
             }
-            // Mili end
-        }
-
-        if (hasError.get()) {
-            totalTickErrors.increment();
+            throw e;
         }
     }
 
     /**
      * Platform Thread 并行模式 —— 将 slices 分配给 worker 队列。
+     *
+     * <p>阻塞式设计：等待所有 worker 完成。
+     * 此模式适合保守部署（worker 数量有限，总执行时间可控）。
+     * 如果 chunk tick 时间过长，可能触发 Folia watchdog。
+     * 建议仅在 virtual thread 不可用时使用此模式。
      */
     private void dispatchParallelPlatform(@NotNull final RegionTickContext context, final long[] chunkArray) {
         if (workers == null || workers.length == 0) return;
@@ -345,6 +385,12 @@ public final class RegionTickDispatcher {
      *
      * <p>注意：实体 tick 会调用 {@code Level.getLocalPlayers()}，依赖 Folia 的线程本地 region 数据，
      * 因此必须在 region tick 线程上直接执行，不能派发到其他线程。
+     *
+     * <p>诊断能力：
+     * <ul>
+     *   <li>单实体警告：单个实体耗时超过 {@code per-entity-warn-ms} 时记录诊断信息</li>
+     *   <li>慢实体队列：记录最近 N 个慢实体的类型和位置，供运维排查</li>
+     * </ul>
      */
     public void dispatchEntityTick(final long regionId,
                                     @NotNull final RegionTickContext context,
@@ -355,6 +401,9 @@ public final class RegionTickDispatcher {
         regionizedWorldData.forEachTickingEntity(entity -> {
             if (entity.isRemoved()) return;
             if (level.tickRateManager().isEntityFrozen(entity)) return;
+
+            long entityStartNanos = System.nanoTime();
+
             try {
                 entity.checkDespawn();
             } catch (Throwable throwable) {
@@ -367,7 +416,36 @@ public final class RegionTickDispatcher {
                 entity.stopRiding();
             }
             level.guardEntityTick(level::tickNonPassenger, entity);
+
+            // 单个实体 tick 过慢时记录诊断信息
+            long entityElapsedNanos = System.nanoTime() - entityStartNanos;
+            if (entityElapsedNanos >= RegionTickPoolConfig.perEntityWarnMs * 1_000_000L) {
+                recordSlowEntity(entity, entityElapsedNanos / 1_000_000, regionId);
+            }
         });
+
+        // 限制慢实体诊断队列大小（保留最近 20 条）
+        trimSlowEntityLog();
+    }
+
+    /**
+     * 记录慢实体的诊断信息。
+     */
+    private void recordSlowEntity(net.minecraft.world.entity.Entity entity, long elapsedMs, long regionId) {
+        String entityInfo = String.format("%s[id=%d] at [%.1f, %.1f, %.1f] took %dms in region #%d",
+                entity.getType().toString(), entity.getId(),
+                entity.getX(), entity.getY(), entity.getZ(),
+                elapsedMs, regionId);
+        slowEntities.offer(entityInfo);
+    }
+
+    /**
+     * 限制慢实体诊断队列大小。
+     */
+    private void trimSlowEntityLog() {
+        while (slowEntities.size() > 20) {
+            slowEntities.poll();
+        }
     }
 
     public void registerDagSystem(@NotNull final String name,
@@ -400,6 +478,8 @@ public final class RegionTickDispatcher {
         stats.put("use_virtual_threads", useVirtualThreads);
         stats.put("dag_systems", dagExecutor.getSystemCount());
         stats.put("dag_build_nanos", dagExecutor.getDagBuildNanos());
+        stats.put("pending_chunk_ticks", this.pendingChunkFutures.size());
+        stats.put("slow_entity_diagnostics", new ArrayList<>(this.slowEntities));
         stats.put("shutdown", this.shutdown.get());
         return stats;
     }

@@ -52,6 +52,18 @@ public class RegionTickPoolConfig implements IConfigModule {
             启用后 worker-count 变为软上限，实际线程按需创建。""")
     public static boolean useVirtualThreads = true;
 
+    @ConfigInfo(name = "per-entity-warn-ms", comments = """
+            单个实体 tick 耗时超过此阈值（毫秒）时输出警告诊断信息。
+            用于定位导致性能问题的慢实体。默认 100ms。""")
+    public static long perEntityWarnMs = 100;
+
+    @ConfigInfo(name = "virtual-thread-timeout-ms", comments = """
+            virtual thread 并行 tick 的完成超时（毫秒）。
+            超时后下一 tick 将跳过执行（避免堆积）。
+            必须小于 Folia watchdog 超时（默认 5000ms），建议预留至少 1s 余量。
+            默认 4000ms。""")
+    public static long virtualThreadTimeoutMs = 4000;
+
     public static int getWorkerCount() {
         int cores = Runtime.getRuntime().availableProcessors();
         if (workerCount > 0) return Math.max(2, workerCount);
