@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="public/image/Mili/mili-logo.png" alt="Mili Logo" width="600">
+  <img src="public/image/Mili/mili-logo.png" alt="LMili Logo" width="600">
 </p>
 
-<h1 align="center">Mili（米粒）</h1>
+<h1 align="center">LMili（米粒）</h1>
 
 <p align="center">
   <strong>基于 Folia 的高性能 Minecraft 服务端核心：更纯粹的区域多线程体验，更多 API，更稳定</strong>
@@ -22,7 +22,7 @@
 
 ## 项目简介
 
-Mili 是一个基于 **Paper → Folia** fork 链的 Minecraft 服务端核心。项目目标是成为一个**纯粹的 Folia**：不引入生电/红石机制修改与客户端协议魔改，专注于在 Folia 区域多线程调度模型之上提供 **更多 API、稳定性修复与 bug 修复**，以及通用的性能优化。
+LMili 是一个基于 **Paper → Folia** fork 链的 Minecraft 服务端核心。项目目标是成为一个**纯粹的 Folia**：不引入生电/红石机制修改与客户端协议魔改，专注于在 Folia 区域多线程调度模型之上提供 **更多 API、稳定性修复与 bug 修复**，以及通用的性能优化。
 
 ### 继承链
 
@@ -30,10 +30,16 @@ Mili 是一个基于 **Paper → Folia** fork 链的 Minecraft 服务端核心�
 Minecraft（原版）
   └── Paper（服务端框架）
         └── Folia（区域多线程调度）
-              └── Mili（本项目）
+              └── LMili（本项目）
 ```
 
-> Mili 现为直接基于 Folia 的服务端，包名 `fun.bm.mili.lmili`。
+> LMili 现为直接基于 Folia 的服务端，包名 `fun.bm.mili.lmili`。
+
+---
+
+## 插件开发文档
+
+[插件开发文档](docs/LMili核心插件开发指南.md)
 
 ---
 
@@ -96,8 +102,8 @@ Minecraft（原版）
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/xucy10/Mili.git
-cd Mili
+git clone https://github.com/MiliMCL/LMili
+cd LMili
 
 # 2. Windows 需启用长路径
 git config --global core.longpaths true
@@ -105,15 +111,12 @@ git config --global core.longpaths true
 # 3. 应用补丁（首次构建必须执行）
 ./gradlew applyAllPatches --no-configuration-cache --no-build-cache
 
-# 4. 注入 Kotlin 支持
-python scripts/inject_kotlin.py
-
-# 5. 构建 Paperclip JAR
-./gradlew :mili-server:createPaperclipJar
+# 4. 构建 Paperclip JAR
+./gradlew :lmili-server:createPaperclipJar
 ```
 
-构建产物位于 `mili-server/build/libs/`：
-- `mili-26.2-paperclip.jar` — 可直接运行的 Paperclip JAR
+构建产物位于 `lmili-server/build/libs/`：
+- `lmili-26.2-paperclip.jar` — 可直接运行的 Paperclip JAR
 
 ---
 
@@ -164,9 +167,9 @@ dependencies {
 
 ```
 Mili/
-├── mili-api/                  # Mili API 模块
+├── lmili-api/                  # Mili API 模块
 │   └── src/main/java/         #   事件 API、Photographer、Bytebuf
-├── mili-server/               # Mili 服务端核心
+├── lmili-server/               # Mili 服务端核心
 │   ├── minecraft-patches/     #   97 个特征补丁（features/）
 │   ├── paper-patches/         #   Paper API/Server 层补丁
 │   └── src/main/
@@ -179,7 +182,6 @@ Mili/
 │           ├── portal/        #     传送门管理
 │           ├── utils/         #     工具类（区域调度、网络优化、内存管理等）
 │           └── villager/      #     村民优化器
-├── lmili-api/                 # LMili 附加 API 源（包名 fun.bm.mili.lmili）
 ├── folia-server/              # Folia 子模块（上游，不直接修改）
 ├── paper-server/              # Paper 服务器（补丁应用目标）
 ├── paper-api/                 # Paper API（补丁应用目标）
@@ -212,14 +214,14 @@ Mili 提供 TOML 配置文件（纯 Java 解析实现）：
 
 ## 补丁工作流
 
-Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理 feature 补丁：
+LMili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理 feature 补丁：
 
-1. 在 `mili-server/src/minecraft/java/` 中修改代码
+1. 在 `lmili-server/src/minecraft/java/` 中修改代码
 2. 提交变更：`git commit -m "描述"`
-3. 重建补丁：`./gradlew :mili-server:rebuildAllServerPatches`
+3. 重建补丁：`./gradlew :lmili-server:rebuildAllServerPatches`
 4. 提交补丁文件并推送
 
-修改 `mili-server/src/minecraft/java/` 下的生成文件会被 `applyAllPatches` 覆盖，必须通过 `minecraft-patches/features/` 下的补丁文件修改。
+修改 `lmili-server/src/minecraft/java/` 下的生成文件会被 `applyAllPatches` 覆盖，必须通过 `minecraft-patches/features/` 下的补丁文件修改。
 
 详细流程见 [贡献指南](docs/CONTRIBUTING.md)。
 
