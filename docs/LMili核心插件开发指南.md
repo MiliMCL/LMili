@@ -77,7 +77,7 @@ LMili（也简称 Mili，中文"米粒"）是一个基于 Folia 的高性能 Min
 | 配置文件 | `lmili_config.toml` | 服务端主配置文件 |
 | 补丁命名 | `015-Rebrand-to-Miki.patch`、`018-Rename-package-me-earthme-luminol-to-fun-bm-mili-lmili.patch` | 重命名补丁（Luminol → LMili） |
 
-> **历史背景**：LMili 前身包含 Luminol 品牌代码。执行 rebrand 后，模块名从 `mili-server` 改为 `lmili-server`，API 包装层从 `mili-api` 改为 `leaves-api`，公共 API 模块改为 `lmili-api`。底层包名从 `me.luminolmc.*` 迁移至 `fun.bm.mili.lmili.*`。
+> **历史背景**：LMili 前身包含 Luminol 品牌代码。执行 rebrand 后，模块名从 `mili-server` 改为 `lmili-server`，API 包装层与公共 API 模块从 `mili-api` 改为 `lmili-api`。底层包名从 `me.luminolmc.*` 迁移至 `fun.bm.mili.lmili.*`。
 
 ### 1.2 与 Folia 的核心差异
 
