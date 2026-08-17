@@ -242,7 +242,7 @@ LMili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理 feat
 |------|------|
 | Folia（直接上游） | https://github.com/PaperMC/Folia |
 | Paper | https://github.com/PaperMC/Paper |
-| Luminol（大量代码移植出处） | https://github.com/LuminolMC/Luminol 已删库 |
+| Luminol（多数代码移植出处） | https://github.com/LuminolMC/Luminol 已删库 |
 
 ---
 
