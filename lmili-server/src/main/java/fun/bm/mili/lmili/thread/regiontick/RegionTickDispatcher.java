@@ -70,6 +70,9 @@ public final class RegionTickDispatcher {
 
     // Async Catcher 引用计数 —— 防止多 region 并发修改导致的竞态条件
     private final AtomicInteger asyncCatcherRefCount = new AtomicInteger(0);
+    // 记录用户配置的 disable_async_catchers 基线值，计数归零时恢复它，
+    // 避免强制将其硬编码为 false 而覆盖用户的配置。
+    private final AtomicBoolean asyncCatcherBaseline = new AtomicBoolean(false);
 
     private RegionTickDispatcher(final int workerCount, final int maxWorkersPerRegion,
                                   final int minWorkersPerRegion, final int parallelismThreshold,
@@ -303,10 +306,16 @@ public final class RegionTickDispatcher {
         // 创建 CompletableFuture 追踪本次 tick 的所有 slice
         CompletableFuture<Void>[] sliceFutures = new CompletableFuture[sliceCount];
 
-        // Async Catcher 引用计数 —— 防止多 region 并发修改导致竞态条件
-        // 第一个需要禁用的 region 启用禁用，最后一个完成的 region 恢复
-        final boolean needDisableAsyncCatcher = !fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled;
-        if (needDisableAsyncCatcher && asyncCatcherRefCount.getAndIncrement() == 0) {
+        // Mili start - Async Catcher 引用计数：每个参与并行 tick 的 region 都无条件计入。
+        // 绝不依赖 "enabled 当前是否为 false" 来决定是否计数 —— 否则当 region A 提前把
+        // enabled 置为 true 后，region B 会跳过计数（only increment when disabled），
+        // 而 A 的异步完成回调可能在 B 的虚拟线程仍执行 chunk tick 时把 enabled 置回 false，
+        // 导致 "Thread failed main thread check" 竞态崩溃（已在生产日志中复现）。
+        // 正确做法：所有 virtual dispatch 全部计数，只有计数归零（所有 region 都完成）才恢复基线值。
+        // 首个 dispatch（计数 0->1）记录用户配置基线并强制启用绕过；
+        // 最后一个完成的 dispatch（计数 1->0）恢复基线。
+        if (asyncCatcherRefCount.incrementAndGet() == 1) {
+            asyncCatcherBaseline.set(fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled);
             fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = true;
         }
 
@@ -353,16 +362,18 @@ public final class RegionTickDispatcher {
                             totalTickErrors.increment();
                             LOGGER.error("[RegionTickPool] Virtual tick completed with error for region #{}", regionId, throwable);
                         }
-                        // 恢复 async catcher（引用计数归零时）
-                        if (needDisableAsyncCatcher && asyncCatcherRefCount.decrementAndGet() == 0) {
-                            fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = false;
+                        // 恢复 async catcher（引用计数归零时 —— 所有 region 的 virtual dispatch 都完成后，恢复用户基线）
+                        if (asyncCatcherRefCount.decrementAndGet() == 0) {
+                            fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
+                                    asyncCatcherBaseline.get();
                         }
                         return null;
                     });
         } catch (Exception e) {
-            // 异常时恢复 async catcher
-            if (needDisableAsyncCatcher && asyncCatcherRefCount.decrementAndGet() == 0) {
-                fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = false;
+            // 异常时恢复 async catcher（未派发成功也要归还计数）
+            if (asyncCatcherRefCount.decrementAndGet() == 0) {
+                fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
+                        asyncCatcherBaseline.get();
             }
             throw e;
         }
@@ -380,7 +391,13 @@ public final class RegionTickDispatcher {
         if (workers == null || workers.length == 0) return;
 
         RegionTickSlice[] slices = RegionTickSlice.fromChunkArray(context, chunkArray, sliceSize);
-        context.beginTick(slices.length);
+        // Mili start - beginTick 的 parties 应为 slice 数 + 1（region tick 线程本身）。
+        // 原代码传入 slices.length，但 workers 会对每个 slice 调用一次 arriveSlice()
+        // （共 slices.length 次），加上 awaitTickCompletion() 中主线程的 arrive()，
+        // 总到达数 = slices.length + 1。若只注册 slices.length 个参与方，
+        // 相位会在最后一个 slice 尚未完成时提前推进，导致 dispatchParallelPlatform 提前返回、
+        // 与下一 tick 产生竞态。改为 slices.length + 1 与文档契约一致。
+        context.beginTick(slices.length + 1);
 
         // 贪心负载均衡分发给 workers
         int actualWorkers = Math.min(slices.length, workers.length);

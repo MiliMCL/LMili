@@ -102,6 +102,17 @@ public final class AsyncKeepaliveManager {
         long currentTimeNs = System.nanoTime();
 
         for (ServerCommonPacketListenerImpl listener : ACTIVE_LISTENERS.values()) {
+            // Mili start - 只对 PLAY 阶段的连接发送 keepalive。
+            // 该 listener 在构造函数中就被注册（此时连接仍处于 login/config 阶段，
+            // 出站（outbound）协议可能尚未配置完成），异步线程若此时发送
+            // ClientboundKeepAlivePacket 会触发
+            // "Pipeline has no outbound protocol configured" 并导致玩家被断开连接。
+            // ServerGamePacketListenerImpl 表示连接已进入 PLAY 阶段，出站协议必然已就绪，
+            // 因此在此阶段发送是安全的；login/config 阶段由主线程 tick 负责 keepalive。
+            if (!(listener instanceof net.minecraft.server.network.ServerGamePacketListenerImpl)) {
+                continue;
+            }
+            // Mili end
             try {
                 // Mili start - actually send keepalive packet instead of just checking isConnected()
                 // Use reflection to access Paper's private keepAlive field
