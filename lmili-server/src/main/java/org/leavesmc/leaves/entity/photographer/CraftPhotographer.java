@@ -91,12 +91,10 @@ public class CraftPhotographer extends CraftPlayer implements Photographer {
     }
 
     // Mili start - Bytebuf PacketAudience
-    @Override
     public @org.jetbrains.annotations.NotNull Object getChannel() {
         return new Object(); // stub: photographer has no network channel
     }
 
-    @Override
     public void send(PacketType packetType, Bytebuf bytebuf) {
         // stub: not implemented in Mili
     }

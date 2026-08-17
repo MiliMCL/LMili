@@ -42,7 +42,7 @@ public class AudienceHolder {
 
     public void setPlayer(Player player) {
         this.player = player;
-        this.audience = player;
+        this.audience = (PacketAudience) player;
     }
 
     public PacketAudience get() {

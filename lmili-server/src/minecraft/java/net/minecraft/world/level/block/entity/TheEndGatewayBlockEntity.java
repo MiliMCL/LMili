@@ -193,8 +193,8 @@ public class TheEndGatewayBlockEntity extends TheEndPortalBlockEntity {
             return false;
         }
         // Lmili start - Add missing teleportation apis
-        final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(toTeleport.level(), portalPos);
-        final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(portalWorld, teleportPos);
+        final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(toTeleport.level(), Vec3.atCenterOf(portalPos));
+        final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(portalWorld, Vec3.atCenterOf(teleportPos));
 
         final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
                 orginalPortalLocation,

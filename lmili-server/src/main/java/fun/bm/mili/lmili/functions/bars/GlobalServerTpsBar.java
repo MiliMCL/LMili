@@ -77,7 +77,7 @@ public class GlobalServerTpsBar extends AbstractGlobalServerBar {
                 Placeholder.component("tps", getTpsComponent(tps)),
                 Placeholder.component("mspt", getMsptComponent(mspt)),
                 Placeholder.component("ping", getPingComponent(player.getPing())),
-                Placeholder.component("chunkhot", getChunkHotComponent(player.getNearbyChunkHot()))
+                Placeholder.component("chunkhot", getChunkHotComponent(((org.bukkit.craftbukkit.entity.CraftPlayer) player).getHandle().getNearbyChunkHot()))
         );
 
         switch (TpsBarConfig.display) {

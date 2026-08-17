@@ -1393,7 +1393,7 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
                 }
                 // Folia end - region threading
                 // CraftBukkit start - respect vanish API
-                if (visibleToPlayer && (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player) || !player.getBukkitEntity().canSeeChunkMapUpdatePlayer(this.entity.getBukkitEntity()))) { // Paper - only consider hits // Folia - region threading // SparklyPaper - optimize canSee checks
+                if (visibleToPlayer && (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player) || !player.getBukkitEntity().canSee(this.entity.getBukkitEntity()))) { // Paper - only consider hits // Folia - region threading
                     visibleToPlayer = false;
                 }
                 // CraftBukkit end

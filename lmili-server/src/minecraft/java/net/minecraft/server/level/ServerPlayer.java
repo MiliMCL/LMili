@@ -1415,7 +1415,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
         }
 
         // SPIGOT-5478 must be called manually now
-        if (shouldDropExperience(event.shouldDropExperience(), event.forceUseEventDropStatus())) this.dropExperience(this.level(), source.getEntity()); // Paper - tie to event // Leaves - exp fix
+        if (shouldDropExperience(event.shouldDropExperience(), event.shouldDropExperience())) this.dropExperience(this.level(), source.getEntity()); // Paper - tie to event
         // we clean the player's inventory after the EntityDeathEvent is called so plugins can get the exact state of the inventory.
         if (!event.getKeepInventory()) {
             // Paper start - PlayerDeathEvent#getItemsToKeep

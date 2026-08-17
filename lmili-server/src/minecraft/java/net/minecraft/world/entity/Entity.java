@@ -4687,8 +4687,8 @@ public abstract class Entity
                 if (destination.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END) {
                     BlockPos targetPos = ServerLevel.END_SPAWN_POINT;
                     // Lmili start - Add missing teleportation apis
-                    final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
-                    final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
+                    final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, Vec3.atCenterOf(originPortal));
+                    final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, Vec3.atCenterOf(targetPos));
 
                     final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
                             orginalPortalLocation,
@@ -4725,8 +4725,8 @@ public abstract class Entity
                 } else {
                     BlockPos spawnPos = destination.getRespawnData().pos();
                     // Lmili start - Add missing teleportation apis
-                    final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
-                    final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, spawnPos);
+                    final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, Vec3.atCenterOf(originPortal));
+                    final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, Vec3.atCenterOf(spawnPos));
 
                     final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
                             orginalPortalLocation,
@@ -4793,8 +4793,8 @@ public abstract class Entity
                 double dimensionScale = net.minecraft.world.level.dimension.DimensionType.getTeleportationScale(origin.dimensionType(), destination.dimensionType());
                 BlockPos targetPos = destination.getWorldBorder().clampToBounds(this.getX() * dimensionScale, this.getY(), this.getZ() * dimensionScale);
                 // Lmili start - Add missing teleportation apis
-                final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, originPortal);
-                final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, targetPos);
+                final org.bukkit.Location orginalPortalLocation = io.papermc.paper.util.MCUtil.toLocation(origin, Vec3.atCenterOf(originPortal));
+                final org.bukkit.Location targetPortalLocation = io.papermc.paper.util.MCUtil.toLocation(destination, Vec3.atCenterOf(targetPos));
 
                 final fun.bm.mili.lmili.api.portal.PortalLocateEvent portalLocateEvent = new fun.bm.mili.lmili.api.portal.PortalLocateEvent(
                         orginalPortalLocation,
@@ -4942,7 +4942,7 @@ public abstract class Entity
         // Lmili start - Add missing teleportation events
         if (!new fun.bm.mili.lmili.api.entity.PreEntityPortalEvent(
                 this.getBukkitEntity(),
-                io.papermc.paper.util.MCUtil.toLocation(this.level, portalPos),
+                io.papermc.paper.util.MCUtil.toLocation(this.level, Vec3.atCenterOf(portalPos)),
                 destination.getWorld()
         ).callEvent()) {
             return false;
