@@ -13,9 +13,6 @@ import java.nio.ByteBuffer;
  *
  * <p>Optimizations:
  * <ul>
- *   <li>Reusable compression buffer: commitSectionData result is consumed by Sector.store()
- *       (written to FileChannel and not retained), so a ThreadLocal buffer avoids repeated
- *       allocations on the write path.</li>
  *   <li>Fast-path for array-backed ByteBuffer: avoids intermediate byte[] allocation
  *       when the source ByteBuffer has a backing array.</li>
  * </ul>
@@ -24,14 +21,10 @@ public class ChunkCompressor {
     private final LZ4Compressor lz4Compressor = LZ4Factory.fastestInstance().fastCompressor();
     private final LZ4FastDecompressor lz4Decompressor = LZ4Factory.fastestInstance().fastDecompressor();
 
-    // Mili start - ThreadLocal 压缩缓冲区复用
-    // commitSectionData 结果仅在 Sector.store() 中消耗（写入 FileChannel），
-    // 调用方不会长期持有，因此可以安全复用
-    private final ThreadLocal<byte[]> compressBuffer = ThreadLocal.withInitial(() -> new byte[4096]);
-    // Mili end
-
     /**
      * Compress the input data and prepend the original length (4 bytes, big-endian).
+     *
+     * <p>返回的 ByteBuffer 是独立的副本，调用方可以安全持有。
      *
      * @param in the raw data to compress
      * @return a buffer containing [originalLength(int)][lz4CompressedData(bytes)]
@@ -41,14 +34,8 @@ public class ChunkCompressor {
         final int maxCompressedLen = this.lz4Compressor.maxCompressedLength(inputLen);
         final int totalLen = maxCompressedLen + 4;
 
-        // 从 ThreadLocal 获取缓冲区，不足则扩容
-        byte[] buffer = this.compressBuffer.get();
-        if (buffer.length < totalLen) {
-            // 按 2 倍增长以避免频繁扩容
-            int newSize = Math.max(totalLen, buffer.length * 2);
-            buffer = new byte[newSize];
-            this.compressBuffer.set(buffer);
-        }
+        // 使用独立缓冲区，确保返回的ByteBuffer不被后续操作覆盖
+        byte[] buffer = new byte[totalLen];
 
         // 手动写入大端序 4 字节原始长度（比 putInt + 手动翻转更高效）
         buffer[0] = (byte) (inputLen >>> 24);

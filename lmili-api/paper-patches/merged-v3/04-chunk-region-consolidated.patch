@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mili Dev <dev@mili.example>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Chunk Region (consolidated)
+
+Consolidated from 3 original patches:
+  - 0002-KioCG-Chunk-API.patch
+  - 0004-Force-disable-reload-command.patch
+  - 0007-Tick-regions-api.patch
+
+
+diff --git a/src/main/java/org/bukkit/Chunk.java b/src/main/java/org/bukkit/Chunk.java
+--- a/src/main/java/org/bukkit/Chunk.java
++++ b/src/main/java/org/bukkit/Chunk.java
+@@ -392,4 +392,6 @@
+          */
+         UNLOADED;
+     }
++
++    long getChunkHotAvg(); // KioCG
+ }
+
+diff --git a/src/main/java/org/bukkit/World.java b/src/main/java/org/bukkit/World.java
+--- a/src/main/java/org/bukkit/World.java
++++ b/src/main/java/org/bukkit/World.java
+@@ -4619,4 +4619,8 @@
+             }
+         }
+     }
++
++    // Mili start - Tick regions api
++    fun.bm.mili.lmili.api.ThreadedRegionizer getThreadedRegionizer();
++    // Mili end - Tick regions api
+ }
+
+diff --git a/src/main/java/org/bukkit/command/SimpleCommandMap.java b/src/main/java/org/bukkit/command/SimpleCommandMap.java
+--- a/src/main/java/org/bukkit/command/SimpleCommandMap.java
++++ b/src/main/java/org/bukkit/command/SimpleCommandMap.java
+@@ -31,9 +31,9 @@
+     }
+ 
+     private void setDefaultCommands() {
+-        final ReloadCommand reload = new ReloadCommand("reload");
+-        this.knownCommands.put("bukkit:reload", reload);
+-        this.knownCommands.put("bukkit:rl", reload);
++        //final ReloadCommand reload = new ReloadCommand("reload"); // Mili - Force disable reload command
++        //this.knownCommands.put("bukkit:reload", reload); // Mili - Force disable reload command
++        //this.knownCommands.put("bukkit:rl", reload); // Mili - Force disable reload command
+         //register("bukkit", new co.aikar.timings.TimingsCommand("timings")); // Mili - Disable timings warn msg and commands
+     }
+ 
+
+diff --git a/src/main/java/org/bukkit/entity/Player.java b/src/main/java/org/bukkit/entity/Player.java
+--- a/src/main/java/org/bukkit/entity/Player.java
++++ b/src/main/java/org/bukkit/entity/Player.java
+@@ -4050,4 +4050,6 @@
+      * clearing any fixed pose in the process.
+      */
+     void unsetFixedPose();
++
++    long getNearbyChunkHot(); // KioCG
+ }
+

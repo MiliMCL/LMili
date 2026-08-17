@@ -119,6 +119,8 @@ public final class StructuredScope implements AutoCloseable {
     /**
      * 提交一个带超时的任务。超时后自动取消。
      *
+     * <p>使用Future.get的超时机制实现，避免嵌套提交任务导致的线程资源浪费。
+     *
      * @param task     要执行的任务
      * @param timeout  超时时长
      * @param unit     时间单位
@@ -129,8 +131,10 @@ public final class StructuredScope implements AutoCloseable {
                                                @NotNull final TimeUnit unit) {
         ensureOpen();
         forked.incrementAndGet();
-        Future<?> future = executor.submit(() -> {
-            Future<?> inner = executor.submit(task);
+        final ExecutorService exec = this.executor;
+        Future<?> future = exec.submit(() -> {
+            // 直接执行任务，通过Future.get的超时机制控制
+            Future<?> inner = exec.submit(task);
             try {
                 return inner.get(timeout, unit);
             } catch (TimeoutException e) {

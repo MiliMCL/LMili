@@ -13,7 +13,9 @@ public class DynamicViewDistanceManager {
     private static volatile boolean enabled = false;
     private static final ConcurrentHashMap<String, PlayerVDState> playerStates = new ConcurrentHashMap<>();
     private static final AtomicLong totalAdjustments = new AtomicLong();
-    private static long lastAdjustTime = 0;
+    // Mili start - fix: use AtomicLong for thread-safe access instead of non-volatile long
+    private static final AtomicLong lastAdjustTime = new AtomicLong(0);
+    // Mili end
 
     public static void setEnabled(boolean v) { enabled = v; }
     public static boolean isEnabled() { return enabled; }
@@ -29,8 +31,10 @@ public class DynamicViewDistanceManager {
 
         long now = System.currentTimeMillis();
         long intervalMs = DynamicViewDistanceConfig.adjustIntervalSeconds * 1000L;
-        if (now - lastAdjustTime < intervalMs) return;
-        lastAdjustTime = now;
+        // Mili start - fix: use AtomicLong for thread-safe comparison
+        if (now - lastAdjustTime.get() < intervalMs) return;
+        lastAdjustTime.set(now);
+        // Mili end
 
         double currentTps = getCurrentTps();
 

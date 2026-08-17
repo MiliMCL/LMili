@@ -115,22 +115,38 @@ public final class AsyncKeepaliveManager {
             // Mili end
             try {
                 // Mili start - actually send keepalive packet instead of just checking isConnected()
-                // Use reflection to access Paper's private keepAlive field
-                java.lang.reflect.Field keepAliveField = ServerCommonPacketListenerImpl.class.getDeclaredField("keepAlive");
-                keepAliveField.setAccessible(true);
-                io.papermc.paper.util.KeepAlive keepAlive = (io.papermc.paper.util.KeepAlive) keepAliveField.get(listener);
-                if ((currentTimeNs - keepAlive.lastKeepAliveTx) >= java.util.concurrent.TimeUnit.SECONDS.toNanos(1L)) {
-                    keepAlive.lastKeepAliveTx = currentTimeNs;
-                    io.papermc.paper.util.KeepAlive.PendingKeepAlive pka =
-                        new io.papermc.paper.util.KeepAlive.PendingKeepAlive(currentTimeNs, Util.getMillis());
-                    keepAlive.pendingKeepAlives.add(pka);
-                    listener.send(new net.minecraft.network.protocol.common.ClientboundKeepAlivePacket(pka.challengeId()));
-                }
+                // Use reflection to access Paper's private keepAlive field, with fallback
+                sendKeepalivePacket(listener, currentTimeNs);
                 // Mili end
             } catch (Throwable throwable) {
                 ACTIVE_LISTENERS.remove(listener.connection, listener);
                 LOGGER.error("Failed to run async keepalive for connection " + listener.connection.getRemoteAddress(), throwable);
             }
+        }
+    }
+
+    /**
+     * 发送keepalive包，使用反射访问Paper内部字段，带fallback处理
+     */
+    private static void sendKeepalivePacket(ServerCommonPacketListenerImpl listener, long currentTimeNs) {
+        try {
+            java.lang.reflect.Field keepAliveField = ServerCommonPacketListenerImpl.class.getDeclaredField("keepAlive");
+            keepAliveField.setAccessible(true);
+            io.papermc.paper.util.KeepAlive keepAlive = (io.papermc.paper.util.KeepAlive) keepAliveField.get(listener);
+            if ((currentTimeNs - keepAlive.lastKeepAliveTx) >= java.util.concurrent.TimeUnit.SECONDS.toNanos(1L)) {
+                keepAlive.lastKeepAliveTx = currentTimeNs;
+                io.papermc.paper.util.KeepAlive.PendingKeepAlive pka =
+                    new io.papermc.paper.util.KeepAlive.PendingKeepAlive(currentTimeNs, net.minecraft.util.Util.getMillis());
+                keepAlive.pendingKeepAlives.add(pka);
+                listener.send(new net.minecraft.network.protocol.common.ClientboundKeepAlivePacket(pka.challengeId()));
+            }
+        } catch (NoSuchFieldException e) {
+            // Fallback: Paper internal field changed, use default keepalive mechanism
+            LOGGER.warn("Paper keepAlive field not found, using fallback keepalive mechanism");
+            // Fallback: just send a keepalive packet using the standard method
+            listener.send(new net.minecraft.network.protocol.common.ClientboundKeepAlivePacket(currentTimeNs));
+        } catch (IllegalAccessException e) {
+            LOGGER.error("Cannot access keepalive field", e);
         }
     }
 }

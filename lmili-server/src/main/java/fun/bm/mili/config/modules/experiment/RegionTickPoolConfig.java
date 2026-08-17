@@ -64,6 +64,15 @@ public class RegionTickPoolConfig implements IConfigModule {
             默认 4000ms。""")
     public static long virtualThreadTimeoutMs = 4000;
 
+    @HotReloadUnsupported
+    @ConfigInfo(name = "use-new-scheduler", comments = """
+            启用新调度系统（重构版）。
+            启用后将使用 MiliScheduler + WorkStealingCoordinator 新架构替代原有调度逻辑。
+            新架构优势：非阻塞 DAG 执行、work-stealing 负载均衡、阻塞操作隔离。
+            此为灰度开关，启用前请充分测试。
+            默认 false（使用旧版稳定实现）。""")
+    public static boolean useNewScheduler = false;
+
     public static int getWorkerCount() {
         int cores = Runtime.getRuntime().availableProcessors();
         if (workerCount > 0) return Math.max(2, workerCount);

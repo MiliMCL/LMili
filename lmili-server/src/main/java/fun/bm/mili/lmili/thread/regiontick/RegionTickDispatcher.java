@@ -314,9 +314,12 @@ public final class RegionTickDispatcher {
         // 正确做法：所有 virtual dispatch 全部计数，只有计数归零（所有 region 都完成）才恢复基线值。
         // 首个 dispatch（计数 0->1）记录用户配置基线并强制启用绕过；
         // 最后一个完成的 dispatch（计数 1->0）恢复基线。
-        if (asyncCatcherRefCount.incrementAndGet() == 1) {
-            asyncCatcherBaseline.set(fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled);
-            fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = true;
+        // 使用同步块确保计数检查和状态修改的原子性
+        synchronized (this) {
+            if (asyncCatcherRefCount.incrementAndGet() == 1) {
+                asyncCatcherBaseline.set(fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled);
+                fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = true;
+            }
         }
 
         try {
@@ -363,17 +366,22 @@ public final class RegionTickDispatcher {
                             LOGGER.error("[RegionTickPool] Virtual tick completed with error for region #{}", regionId, throwable);
                         }
                         // 恢复 async catcher（引用计数归零时 —— 所有 region 的 virtual dispatch 都完成后，恢复用户基线）
-                        if (asyncCatcherRefCount.decrementAndGet() == 0) {
-                            fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
-                                    asyncCatcherBaseline.get();
+                        // 使用同步块确保计数检查和状态恢复的原子性
+                        synchronized (this) {
+                            if (asyncCatcherRefCount.decrementAndGet() == 0) {
+                                fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
+                                        asyncCatcherBaseline.get();
+                            }
                         }
                         return null;
                     });
         } catch (Exception e) {
             // 异常时恢复 async catcher（未派发成功也要归还计数）
-            if (asyncCatcherRefCount.decrementAndGet() == 0) {
-                fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
-                        asyncCatcherBaseline.get();
+            synchronized (this) {
+                if (asyncCatcherRefCount.decrementAndGet() == 0) {
+                    fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
+                            asyncCatcherBaseline.get();
+                }
             }
             throw e;
         }

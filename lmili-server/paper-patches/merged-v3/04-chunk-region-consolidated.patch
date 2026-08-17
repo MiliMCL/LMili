@@ -1,0 +1,246 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy <xucy0609@gmail.com>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Chunk Region (consolidated)
+
+Consolidated from 4 original patches:
+  - 005-Add-tpsbar-with-chunkhot-membar-and-region-bar.patch
+  - 007-Force-disable-builtin-spark-plugin.patch
+  - 008-Tick-regions-api.patch
+  - 017-Add-cancel-task-by-task-id-in-FoliaGlobalRegionScheduler.patch
+
+
+diff --git a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java b/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
+--- a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
++++ b/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
+@@ -76,7 +76,7 @@
+         }
+ 
+         final PluginMeta config = type.getConfig(file);
+-        if ((config.getName().equals("spark") && config.getMainClass().equals("me.lucko.spark.bukkit.BukkitSparkPlugin")) && !SparksFly.isPluginPreferred()) {
++        if ((config.getName().equals("spark") && config.getMainClass().equals("me.lucko.spark.bukkit.BukkitSparkPlugin")) && !SparksFly.isPluginPreferred() && false) { // Luminol - Force disable builtin spark
+             LOGGER.info("The spark plugin will not be loaded as this server bundles the spark profiler.");
+             return;
+         }
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+--- a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+@@ -16,6 +16,8 @@
+     private long tickCount = 0L;
+     private final Object stateLock = new Object();
+     private final Long2ObjectOpenHashMap<List<GlobalScheduledTask>> tasksByDeadline = new Long2ObjectOpenHashMap<>();
++    private int lastTaskId = 1; // Mili - add task id
++    private final Object stateLockForTaskId = new Object(); // Mili - add task id
+ 
+     public void tick() {
+         final List<GlobalScheduledTask> run;
+@@ -66,7 +68,7 @@
+             throw new IllegalPluginAccessException("Plugin attempted to register task while disabled");
+         }
+ 
+-        final GlobalScheduledTask ret = new GlobalScheduledTask(plugin, -1, task);
++        final GlobalScheduledTask ret = new GlobalScheduledTask(plugin, -1, task, this.getNextTaskId()); // Mili - add task id
+ 
+         this.scheduleInternal(ret, delayTicks);
+ 
+@@ -93,7 +95,7 @@
+             throw new IllegalPluginAccessException("Plugin attempted to register task while disabled");
+         }
+ 
+-        final GlobalScheduledTask ret = new GlobalScheduledTask(plugin, periodTicks, task);
++        final GlobalScheduledTask ret = new GlobalScheduledTask(plugin, periodTicks, task, this.getNextTaskId()); // Mili - add task id
+ 
+         this.scheduleInternal(ret, initialDelayTicks);
+ 
+@@ -135,7 +137,33 @@
+         }
+     }
+ 
+-    private final class GlobalScheduledTask implements ScheduledTask, Runnable {
++    // Mili start - add cancel task by task id
++    public void cancelTask(final int taskId) {
++        synchronized (this.stateLock) {
++            for (final List<GlobalScheduledTask> tasks : this.tasksByDeadline.values()) {
++                for (final GlobalScheduledTask task : tasks) {
++                    if (task.getTaskId() == taskId) {
++                        task.cancel();
++                        return;
++                    }
++                }
++            }
++        }
++    }
++
++    private int getNextTaskId() {
++        synchronized (this.stateLockForTaskId) {
++            if (this.lastTaskId == Integer.MAX_VALUE) {
++                this.lastTaskId = 1;
++            } else {
++                ++this.lastTaskId;
++            }
++        }
++        return this.lastTaskId;
++    }
++    // Mili end - add cancel task by task id
++
++    public final class GlobalScheduledTask implements ScheduledTask, Runnable { // Mili - private -> public
+ 
+         private static final int STATE_IDLE                = 0;
+         private static final int STATE_EXECUTING           = 1;
+@@ -173,13 +201,15 @@
+         private final long repeatDelay; // in ticks
+         private Consumer<ScheduledTask> run;
+         private volatile int state;
++        private int taskId; // Mili - add task id
+ 
+         private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(GlobalScheduledTask.class, "state", int.class);
+ 
+-        private GlobalScheduledTask(final Plugin plugin, final long repeatDelay, final Consumer<ScheduledTask> run) {
++        private GlobalScheduledTask(final Plugin plugin, final long repeatDelay, final Consumer<ScheduledTask> run, int taskId) { // Mili - add task id
+             this.plugin = plugin;
+             this.repeatDelay = repeatDelay;
+             this.run = run;
++            this.taskId = taskId; // Mili - add task id
+         }
+ 
+         private final int getStateVolatile() {
+@@ -292,5 +322,11 @@
+                 }
+             }
+         }
++
++        // Mili start - add task id
++        public int getTaskId() {
++            return taskId;
++        }
++        // Mili end - add task id
+     }
+ }
+-- 
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftChunk.java b/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
+--- a/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
+@@ -406,4 +406,12 @@
+     static {
+         Arrays.fill(FULL_LIGHT, (byte) 0xFF);
+     }
++
++    // KioCG start - ChunkHot
++    @Override
++    public long getChunkHotAvg() {
++        final net.minecraft.world.level.chunk.LevelChunk target = this.level.getChunkIfLoaded(this.x,this.z);
++        return target == null ? -1 : target.getChunkHot().getAverage();
++    }
++    // KioCG end
+ }
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -302,7 +302,7 @@
+     public static Exception excessiveVelEx;
+     private final io.papermc.paper.logging.SysoutCatcher sysoutCatcher = new io.papermc.paper.logging.SysoutCatcher();
+     private final io.papermc.paper.potion.PaperPotionBrewer potionBrewer;
+-    public final io.papermc.paper.SparksFly spark;
++    public io.papermc.paper.SparksFly spark; // Paper - spark // Luminol - Force disable builtin spark
+     private final ServerConfiguration serverConfig = new PaperServerConfiguration();
+ 
+     // Paper start - Folia region threading API
+@@ -478,7 +478,7 @@
+         }
+         this.potionBrewer = new io.papermc.paper.potion.PaperPotionBrewer(console); // Paper - custom potion mixes
+         datapackManager = new io.papermc.paper.datapack.PaperDatapackManager(console.getPackRepository()); // Paper
+-        this.spark = new io.papermc.paper.SparksFly(this); // Paper - spark
++        if (false) this.spark = new io.papermc.paper.SparksFly(this); // Paper - spark // Luminol - Force disable builtin spark
+     }
+ 
+     public boolean getCommandBlockOverride(String command) {
+@@ -1049,7 +1049,7 @@
+         this.reloadData();
+         org.spigotmc.SpigotConfig.registerCommands(); // Spigot
+         io.papermc.paper.command.PaperCommands.registerCommands(this.console); // Paper
+-        this.spark.registerCommandBeforePlugins(this); // Paper - spark
++        if (false) this.spark.registerCommandBeforePlugins(this); // Paper - spark // Luminol - Force disable builtin spark
+         this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
+         this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");
+ 
+@@ -1078,7 +1078,7 @@
+         this.loadPlugins();
+         this.enablePlugins(PluginLoadOrder.STARTUP);
+         this.enablePlugins(PluginLoadOrder.POSTWORLD);
+-        this.spark.registerCommandAfterPlugins(this); // Paper - spark
++        if (false) this.spark.registerCommandAfterPlugins(this); // Paper - spark // Luminol - Force disable builtin spark
+         // Paper start - brigadier command API
+         io.papermc.paper.command.brigadier.PaperCommands.INSTANCE.setValid(); // to clear invalid state for event fire below
+         io.papermc.paper.plugin.lifecycle.event.LifecycleEventRunner.INSTANCE.callReloadableRegistrarEvent(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, io.papermc.paper.command.brigadier.PaperCommands.INSTANCE, org.bukkit.plugin.Plugin.class, io.papermc.paper.plugin.lifecycle.event.registrar.ReloadableRegistrarEvent.Cause.RELOAD); // call commands event for regular plugins
+-- 
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -2082,4 +2082,11 @@
+         return POINTERS_SUPPLIER.view(this);
+     }
+     // Paper end
++
++    // Luminol start - Tick regions api
++    @Override
++    public fun.bm.mili.lmili.api.ThreadedRegionizer getThreadedRegionizer() {
++        return this.world.regioniser.threadedRegionizerAPI;
++    }
++    // Luminol end
+ }
+-- 
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -2198,6 +2198,15 @@
+             handle.newLevel = data.getIntOr("newLevel", 0);
+             handle.expToDrop = data.getIntOr("expToDrop", 0);
+             handle.keepLevel = data.getBooleanOr("keepLevel", false);
++            //Luminol start - Tpsbar
++            getHandle().isTpsBarVisible = data.getBooleanOr("tpsbarVisible", false);
++            //Luminol end
++            //Luminol start - Membar
++            getHandle().isMemBarVisible = data.getBooleanOr("membarVisible", false);
++            //Luminol end
++            //Luminol start - Regionbar
++            getHandle().isRegionBarVisible = data.getBooleanOr("regionbarVisible", false);
++            //Luminol end
+         });
+     }
+ 
+@@ -2224,6 +2233,16 @@
+         data.putLong("lastPlayed", System.currentTimeMillis());
+         data.putString("lastKnownName", handle.getGameProfile().name());
+ 
++        //Luminol start - Tpsbar
++        data.putBoolean("tpsbarVisible",handle.isTpsBarVisible);
++        //Luminol end
++        //Luminol start - Membar
++        data.putBoolean("membarVisible", handle.isMemBarVisible);
++        //Luminol end
++        //Luminol start - Regionbar
++        data.putBoolean("regionbarVisible", handle.isRegionBarVisible);
++        //Luminol end
++
+         // Paper start - persist for use in offline save data
+         ValueOutput paper = output.child("Paper");
+         paper.putLong("LastLogin", handle.loginTime);
+@@ -3439,4 +3458,11 @@
+         this.getHandle().fixedPose = false;
+         this.getHandle().updatePlayerPose();
+     }
++
++    // KioCG start - ChunkHot
++    @Override
++    public long getNearbyChunkHot() {
++        return this.getHandle().getNearbyChunkHot();
++    }
++    // KioCG end
+ }
+-- 
+

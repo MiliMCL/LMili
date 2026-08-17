@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Rebrand (consolidated)
+
+Consolidated from 1 original patches:
+  - 0001-Rebrand-to-Mili.patch
+
+
+diff --git a/src/main/java/io/papermc/paper/ServerBuildInfo.java b/src/main/java/io/papermc/paper/ServerBuildInfo.java
+--- a/src/main/java/io/papermc/paper/ServerBuildInfo.java
++++ b/src/main/java/io/papermc/paper/ServerBuildInfo.java
+@@ -19,6 +19,17 @@
+      */
+     Key BRAND_PAPER_ID = Key.key("papermc", "paper");
++    // Mili start
++    /**
++     * The brand id for folia
++     */
++    Key BRAND_FOLIA_ID = Key.key("papermc", "folia");
++    /**
++     * The brand id for Mili.
++     */
++    Key BRAND_MILI_ID = Key.key("lmili", "mili");
++    // Mili end
++
+     /**
+      * Gets the {@code ServerBuildInfo}.
+      *
+

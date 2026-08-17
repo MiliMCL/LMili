@@ -24,7 +24,7 @@ paperweight {
 
         patchRepo("paperApi") {
             upstreamPath = "paper-api"
-            patchesDir = file("lmili-api/paper-patches")
+            patchesDir = file("lmili-api/paper-patches/merged-v3")
             outputDir = file("paper-api")
         }
     }

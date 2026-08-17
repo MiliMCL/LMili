@@ -25,5 +25,5 @@ def apply(filepath):
     else:
         print(f"{filepath}: OK")
 
-for f in ["mili-api/build.gradle.kts", "mili-server/build.gradle.kts"]:
+for f in ["lmili-api/build.gradle.kts", "lmili-server/build.gradle.kts"]:
     apply(f)

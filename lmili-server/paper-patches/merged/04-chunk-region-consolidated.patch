@@ -1,0 +1,245 @@
+diff --git a/src/main/java/io/papermc/paper/util/MCUtil.java b/src/main/java/io/papermc/paper/util/MCUtil.java
+--- a/src/main/java/io/papermc/paper/util/MCUtil.java
++++ b/src/main/java/io/papermc/paper/util/MCUtil.java
+@@ -183,6 +183,12 @@
+         return CraftLocation.toBukkit(pos, world);
+     }
+ 
++    // Luminol start - add BlockPos support
++    public static Location toLocation(Level world, BlockPos pos) {
++        return new Location(world.getWorld(), pos.getX(), pos.getY(), pos.getZ());
++    }
++    // Luminol end - add BlockPos support
++
+     /**
+      * Converts a NMS World/Vector to Bukkit Location
+      *
+-- 
+2.55.0.windows.3
+
+
+// === Merged from: 007-Force-disable-builtin-spark-plugin.patch ===
+// Subject: Force disable builtin spark plugin
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java b/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
+--- a/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
++++ b/src/main/java/io/papermc/paper/plugin/provider/source/FileProviderSource.java
+@@ -76,7 +76,7 @@
+         }
+ 
+         final PluginMeta config = type.getConfig(file);
+-        if ((config.getName().equals("spark") && config.getMainClass().equals("me.lucko.spark.bukkit.BukkitSparkPlugin")) && !SparksFly.isPluginPreferred()) {
++        if ((config.getName().equals("spark") && config.getMainClass().equals("me.lucko.spark.bukkit.BukkitSparkPlugin")) && !SparksFly.isPluginPreferred() && false) { // Luminol - Force disable builtin spark
+             LOGGER.info("The spark plugin will not be loaded as this server bundles the spark profiler.");
+             return;
+         }
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -302,7 +302,7 @@
+     public static Exception excessiveVelEx;
+     private final io.papermc.paper.logging.SysoutCatcher sysoutCatcher = new io.papermc.paper.logging.SysoutCatcher();
+     private final io.papermc.paper.potion.PaperPotionBrewer potionBrewer;
+-    public final io.papermc.paper.SparksFly spark;
++    public io.papermc.paper.SparksFly spark; // Paper - spark // Luminol - Force disable builtin spark
+     private final ServerConfiguration serverConfig = new PaperServerConfiguration();
+ 
+     // Paper start - Folia region threading API
+@@ -478,7 +478,7 @@
+         }
+         this.potionBrewer = new io.papermc.paper.potion.PaperPotionBrewer(console); // Paper - custom potion mixes
+         datapackManager = new io.papermc.paper.datapack.PaperDatapackManager(console.getPackRepository()); // Paper
+-        this.spark = new io.papermc.paper.SparksFly(this); // Paper - spark
++        if (false) this.spark = new io.papermc.paper.SparksFly(this); // Paper - spark // Luminol - Force disable builtin spark
+     }
+ 
+     public boolean getCommandBlockOverride(String command) {
+@@ -1049,7 +1049,7 @@
+         this.reloadData();
+         org.spigotmc.SpigotConfig.registerCommands(); // Spigot
+         io.papermc.paper.command.PaperCommands.registerCommands(this.console); // Paper
+-        this.spark.registerCommandBeforePlugins(this); // Paper - spark
++        if (false) this.spark.registerCommandBeforePlugins(this); // Paper - spark // Luminol - Force disable builtin spark
+         this.overrideAllCommandBlockCommands = this.commandsConfiguration.getStringList("command-block-overrides").contains("*");
+         this.ignoreVanillaPermissions = this.commandsConfiguration.getBoolean("ignore-vanilla-permissions");
+ 
+@@ -1078,7 +1078,7 @@
+         this.loadPlugins();
+         this.enablePlugins(PluginLoadOrder.STARTUP);
+         this.enablePlugins(PluginLoadOrder.POSTWORLD);
+-        this.spark.registerCommandAfterPlugins(this); // Paper - spark
++        if (false) this.spark.registerCommandAfterPlugins(this); // Paper - spark // Luminol - Force disable builtin spark
+         // Paper start - brigadier command API
+         io.papermc.paper.command.brigadier.PaperCommands.INSTANCE.setValid(); // to clear invalid state for event fire below
+         io.papermc.paper.plugin.lifecycle.event.LifecycleEventRunner.INSTANCE.callReloadableRegistrarEvent(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, io.papermc.paper.command.brigadier.PaperCommands.INSTANCE, org.bukkit.plugin.Plugin.class, io.papermc.paper.plugin.lifecycle.event.registrar.ReloadableRegistrarEvent.Cause.RELOAD); // call commands event for regular plugins
+-- 
+2.55.0.windows.3
+
+
+// === Merged from: 008-Tick-regions-api.patch ===
+// Subject: Tick regions api
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -2082,4 +2082,11 @@
+         return POINTERS_SUPPLIER.view(this);
+     }
+     // Paper end
++
++    // Luminol start - Tick regions api
++    @Override
++    public fun.bm.mili.lmili.api.ThreadedRegionizer getThreadedRegionizer() {
++        return this.world.regioniser.threadedRegionizerAPI;
++    }
++    // Luminol end
+ }
+-- 
+2.55.0.windows.3
+
+
+// === Merged from: 010-Leaf-Secure-seed-and-matter-seed-command.patch ===
+// Subject: Leaf Secure seed and matter seed command
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftChunk.java b/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
+--- a/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
+@@ -191,7 +191,12 @@
+     @Override
+     public boolean isSlimeChunk() {
+         // 987234911L is taken from Slime when seeing if a slime can spawn in a chunk
+-        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || WorldgenRandom.seedSlimeChunk(this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
++        // Leaf start - Matter - Secure Seed
++        boolean isSlimeChunk = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
++            ? level.getChunk(this.getX(), this.getZ()).isSlimeChunk()
++            : WorldgenRandom.seedSlimeChunk(this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
++        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || isSlimeChunk;
++        // Leaf end - Matter - Secure Seed
+     }
+ 
+     @Override
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1259,7 +1259,11 @@
+             .orElse(null);
+         RegistryAccess contextRegistryAccess = registryAccess;
+         if (worldGenSettings == null) {
+-            WorldOptions worldOptions = new WorldOptions(creator.seed(), creator.generateStructures(), creator.bonusChest());
++            // Leaf start - Matter - Secure Seed
++            WorldOptions worldOptions = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
++                ? new WorldOptions(creator.seed(), su.plo.matter.Globals.createRandomWorldSeed(), creator.generateStructures(), false)
++                : new WorldOptions(creator.seed(), creator.generateStructures(), creator.bonusChest());
++            // Leaf end - Matter - Secure Seed
+ 
+             String flatGenSettings = creator.generatorSettings();
+             if (flatGenSettings.isEmpty()) {
+-- 
+2.55.0.windows.3
+
+
+// === Merged from: 017-Add-cancel-task-by-task-id-in-FoliaGlobalRegionScheduler.patch ===
+// Subject: Add cancel task by task id in FoliaGlobalRegionScheduler
+// Author: Helvetica Volubi <suisuroru@blue-millennium.fun>
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+--- a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+@@ -16,6 +16,8 @@
+     private long tickCount = 0L;
+     private final Object stateLock = new Object();
+     private final Long2ObjectOpenHashMap<List<GlobalScheduledTask>> tasksByDeadline = new Long2ObjectOpenHashMap<>();
++    private int lastTaskId = 1; // Mili - add task id
++    private final Object stateLockForTaskId = new Object(); // Mili - add task id
+ 
+     public void tick() {
+         final List<GlobalScheduledTask> run;
+@@ -64,7 +66,7 @@
+             throw new IllegalPluginAccessException("Plugin attempted to register task while disabled");
+         }
+ 
+-        final GlobalScheduledTask ret = new GlobalScheduledTask(plugin, -1, task);
++        final GlobalScheduledTask ret = new GlobalScheduledTask(plugin, -1, task, this.getNextTaskId()); // Mili - add task id
+ 
+         this.scheduleInternal(ret, delayTicks);
+ 
+@@ -91,7 +93,7 @@
+             throw new IllegalPluginAccessException("Plugin attempted to register task while disabled");
+         }
+ 
+-        final GlobalScheduledTask ret = new GlobalScheduledTask(plugin, periodTicks, task);
++        final GlobalScheduledTask ret = new GlobalScheduledTask(plugin, periodTicks, task, this.getNextTaskId()); // Mili - add task id
+ 
+         this.scheduleInternal(ret, initialDelayTicks);
+ 
+@@ -133,7 +135,33 @@
+         }
+     }
+ 
+-    private final class GlobalScheduledTask implements ScheduledTask, Runnable {
++    // Mili start - add cancel task by task id
++    public void cancelTask(final int taskId) {
++        synchronized (this.stateLock) {
++            for (final List<GlobalScheduledTask> tasks : this.tasksByDeadline.values()) {
++                for (final GlobalScheduledTask task : tasks) {
++                    if (task.getTaskId() == taskId) {
++                        task.cancel();
++                        return;
++                    }
++                }
++            }
++        }
++    }
++
++    private int getNextTaskId() {
++        synchronized (this.stateLockForTaskId) {
++            if (this.lastTaskId == Integer.MAX_VALUE) {
++                this.lastTaskId = 1;
++            } else {
++                ++this.lastTaskId;
++            }
++        }
++        return this.lastTaskId;
++    }
++    // Mili end - add cancel task by task id
++
++    public final class GlobalScheduledTask implements ScheduledTask, Runnable { // Mili - private -> public
+ 
+         private static final int STATE_IDLE                = 0;
+         private static final int STATE_EXECUTING           = 1;
+@@ -145,13 +173,15 @@
+         private final long repeatDelay; // in ticks
+         private Consumer<ScheduledTask> run;
+         private volatile int state;
++        private int taskId; // Mili - add task id
+ 
+         private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(GlobalScheduledTask.class, "state", int.class);
+ 
+-        private GlobalScheduledTask(final Plugin plugin, final long repeatDelay, final Consumer<ScheduledTask> run) {
++        private GlobalScheduledTask(final Plugin plugin, final long repeatDelay, final Consumer<ScheduledTask> run, int taskId) { // Mili - add task id
+             this.plugin = plugin;
+             this.repeatDelay = repeatDelay;
+             this.run = run;
++            this.taskId = taskId; // Mili - add task id
+         }
+ 
+         private final int getStateVolatile() {
+@@ -262,5 +292,11 @@
+                 }
+             }
+         }
++
++        // Mili start - add task id
++        public int getTaskId() {
++            return taskId;
++        }
++        // Mili end - add task id
+     }
+ }
+-- 
+2.55.0.windows.3

@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
 /**
@@ -217,4 +218,23 @@ public final class DagBasedTickExecutor implements RegionTickExecutor {
     public int getSystemCount() { return registeredSystems.size(); }
     public long getDagBuildNanos() { return this.dagBuildNanos; }
     public RegionDag getCachedDag() { return this.cachedDag; }
+
+    /**
+     * 优雅关闭DAG执行器，关闭共享的ForkJoinPool。
+     * 应在server关闭时调用，防止线程泄漏。
+     */
+    public static void shutdown() {
+        LOGGER.info("[DagBasedTickExecutor] Shutting down shared ForkJoinPool...");
+        SHARED_DAG_POOL.shutdown();
+        try {
+            if (!SHARED_DAG_POOL.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("[DagBasedTickExecutor] Force shutting down ForkJoinPool");
+                SHARED_DAG_POOL.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            SHARED_DAG_POOL.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        LOGGER.info("[DagBasedTickExecutor] Shutdown complete");
+    }
 }

@@ -1,0 +1,429 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy <xucy0609@gmail.com>s
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Misc (consolidated)
+
+Consolidated from 5 original patches:
+  - 0025-Add-back-read-only-datapack-command.patch: Add back read-only datapack command
+  - 0040-Lithium-Fast-util.patch: Lithium: Fast util
+  - 0083-Leaf-Check-targeting-range-before-getting-visibility.patch: Leaf: Check targeting range before getting visibility
+  - 0087-Some-optimizations-from-krypton.patch: Some optimizations from krypton
+  - 0111-Global-Entities-Counter.patch: Global-Entities-Counter
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -557,6 +557,9 @@
+     }
+     // Luminol end
+ 
++    public int uniqueId = -1; // Mili - Global Entities Counter
++    public boolean underGlobalEntitiesCounter = false; // Mili - Global Entities Counter
++
+     public final TickRegions.TickRegionData regionData;
+ 
+     public RegionizedWorldData(final ServerLevel world, final TickRegions.TickRegionData regionData) {
+@@ -572,6 +575,13 @@
+         this.turbo = new io.papermc.paper.redstone.RedstoneWireTurbo((RedStoneWireBlock)Blocks.REDSTONE_WIRE);
+         this.regionData = regionData;
+ 
++        // Mili start - Global Entities Counter
++        if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++            uniqueId = fun.bm.mili.utils.EntitiesCounterUtil.generateUniqueId();
++            underGlobalEntitiesCounter = true;
++        }
++        // Mili end - Global Entities Counter
++
+         // tasks may be drained before the region ticks, so we must set up the tick data early just in case
+         this.updateTickData();
+     }
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -205,7 +205,7 @@
+         if(fun.bm.mili.lmili.config.modules.experiment.CommandConfig.data) { // Luminol - Config for data command
+         DataCommands.register(this.dispatcher); // Folia - region threading - TODO // Luminol - Config for data command
+         } // Luminol - Config for data command
+-        //DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO
++        DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO // Luminol - Add back read-only datapack command
+         //DebugCommand.register(this.dispatcher); // Folia - region threading - TODO
+         DefaultGameModeCommands.register(this.dispatcher);
+         //DialogCommand.register(this.dispatcher, context); // Folia - region threading - TODO
+
+diff --git a/net/minecraft/core/Direction.java b/net/minecraft/core/Direction.java
+--- a/net/minecraft/core/Direction.java
++++ b/net/minecraft/core/Direction.java
+@@ -223,7 +223,7 @@
+     }
+ 
+     public Direction getOpposite() {
+-        return this.opposite; // Paper - optimise collisions
++        return VALUES[this.oppositeIndex]; // Leaf - Lithium - fast util
+     }
+ 
+     public Direction getClockWise(final Direction.Axis axis) {
+@@ -355,7 +355,7 @@
+     }
+ 
+     public static Direction getRandom(final RandomSource random) {
+-        return Util.getRandom(VALUES, random);
++        return VALUES[random.nextInt(VALUES.length)]; // Leaf - Lithium - fast util
+     }
+ 
+     public static Direction getApproximateNearest(final double dx, final double dy, final double dz) {
+
+diff --git a/net/minecraft/network/Utf8String.java b/net/minecraft/network/Utf8String.java
+--- a/net/minecraft/network/Utf8String.java
++++ b/net/minecraft/network/Utf8String.java
+@@ -33,6 +33,22 @@
+     }
+ 
+     public static void write(final ByteBuf output, final CharSequence value, final int maxLength) {
++        // Luminol start - Krypton optimizations
++        if (true) {
++            if (value.length() > maxLength) {
++                throw new EncoderException("String too big (was " + value.length() + " characters, max " + maxLength + ")");
++            }
++            int utf8Bytes = ByteBufUtil.utf8Bytes(value);
++            int maxBytesPermitted = ByteBufUtil.utf8MaxBytes(maxLength);
++            if (utf8Bytes > maxBytesPermitted) {
++                throw new EncoderException("String too big (was " + utf8Bytes + " bytes encoded, max " + maxBytesPermitted + ")");
++            } else {
++                VarInt.write(output, utf8Bytes);
++                output.writeCharSequence(value, StandardCharsets.UTF_8);
++            }
++            return;
++        }
++        // Luminol end
+         if (value.length() > maxLength) {
+             throw new EncoderException("String too big (was " + value.length() + " characters, max " + maxLength + ")");
+         }
+
+diff --git a/net/minecraft/network/VarInt.java b/net/minecraft/network/VarInt.java
+--- a/net/minecraft/network/VarInt.java
++++ b/net/minecraft/network/VarInt.java
+@@ -60,7 +60,8 @@
+             int s = (value & 0x7F | 0x80) << 8 | (value >>> 7);
+             output.writeShort(s);
+         } else {
+-            writeSlow(output, value);
++            // writeSlow(output, value); // Luminol - Krypton optimizations
++            writeVarIntFull(output, value); // Luminol - Krypton optimizations
+         }
+         return output;
+     }
+@@ -75,4 +76,27 @@
+         output.writeByte(value);
+         return output;
+     }
++    // Luminol start - Krypton optimizations
++    private static void writeVarIntFull(ByteBuf buf, int value) {
++        // See https://steinborn.me/posts/performance/how-fast-can-you-write-a-varint/
++        if ((value & (0xFFFFFFFF << 7)) == 0) {
++            buf.writeByte(value);
++        } else if ((value & (0xFFFFFFFF << 14)) == 0) {
++            int w = (value & 0x7F | 0x80) << 8 | (value >>> 7);
++            buf.writeShort(w);
++        } else if ((value & (0xFFFFFFFF << 21)) == 0) {
++            int w = (value & 0x7F | 0x80) << 16 | ((value >>> 7) & 0x7F | 0x80) << 8 | (value >>> 14);
++            buf.writeMedium(w);
++        } else if ((value & (0xFFFFFFFF << 28)) == 0) {
++            int w = (value & 0x7F | 0x80) << 24 | (((value >>> 7) & 0x7F | 0x80) << 16)
++                    | ((value >>> 14) & 0x7F | 0x80) << 8 | (value >>> 21);
++            buf.writeInt(w);
++        } else {
++            int w = (value & 0x7F | 0x80) << 24 | ((value >>> 7) & 0x7F | 0x80) << 16
++                    | ((value >>> 14) & 0x7F | 0x80) << 8 | ((value >>> 21) & 0x7F | 0x80);
++            buf.writeInt(w);
++            buf.writeByte(value >>> 28);
++        }
++    }
++    // Luminol end
+ }
+
+diff --git a/net/minecraft/server/commands/DataPackCommand.java b/net/minecraft/server/commands/DataPackCommand.java
+--- a/net/minecraft/server/commands/DataPackCommand.java
++++ b/net/minecraft/server/commands/DataPackCommand.java
+@@ -99,7 +99,7 @@
+         dispatcher.register(
+             Commands.literal("datapack")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+-                .then(
++                /*.then( // Luminol - Add back read-only datapack command
+                     Commands.literal("enable")
+                         .then(
+                             Commands.argument("name", StringArgumentType.string())
+@@ -146,11 +146,11 @@
+                                 .suggests(SELECTED_PACKS)
+                                 .executes(c -> disablePack(c.getSource(), getPack(c, "name", false)))
+                         )
+-                )
++                )*/ // Luminol - Add back read-only datapack command
+                 .then(
+                     Commands.literal("list")
+                         .executes(c -> listPacks(c.getSource()))
+-                        .then(Commands.literal("available").executes(c -> listAvailablePacks(c.getSource())))
++                        // .then(Commands.literal("available").executes(c -> listAvailablePacks(c.getSource()))) // Luminol - Add back read-only datapack command
+                         .then(Commands.literal("enabled").executes(c -> listEnabledPacks(c.getSource())))
+                 )
+                 .then(
+@@ -238,7 +238,7 @@
+     }
+ 
+     private static int listPacks(final CommandSourceStack source) {
+-        return listEnabledPacks(source) + listAvailablePacks(source);
++        return listEnabledPacks(source) ;// + listAvailablePacks(source); // Luminol - Add back read-only datapack command
+     }
+ 
+     private static int listAvailablePacks(final CommandSourceStack source) {
+@@ -266,7 +266,7 @@
+ 
+     private static int listEnabledPacks(final CommandSourceStack source) {
+         PackRepository repository = source.getServer().getPackRepository();
+-        repository.reload();
++        // repository.reload(); // Luminol - Add back read-only datapack command
+         Collection<? extends Pack> selectedPacks = repository.getSelectedPacks();
+         if (selectedPacks.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.datapack.list.enabled.none"), false);
+
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -511,6 +511,23 @@
+         this.chunkMap.tick(haveTime);
+         profiler.pop();
+         this.clearCache();
++        // Mili start - Global Entities Counter
++        if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++            io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.level.getCurrentWorldData();
++            if (regionizedWorldData != null) {
++                if (regionizedWorldData.underGlobalEntitiesCounter) {
++                    if (regionizedWorldData.getLocalPlayers().isEmpty()) {
++                        fun.bm.mili.utils.EntitiesCounterUtil.onWorldDataUnload(level, regionizedWorldData.uniqueId);
++                        regionizedWorldData.underGlobalEntitiesCounter = false;
++                    }
++                } else {
++                    if (!regionizedWorldData.getLocalPlayers().isEmpty()) {
++                        regionizedWorldData.underGlobalEntitiesCounter = true;
++                    }
++                }
++            }
++        }
++        // Mili end - Global Entities Counter
+     }
+ 
+     private void tickChunks() {
+@@ -592,7 +609,13 @@
+             }
+             spawnCookie = NaturalSpawner.createState(chunkCount, regionizedWorldData.getLoadedEntities(), this::getFullChunk, null, true); // Folia - region threading - note: function only cares about loaded entities, doesn't need all
+         } else {
++            // Mili start - Global Entities Counter
++            if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++                spawnCookie = fun.bm.mili.utils.EntitiesCounterUtil.runRemainingTasks(level, regionizedWorldData.getLoadedEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
++            } else {
+             spawnCookie = NaturalSpawner.createState(chunkCount, regionizedWorldData.getLoadedEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false); // Folia - region threading - note: function only cares about loaded entities, doesn't need all
++            }
++            // Mili end - Global Entities Counter
+         }
+         } finally { foliaProfiler.stopTimer(ca.spottedleaf.leafprofiler.LProfilerRegistry.MOB_SPAWN_ENTITY_COUNT); } // Folia - profiler
+         // Paper end - Optional per player mob spawns
+@@ -606,7 +629,7 @@
+         boolean doMobSpawning = this.level.getGameRules().get(GameRules.SPAWN_MOBS) && !this.level.getLocalPlayers().isEmpty(); // CraftBukkit // Folia - region threading
+         int tickSpeed = this.level.getGameRules().get(GameRules.RANDOM_TICK_SPEED);
+         List<MobCategory> spawningCategories;
+-        if (doMobSpawning && (this.spawnEnemies || this.spawnFriendlies)) { // Paper
++        if (spawnCookie != null && doMobSpawning && (this.spawnEnemies || this.spawnFriendlies)) { // Paper // Mili - Global Entities Counter
+             // Paper start - PlayerNaturallySpawnCreaturesEvent
+             for (ServerPlayer player : this.level.getLocalPlayers()) { // Folia - region threading
+                 int chunkRange = Math.min(level.spigotConfig.mobSpawnRange, player.getBukkitEntity().getViewDistance());
+@@ -666,7 +689,7 @@
+             this.level.tickThunder(chunk);
+         }
+ 
+-        if (!spawningCategories.isEmpty()) {
++        if (spawnCookie != null && !spawningCategories.isEmpty()) { // Mili - Global Entities Counter
+             if (this.level.getWorldBorder().isWithinBounds(chunkPos)) { // Paper - rewrite chunk system
+                 NaturalSpawner.spawnForChunk(this.level, chunk, spawnCookie, spawningCategories);
+             }
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -817,6 +817,22 @@
+     }
+ 
+     public void tick(BooleanSupplier haveTime, final io.papermc.paper.threadedregions.TickRegions.TickRegionData region) { // Folia - regionised ticking
++        // Mili start - Global Entities Counter
++        if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++            io.papermc.paper.threadedregions.RegionizedWorldData data = this.getCurrentWorldData();
++            if (data != null && data.underGlobalEntitiesCounter) {
++                fun.bm.mili.utils.EntitiesCounterUtil.tick(this, data.uniqueId, (ca.spottedleaf.moonrise.common.list.ReferenceList<Entity>) data.getLoadedEntities(), data.spawnChunkTracker);
++            }
++        }
++        // Mili end - Global Entities Counter
++        // Mili start - Cross Region Helper
++        if (fun.bm.mili.config.modules.experiment.CrossRegionHelperConfig.enabled) {
++            io.papermc.paper.threadedregions.RegionizedWorldData data = this.getCurrentWorldData();
++            if (data != null) {
++                fun.bm.mili.utils.CrossRegionHelper.onRegionTick(this, data);
++            }
++        }
++        // Mili end - Cross Region Helper
+         final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.getCurrentWorldData(); // Folia - regionised ticking
+         final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle foliaProfiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler(); // Folia - profiler
+         ProfilerFiller profiler = Profiler.get();
+
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -826,6 +826,44 @@
+                 }
+             }
+         } else {
++            // Mili start - fix some bug if player is cross scheduler >> to remove monster if the region don't have any valid player
++            if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++                List<net.minecraft.server.level.ServerPlayer> playerList = this.level().getServer().getPlayerList().getPlayers();
++                if (!playerList.isEmpty()) {
++                    double d = -1.0;
++                    Vec3 vec3 = null;
++                    for (net.minecraft.server.level.ServerPlayer player1 : playerList) {
++                        if (player1.level() != this.level()) continue;
++                        double d1 = player1.distanceToSqr(this.position());
++                        if (d == -1.0 || d1 < d) {
++                            d = d1;
++                            vec3 = player1.position();
++                        }
++                    }
++                    if (vec3 != null) {
++                        // copy from PaperMC
++                        // Paper start - Configurable despawn distances
++                        final io.papermc.paper.configuration.WorldConfiguration.Entities.Spawning.DespawnRangePair despawnRangePair = this.level().paperConfig().entities.spawning.despawnRanges.get(this.getType().getCategory());
++                        final io.papermc.paper.configuration.type.DespawnRange.Shape shape = this.level().paperConfig().entities.spawning.despawnRangeShape;
++                        final double dy = Math.abs(vec3.y - this.getY());
++                        final double dySqr = Mth.square(dy);
++                        final double dxSqr = Mth.square(vec3.x - this.getX());
++                        final double dzSqr = Mth.square(vec3.z - this.getZ());
++                        final double distanceSquared = dxSqr + dzSqr + dySqr;
++                        // Despawn if hard/soft limit is exceeded
++                        if (despawnRangePair.hard().shouldDespawn(shape, dxSqr, dySqr, dzSqr, dy) && this.removeWhenFarAway(distanceSquared)) {
++                            this.discard(EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
++                        }
++
++                        if (despawnRangePair.soft().shouldDespawn(shape, dxSqr, dySqr, dzSqr, dy)) {
++                            if (this.noActionTime > 600 && this.random.nextInt(800) == 0 && this.removeWhenFarAway(distanceSquared)) {
++                                this.discard(EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
++                            }
++                        }
++                    }
++                }
++            }
++            // Mili end
+             this.noActionTime = 0;
+         }
+     }
+
+diff --git a/net/minecraft/world/entity/ai/targeting/TargetingConditions.java b/net/minecraft/world/entity/ai/targeting/TargetingConditions.java
+--- a/net/minecraft/world/entity/ai/targeting/TargetingConditions.java
++++ b/net/minecraft/world/entity/ai/targeting/TargetingConditions.java
+@@ -79,9 +79,18 @@
+             }
+ 
+             if (this.range > 0.0) {
+-                double modifier = this.testInvisible ? target.getVisibilityPercent(targeter) : 1.0;
+-                double visibilityDistance = Math.max(this.range * modifier, 2.0);
++                // Gale start - Airplane - check targeting range before getting visibility
++                // modifier = invisibility percent, visibilityDistance = follow range adjusted for invisibility, distanceToSqr = distance
+                 double distanceToSqr = targeter.distanceToSqr(target.getX(), target.getY(), target.getZ());
++                double followRangeRaw = this.range;
++
++                if (distanceToSqr > followRangeRaw * followRangeRaw) { // the actual follow range will always be this value or smaller, so if the distance is larger then it never will return true after getting invis
++                    return false;
++                }
++
++                double modifier = this.testInvisible ? target.getVisibilityPercent(targeter) : 1.0;
++                double visibilityDistance = Math.max(followRangeRaw * modifier, 2.0);
++                // Gale end - Airplane - check targeting range before getting visibility
+                 if (distanceToSqr > visibilityDistance * visibilityDistance) {
+                     return false;
+                 }
+
+diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
+--- a/net/minecraft/world/level/NaturalSpawner.java
++++ b/net/minecraft/world/level/NaturalSpawner.java
+@@ -121,7 +121,7 @@
+         return new NaturalSpawner.SpawnState(spawnableChunkCount, mobCounts, spawnPotential, localMobCapCalculator);
+     }
+ 
+-    private static Biome getRoughBiome(final BlockPos pos, final ChunkAccess chunk) {
++    public static Biome getRoughBiome(final BlockPos pos, final ChunkAccess chunk) { // Mili - private -> public
+         return chunk.getNoiseBiome(QuartPos.fromBlock(pos.getX()), QuartPos.fromBlock(pos.getY()), QuartPos.fromBlock(pos.getZ())).value();
+     }
+ 
+@@ -629,7 +629,7 @@
+         private @Nullable EntityType<?> lastCheckedType;
+         private double lastCharge;
+ 
+-        private SpawnState(
++        public SpawnState( // Mili - private -> public
+             final int spawnableChunkCount,
+             final Object2IntOpenHashMap<MobCategory> mobCategoryCounts,
+             final PotentialCalculator spawnPotential,
+
+diff --git a/net/minecraft/world/phys/AABB.java b/net/minecraft/world/phys/AABB.java
+--- a/net/minecraft/world/phys/AABB.java
++++ b/net/minecraft/world/phys/AABB.java
+@@ -19,6 +19,15 @@
+     public final double maxY;
+     public final double maxZ;
+ 
++    // Leaf start - Lithium - fast util
++    static {
++        assert Direction.Axis.X.ordinal() == 0;
++        assert Direction.Axis.Y.ordinal() == 1;
++        assert Direction.Axis.Z.ordinal() == 2;
++        assert Direction.Axis.values().length == 3;
++    }
++    // Leaf end - Lithium - fast util
++
+     public AABB(final double minX, final double minY, final double minZ, final double maxX, final double maxY, final double maxZ) {
+         this.minX = Math.min(minX, maxX);
+         this.minY = Math.min(minY, maxY);
+@@ -89,11 +98,33 @@
+     }
+ 
+     public double min(final Direction.Axis axis) {
+-        return axis.choose(this.minX, this.minY, this.minZ);
++        // Leaf start - Lithium - fast util
++        switch (axis.ordinal()) {
++            case 0: //X
++                return this.minX;
++            case 1: //Y
++                return this.minY;
++            case 2: //Z
++                return this.minZ;
++        }
++
++        throw new IllegalArgumentException();
++        // Leaf end - Lithium - fast util
+     }
+ 
+     public double max(final Direction.Axis axis) {
+-        return axis.choose(this.maxX, this.maxY, this.maxZ);
++        // Leaf start - Lithium - fast util
++        switch (axis.ordinal()) {
++            case 0: //X
++                return this.maxX;
++            case 1: //Y
++                return this.maxY;
++            case 2: //Z
++                return this.maxZ;
++        }
++
++        throw new IllegalArgumentException();
++        // Leaf end - Lithium - fast util
+     }
+ 
+     @Override
+

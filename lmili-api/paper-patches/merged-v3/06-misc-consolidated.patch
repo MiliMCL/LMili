@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mili Dev <dev@mili.example>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Misc (consolidated)
+
+Consolidated from 1 original patches:
+  - 0003-Disable-timings-warn-msg-and-commands.patch
+
+
+diff --git a/src/main/java/co/aikar/timings/Timings.java b/src/main/java/co/aikar/timings/Timings.java
+--- a/src/main/java/co/aikar/timings/Timings.java
++++ b/src/main/java/co/aikar/timings/Timings.java
+@@ -147,7 +147,7 @@
+     public static void setTimingsEnabled(boolean enabled) {
+         enabled = false; // Folia - region threading - disable timings
+         if (enabled && !warnedAboutDeprecationOnEnable) {
+-            Bukkit.getLogger().severe(PlainTextComponentSerializer.plainText().serialize(deprecationMessage()));
++            // Bukkit.getLogger().severe(PlainTextComponentSerializer.plainText().serialize(deprecationMessage()));  // Mili - Disable timings warn msg and commands
+             warnedAboutDeprecationOnEnable = true;
+         }
+     }
+
+diff --git a/src/main/java/org/bukkit/command/SimpleCommandMap.java b/src/main/java/org/bukkit/command/SimpleCommandMap.java
+--- a/src/main/java/org/bukkit/command/SimpleCommandMap.java
++++ b/src/main/java/org/bukkit/command/SimpleCommandMap.java
+@@ -34,7 +34,7 @@
+         final ReloadCommand reload = new ReloadCommand("reload");
+         this.knownCommands.put("bukkit:reload", reload);
+         this.knownCommands.put("bukkit:rl", reload);
+-        register("bukkit", new co.aikar.timings.TimingsCommand("timings"));
++        //register("bukkit", new co.aikar.timings.TimingsCommand("timings")); // Mili - Disable timings warn msg and commands
+     }
+ 
+     public void setFallbackCommands() {
+
+diff --git a/src/main/java/org/bukkit/plugin/SimplePluginManager.java b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
+--- a/src/main/java/org/bukkit/plugin/SimplePluginManager.java
++++ b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
+@@ -966,7 +966,7 @@
+      */
+     @Deprecated(forRemoval = true)
+     public void useTimings(boolean use) {
+-        co.aikar.timings.Timings.setTimingsEnabled(use); // Paper
++        // co.aikar.timings.Timings.setTimingsEnabled(use); // Paper // Mili - Disable timings warn msg and commands
+     }
+ 
+     // Paper start
+

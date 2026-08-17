@@ -42,7 +42,7 @@ paperweight {
         forks = folia
         upstream.patchRepo("paperServer") {
             upstreamRepo = folia.patchedRepo("paperServer")
-            patchesDir = rootDirectory.dir("lmili-server/paper-patches")
+            patchesDir = rootDirectory.dir("lmili-server/paper-patches/merged-v3")
             outputDir = rootDirectory.dir("paper-server")
         }
 

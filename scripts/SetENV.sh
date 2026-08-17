@@ -1,5 +1,6 @@
 prop() {
-  grep "^[[:space:]]*${1}" gradle.properties | cut -d'=' -f2 | sed 's/^[[:space:]]*//; s/\r//'
+  # Mili start - fix: use cut -d'=' -f2- to handle values containing '='
+  grep "^[[:space:]]*${1}" gradle.properties | cut -d'=' -f2- | sed 's/^[[:space:]]*//; s/\r//'
 }
 
 project_id="lmili"

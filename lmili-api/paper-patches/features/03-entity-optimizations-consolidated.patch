@@ -1,0 +1,249 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Entity Optimizations (consolidated)
+
+Consolidated from 6 original patches:
+  - 0005-Pufferfish-Sentry.patch
+  - 0006-Pufferfish-SIMD-Utilities.patch
+  - 0008-Leaves-Fix-SculkCatalyst-exp-skip.patch
+  - 0009-Purpur-Lobotomize-stuck-villagers.patch
+  - 0011-Leaves-Replay-Mod-API.patch
+  - 0012-Leaves-Bytebuf-API.patch
+
+
+diff --git a/src/main/java/org/bukkit/Bukkit.java b/src/main/java/org/bukkit/Bukkit.java
+--- a/src/main/java/org/bukkit/Bukkit.java
++++ b/src/main/java/org/bukkit/Bukkit.java
+@@ -3045,4 +3045,10 @@
+     public static void restart() {
+         server.restart();
+     }
++
++    // Leaves start - Photographer API
++    public static @NotNull org.leavesmc.leaves.entity.photographer.PhotographerManager getPhotographerManager() {
++        return server.getPhotographerManager();
++    }
++    // Leaves end - Photographer API
+ }
+@@ -3062,4 +3062,10 @@
+         return server.getPhotographerManager();
+     }
+     // Leaves end - Photographer API
++
++    // Leaves start - Bytebuf API
++    public static org.leavesmc.leaves.bytebuf.BytebufAllocator getBytebufManager() {
++        return server.getBytebufAllocator();
++    }
++    // Leaves end - Bytebuf API
+ }
+
+diff --git a/src/main/java/org/bukkit/Server.java b/src/main/java/org/bukkit/Server.java
+--- a/src/main/java/org/bukkit/Server.java
++++ b/src/main/java/org/bukkit/Server.java
+@@ -2804,4 +2804,8 @@
+      */
+     double @Nullable [] getRegionTPS(@NotNull World world, int chunkX, int chunkZ);
+     // Folia end - region TPS API
++
++    // Leaves start - Photographer API
++    @NotNull org.leavesmc.leaves.entity.photographer.PhotographerManager getPhotographerManager();
++    // Leaves end - Photographer API
+ }
+@@ -2808,4 +2808,8 @@
+     // Leaves start - Photographer API
+     @NotNull org.leavesmc.leaves.entity.photographer.PhotographerManager getPhotographerManager();
+     // Leaves end - Photographer API
++
++    // Leaves start - Bytebuf API
++    org.leavesmc.leaves.bytebuf.BytebufAllocator getBytebufAllocator();
++    // Leaves end - Bytebuf API
+ }
+
+diff --git a/src/main/java/org/bukkit/entity/Player.java b/src/main/java/org/bukkit/entity/Player.java
+--- a/src/main/java/org/bukkit/entity/Player.java
++++ b/src/main/java/org/bukkit/entity/Player.java
+@@ -75,7 +75,7 @@
+  * Represents a player, connected or not
+  */
+ @NullMarked
+-public interface Player extends HumanEntity, Conversable, OfflinePlayer, PluginMessageRecipient, net.kyori.adventure.identity.Identified, net.kyori.adventure.bossbar.BossBarViewer, com.destroystokyo.paper.network.NetworkClient, ObjectContentsLike { // Paper
++public interface Player extends HumanEntity, Conversable, OfflinePlayer, PluginMessageRecipient, net.kyori.adventure.identity.Identified, net.kyori.adventure.bossbar.BossBarViewer, com.destroystokyo.paper.network.NetworkClient, ObjectContentsLike, org.leavesmc.leaves.bytebuf.PacketAudience { // Paper // Leaves - Bytebuf API
+ 
+     // Paper start
+     @Override
+
+diff --git a/src/main/java/org/bukkit/entity/Villager.java b/src/main/java/org/bukkit/entity/Villager.java
+--- a/src/main/java/org/bukkit/entity/Villager.java
++++ b/src/main/java/org/bukkit/entity/Villager.java
+@@ -406,4 +406,13 @@
+      * Demand is still updated even if all events are canceled.
+      */
+     public void restock();
++    // Purpur start
++
++    /**
++     * Check if villager is currently lobotomized
++     *
++     * @return True if lobotomized
++     */
++    boolean isLobotomized();
++    // Purpur end
+ }
+
+diff --git a/src/main/java/org/bukkit/event/entity/EntityDeathEvent.java b/src/main/java/org/bukkit/event/entity/EntityDeathEvent.java
+--- a/src/main/java/org/bukkit/event/entity/EntityDeathEvent.java
++++ b/src/main/java/org/bukkit/event/entity/EntityDeathEvent.java
+@@ -27,6 +27,7 @@
+     @Nullable private org.bukkit.SoundCategory deathSoundCategory;
+     private float deathSoundVolume;
+     private float deathSoundPitch;
++    private int rewardExp; // Leaves - exp fix
+ 
+     private boolean cancelled;
+ 
+@@ -36,13 +37,20 @@
+         this(livingEntity, damageSource, drops, 0);
+     }
+ 
+-    @ApiStatus.Internal
+     public EntityDeathEvent(@NotNull final LivingEntity livingEntity, @NotNull DamageSource damageSource, @NotNull final List<ItemStack> drops, final int droppedExp) {
++        // Leaves start - exp fix
++        this(livingEntity, damageSource, drops, droppedExp, droppedExp);
++    }
++
++    @ApiStatus.Internal
++    public EntityDeathEvent(@NotNull final LivingEntity livingEntity, @NotNull DamageSource damageSource, @NotNull final List<ItemStack> drops, final int droppedExp, final int rewardExp) {
+         super(livingEntity);
+         this.damageSource = damageSource;
+         this.drops = drops;
+         this.dropExp = droppedExp;
++        this.rewardExp = rewardExp;
+     }
++    // Leaves end - exp fix
+ 
+     @NotNull
+     @Override
+@@ -238,4 +246,14 @@
+     public static HandlerList getHandlerList() {
+         return HANDLER_LIST;
+     }
++
++    // Leaves start - exp fix
++    public int getRewardExp() {
++        return rewardExp;
++    }
++
++    public void setRewardExp(int rewardExp) {
++        this.rewardExp = rewardExp;
++    }
++    // Leaves end - exp fix
+ }
+
+diff --git a/src/main/java/org/bukkit/event/entity/PlayerDeathEvent.java b/src/main/java/org/bukkit/event/entity/PlayerDeathEvent.java
+--- a/src/main/java/org/bukkit/event/entity/PlayerDeathEvent.java
++++ b/src/main/java/org/bukkit/event/entity/PlayerDeathEvent.java
+@@ -25,6 +25,7 @@
+     private boolean doExpDrop;
+     private boolean keepLevel = false;
+     private boolean keepInventory = false;
++    private boolean useApiExpDropStatus = false; // Leaves - exp fix
+     @Deprecated
+     private final List<ItemStack> itemsToKeep = new ArrayList<>();
+ 
+@@ -83,8 +84,15 @@
+         this.showDeathMessages = true;
+         this.deathMessage = LegacyComponentSerializer.legacySection().deserializeOrNull(deathMessage);
+         this.doExpDrop = doExpDrop;
++        this.useApiExpDropStatus = true; // Leaves - exp fix
+     }
+ 
++    // Leaves start - exp fix
++    public boolean forceUseEventDropStatus() {
++        return this.useApiExpDropStatus;
++    }
++    // Leaves end - exp fix
++
+     @NotNull
+     @Override
+     public Player getEntity() {
+
+diff --git a/src/main/java/org/bukkit/map/MapPalette.java b/src/main/java/org/bukkit/map/MapPalette.java
+--- a/src/main/java/org/bukkit/map/MapPalette.java
++++ b/src/main/java/org/bukkit/map/MapPalette.java
+@@ -35,7 +35,7 @@
+     }
+ 
+     @NotNull
+-    static final Color[] colors = {
++    public static final Color[] colors = { // Mili - package-private -> public
+         // Start generate - MapPalette#colors
+         new Color(0x00000000, true),
+         new Color(0x00000000, true),
+@@ -394,9 +394,11 @@
+         temp.getRGB(0, 0, temp.getWidth(), temp.getHeight(), pixels, 0, temp.getWidth());
+ 
+         byte[] result = new byte[temp.getWidth() * temp.getHeight()];
++        if ((mapColorCache != null && mapColorCache.isCached()) || !gg.pufferfish.pufferfish.simd.SIMDDetection.isEnabled) { // Mili - Pufferfish - vectorized map color conversion
+         for (int i = 0; i < pixels.length; i++) {
+             result[i] = matchColor(new Color(pixels[i], true));
+         }
++        } else gg.pufferfish.pufferfish.simd.VectorMapPalette.matchColorVectorized(pixels, result); // Mili - Pufferfish - vectorized map color conversion
+         return result;
+     }
+ 
+
+diff --git a/src/main/java/org/bukkit/plugin/SimplePluginManager.java b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
+--- a/src/main/java/org/bukkit/plugin/SimplePluginManager.java
++++ b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
+@@ -597,7 +597,9 @@
+ 
+     // Paper start
+     private void handlePluginException(String msg, Throwable ex, Plugin plugin) {
++        gg.pufferfish.pufferfish.sentry.SentryContext.setPluginContext(plugin); // Pufferfish
+         server.getLogger().log(Level.SEVERE, msg, ex);
++        gg.pufferfish.pufferfish.sentry.SentryContext.removePluginContext(); // Pufferfish
+         callEvent(new com.destroystokyo.paper.event.server.ServerExceptionEvent(new com.destroystokyo.paper.exception.ServerPluginEnableDisableException(msg, ex, plugin)));
+     }
+     // Paper end
+@@ -669,9 +671,11 @@
+                             ));
+                 }
+             } catch (Throwable ex) {
++                gg.pufferfish.pufferfish.sentry.SentryContext.setEventContext(event, registration); // Pufferfish
+                 // Paper start - error reporting
+                 String msg = "Could not pass event " + event.getEventName() + " to " + registration.getPlugin().getDescription().getFullName();
+                 server.getLogger().log(Level.SEVERE, msg, ex);
++                gg.pufferfish.pufferfish.sentry.SentryContext.removeEventContext(); // Pufferfish
+                 if (!(event instanceof com.destroystokyo.paper.event.server.ServerExceptionEvent)) { // We don't want to cause an endless event loop
+                     callEvent(new com.destroystokyo.paper.event.server.ServerExceptionEvent(new com.destroystokyo.paper.exception.ServerEventException(msg, ex, registration.getPlugin(), registration.getListener(), event)));
+                 }
+
+diff --git a/src/main/java/org/bukkit/plugin/java/JavaPluginLoader.java b/src/main/java/org/bukkit/plugin/java/JavaPluginLoader.java
+--- a/src/main/java/org/bukkit/plugin/java/JavaPluginLoader.java
++++ b/src/main/java/org/bukkit/plugin/java/JavaPluginLoader.java
+@@ -329,7 +329,13 @@
+             try {
+                 jPlugin.setEnabled(true);
+             } catch (Throwable ex) {
++                gg.pufferfish.pufferfish.sentry.SentryContext.setPluginContext(plugin); // Pufferfish
+                 server.getLogger().log(Level.SEVERE, "Error occurred while enabling " + plugin.getDescription().getFullName() + " (Is it up to date?)", ex);
++                gg.pufferfish.pufferfish.sentry.SentryContext.removePluginContext(); // Pufferfish
++                // Paper start - Disable plugins that fail to load
++                this.server.getPluginManager().disablePlugin(jPlugin);
++                return;
++                // Paper end
+             }
+ 
+             // Perhaps abort here, rather than continue going, but as it stands,
+@@ -360,7 +366,9 @@
+             try {
+                 jPlugin.setEnabled(false);
+             } catch (Throwable ex) {
++                gg.pufferfish.pufferfish.sentry.SentryContext.setPluginContext(plugin); // Pufferfish
+                 server.getLogger().log(Level.SEVERE, "Error occurred while disabling " + plugin.getDescription().getFullName() + " (Is it up to date?)", ex);
++                gg.pufferfish.pufferfish.sentry.SentryContext.removePluginContext(); // Pufferfish
+             }
+ 
+             if (cloader instanceof PluginClassLoader) {
+

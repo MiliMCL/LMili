@@ -6,6 +6,7 @@ import org.bukkit.Bukkit;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
@@ -31,7 +32,9 @@ public class NetworkOptimizer {
 
     // Per-player packet counter for the current tick, reset every tick
     private static final ConcurrentHashMap<java.util.UUID, AtomicInteger> playerPacketCounts = new ConcurrentHashMap<>();
-    private static volatile long currentTick = -1;
+    // Mili start - fix: use AtomicLong for thread-safe tick comparison
+    private static final AtomicLong currentTick = new AtomicLong(-1);
+    // Mili end
 
     // Periodic cleanup state
     private static volatile long lastCleanupTime = 0;
@@ -92,8 +95,10 @@ public class NetworkOptimizer {
      */
     public static void onServerTick(long serverTick) {
         if (!NetworkOptimizerConfig.enabled) return;
-        if (serverTick == currentTick) return;
-        currentTick = serverTick;
+        // Mili start - fix: use AtomicLong for thread-safe tick comparison
+        if (!currentTick.compareAndSet(-1, serverTick) && currentTick.get() == serverTick) return;
+        currentTick.set(serverTick);
+        // Mili end
 
         // Reset per-player packet counts
         playerPacketCounts.clear();

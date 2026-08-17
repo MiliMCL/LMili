@@ -1,0 +1,981 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy <xucy0609@gmail.com>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Chunk Region (consolidated)
+
+Consolidated from 6 original patches:
+  - 0002-Threading-utilities.patch
+  - 0021-Add-tick-regions-api.patch
+  - 0022-Add-tpsbar-with-chunkhot-membar-and-regionbar.patch
+  - 0056-Force-disable-builtin-spark-plugin.patch
+  - 0068-Improved-Server-Health-Report.patch
+  - 0112-Add-null-check-in-RegionizedWorldData-conections.patch
+
+
+diff --git a/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java b/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java
+--- a/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java
++++ b/ca/spottedleaf/moonrise/paper/util/BaseChunkSystemHooks.java
+@@ -122,6 +122,7 @@
+ 
+     @Override
+     public void onChunkNotTicking(final LevelChunk chunk, final ChunkHolder holder) {
++        chunk.getChunkHot().clear(); // KioCG
+         chunk.getLevel().getCurrentWorldData().removeTickingChunk(chunk); // Folia - region threading
+     }
+ 
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -225,14 +225,17 @@
+             }
+             from.portalRateThrottler.destroy();
+             // Luminol end
++            Set<Connection> cons = new java.util.HashSet<>(from.connections.size()); // Mili - save all connections we have processed in connection process
+             // connections
+             for (final Connection conn : from.connections) {
+                 final ServerPlayer player = conn.getPlayer();
++                if (player == null) continue; // Mili - skip null player connections
+                 final ChunkPos pos = player.chunkPosition();
+                 // Note: It is impossible for an entity in the world to _not_ be in an entity chunk, which means
+                 // the chunk holder must _exist_, and so the region section exists.
+                 regionToData.get(CoordinateUtils.getChunkKey(pos.x() >> chunkToRegionShift, pos.z() >> chunkToRegionShift))
+                     .connections.add(conn);
++                cons.add(conn); // Mili - save all connections we have processed in connection process
+             }
+             // entities
+             for (final ServerPlayer player : from.localPlayers) {
+@@ -246,6 +249,13 @@
+                 into.localPlayers.add(player);
+                 player.getBukkitEntity().updateRegion(into);
+                 into.nearbyPlayers.addPlayer(player);
++                // Mili start - we need to process the connection if player's connection is not processed, if connection.player is null, next tick will clean up it
++                final Connection conn = player.connection.connection;
++                if (!cons.contains(conn)) {
++                    regionToData.get(CoordinateUtils.getChunkKey(pos.x() >> chunkToRegionShift, pos.z() >> chunkToRegionShift))
++                            .connections.add(conn);
++                }
++                // Mili end
+             }
+             for (final Entity entity : from.allEntities) {
+                 final ChunkPos pos = entity.chunkPosition();
+@@ -607,6 +617,7 @@
+     private static void cleanUpConnection(final Connection conn) {
+         // note: ALL connections HERE have a player
+         final ServerPlayer player = conn.getPlayer();
++        if (player == null) return; // Mili - skip null player connections
+         // now that the connection is removed, we can allow this region to die
+         player.level().moonrise$getChunkTaskScheduler().chunkHolderManager.removeTicketAtLevel(
+             ServerGamePacketListenerImpl.DISCONNECT_TICKET, player.connection.disconnectPos,
+
+diff --git a/io/papermc/paper/threadedregions/ThreadedRegionizer.java b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+--- a/io/papermc/paper/threadedregions/ThreadedRegionizer.java
++++ b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+@@ -43,6 +43,7 @@
+     private final RegionCallbacks<R, S> callbacks;
+     private final StampedLock regionLock = new StampedLock();
+     private Thread writeLockOwner;
++    public final fun.bm.mili.lmili.api.ThreadedRegionizer threadedRegionizerAPI; // Luminol - Tick region API
+ 
+     /*
+     static final record Operation(String type, int chunkX, int chunkZ) {}
+@@ -73,6 +74,7 @@
+         this.world = world;
+         this.callbacks = callbacks;
+         //this.loadTestData();
++        this.threadedRegionizerAPI = new fun.bm.mili.lmili.api.impl.ThreadedRegionizerImpl(this.world); // Luminol - Tick region API
+     }
+ 
+     /*
+@@ -695,6 +697,7 @@
+ 
+         private final ReferenceOpenHashSet<ThreadedRegion<R, S>> mergeIntoLater = new ReferenceOpenHashSet<>();
+         private final ReferenceOpenHashSet<ThreadedRegion<R, S>> expectingMergeFrom = new ReferenceOpenHashSet<>();
++        public final fun.bm.mili.lmili.api.ThreadedRegion threadedRegionAPI = new fun.bm.mili.lmili.api.impl.ThreadedRegionImpl((ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>) this); // Luminol - Tickregion API
+ 
+         public ThreadedRegion(final ThreadedRegionizer<R, S> regioniser) {
+             this.regioniser = regioniser;
+@@ -822,7 +825,7 @@
+             return this.deadSections.size() == this.sectionByKey.size();
+         }
+ 
+-        private final double getDeadSectionPercent() {
++        public final double getDeadSectionPercent() { // Luminol - Threaded regions api
+             return (double)this.deadSections.size() / (double)this.sectionByKey.size();
+         }
+ 
+
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -156,6 +156,7 @@
+         private final AtomicInteger entityCount = new AtomicInteger();
+         private final AtomicInteger playerCount = new AtomicInteger();
+         private final AtomicInteger chunkCount = new AtomicInteger();
++        public final fun.bm.mili.lmili.api.RegionStats regionStatsAPI = new fun.bm.mili.lmili.api.impl.RegionStatsImpl(this); // Luminol - Tickregion API
+ 
+         public int getEntityCount() {
+             return this.entityCount.get();
+@@ -208,6 +209,7 @@
+         private final AtomicBoolean hasPackets = new AtomicBoolean(false);
+ 
+         public volatile ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler; // Folia - profiler
++        public final fun.bm.mili.lmili.api.TickRegionData tickRegionDataAPI = new fun.bm.mili.lmili.api.impl.TickRegionDataImpl(this); // Luminol - Tickregion API
+ 
+         private TickRegionData(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+             this.region = region;
+
+diff --git a/io/papermc/paper/threadedregions/commands/CommandServerHealth.java b/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
+--- a/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
++++ b/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
+@@ -29,6 +29,14 @@
+ import java.util.Arrays;
+ import java.util.List;
+ import java.util.Locale;
++// Luminol start - Improved Server Health Report
++import java.util.concurrent.TimeUnit;
++import java.lang.management.ManagementFactory;
++import java.lang.management.MemoryMXBean;
++import java.lang.management.MemoryUsage;
++import java.lang.management.RuntimeMXBean;
++import org.jetbrains.annotations.NotNull;
++// Luminol end
+ 
+ public final class CommandServerHealth extends Command {
+ 
+@@ -53,7 +61,7 @@
+     private static final TextColor HEADER = TextColor.color(79, 164, 240);
+     private static final TextColor PRIMARY = TextColor.color(48, 145, 237);
+     private static final TextColor SECONDARY = TextColor.color(104, 177, 240);
+-    private static final TextColor INFORMATION = TextColor.color(145, 198, 243);
++    private static final TextColor INFORMATION = TextColor.color(180, 220, 255); // Luminol start - Improved Server Health Report
+     private static final TextColor LIST = TextColor.color(33, 97, 188);
+ 
+     public CommandServerHealth() {
+@@ -66,30 +74,32 @@
+     private static Component formatRegionInfo(final String prefix, final double util, final double mspt, final double tps,
+                                               final boolean newline) {
+         return Component.text()
+-            .append(Component.text(prefix, PRIMARY, TextDecoration.BOLD))
+-            .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), CommandUtil.getUtilisationColourRegion(util)))
+-            .append(Component.text("% util at ", PRIMARY))
+-            .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), CommandUtil.getColourForMSPT(mspt)))
+-            .append(Component.text(" MSPT at ", PRIMARY))
+-            .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), CommandUtil.getColourForTPS(tps)))
+-            .append(Component.text(" TPS" + (newline ? "\n" : ""), PRIMARY))
+-            .build();
++                .append(Component.text(prefix, PRIMARY, TextDecoration.BOLD))
++                .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), CommandUtil.getUtilisationColourRegion(util)))
++                .append(Component.text("% util", PRIMARY))
++                .append(Component.text(" | ", SECONDARY))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), CommandUtil.getColourForMSPT(mspt)))
++                .append(Component.text(" mspt", PRIMARY))
++                .append(Component.text(" | ", SECONDARY))
++                .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), CommandUtil.getColourForTPS(tps)))
++                .append(Component.text(" TPS" + (newline ? "\n" : ""), PRIMARY))
++                .build();
+     }
+ 
+     private static Component formatRegionStats(final TickRegions.RegionStats stats, final boolean newline) {
+         return Component.text()
+-            .append(Component.text("Chunks: ", PRIMARY))
+-            .append(Component.text(NO_DECIMAL_PLACES.get().format((long)stats.getChunkCount()), INFORMATION))
+-            .append(Component.text(" Players: ", PRIMARY))
+-            .append(Component.text(NO_DECIMAL_PLACES.get().format((long)stats.getPlayerCount()), INFORMATION))
+-            .append(Component.text(" Entities: ", PRIMARY))
+-            .append(Component.text(NO_DECIMAL_PLACES.get().format((long)stats.getEntityCount()) + (newline ? "\n" : ""), INFORMATION))
+-            .build();
++                .append(Component.text("Chunks: ", PRIMARY))
++                .append(Component.text(NO_DECIMAL_PLACES.get().format((long)stats.getChunkCount()), INFORMATION))
++                .append(Component.text("  Players: ", PRIMARY))
++                .append(Component.text(NO_DECIMAL_PLACES.get().format((long)stats.getPlayerCount()), INFORMATION))
++                .append(Component.text("  Entities: ", PRIMARY))
++                .append(Component.text(NO_DECIMAL_PLACES.get().format((long)stats.getEntityCount()) + (newline ? "\n" : ""), INFORMATION))
++                .build();
+     }
+ 
+     private static boolean executeRegion(final CommandSender sender, final String commandLabel, final String[] args) {
+         final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
+-            TickRegionScheduler.getCurrentRegion();
++                TickRegionScheduler.getCurrentRegion();
+         if (region == null) {
+             sender.sendMessage(Component.text("You are not in a region currently", NamedTextColor.RED));
+             return true;
+@@ -115,25 +125,17 @@
+         final double tps1m = report1m.tpsData().segmentAll().average();
+         final double mspt1m = report1m.timePerTickData().segmentAll().average() / 1.0E6;
+ 
+-        final int yLoc = 80;
+-        final String location = "[w:'" + world.getWorld().getName() + "'," + centerBlockX + "," + yLoc + "," + centerBlockZ + "]";
++        final String location = world.getWorld().getName() + " (" + centerBlockX + ", " + centerBlockZ + ")";
+ 
+         final Component line = Component.text()
+-            .append(Component.text("Region around block ", PRIMARY))
+-            .append(Component.text(location, INFORMATION))
+-            .append(Component.text(":\n", PRIMARY))
+-
+-            .append(
+-                formatRegionInfo("15s: ", util15s, mspt15s, tps15s, true)
+-            )
+-            .append(
+-                formatRegionInfo("1m: ", util1m, mspt1m, tps1m, true)
+-            )
+-            .append(
+-                formatRegionStats(region.getData().getRegionStats(), false)
+-            )
+-
+-            .build();
++                .append(Component.text("Region around block ", PRIMARY))
++                .append(Component.text(location, INFORMATION))
++                .append(Component.text(":\n", PRIMARY))
++
++                .append(formatRegionInfo("15s: ", util15s, mspt15s, tps15s, true))
++                .append(formatRegionInfo("1m:  ", util1m, mspt1m, tps1m, true))
++                .append(formatRegionStats(region.getData().getRegionStats(), false))
++                .build();
+ 
+         sender.sendMessage(line);
+ 
+@@ -146,7 +148,7 @@
+         }
+ 
+         final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions =
+-            new ArrayList<>();
++                new ArrayList<>();
+ 
+         for (final World bukkitWorld : Bukkit.getWorlds()) {
+             final ServerLevel world = ((CraftWorld)bukkitWorld).getHandle();
+@@ -165,6 +167,18 @@
+         final long currTime = System.nanoTime();
+         final TickData.TickReportData globalTickReport = RegionizedServer.getGlobalTickData().getTickReport15s(currTime);
+ 
++        final MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
++        final MemoryUsage heapUsage = memoryBean.getHeapMemoryUsage();
++        final long usedMemory = heapUsage.getUsed() / (1024 * 1024);
++        final long maxMemory = heapUsage.getMax() / (1024 * 1024);
++
++        final double memPercent = (double) usedMemory / maxMemory * 100.0;
++        final TextColor memColor = memPercent < 60 ? CommandUtil.getUtilisationColourRegion(0.0) : (memPercent < 85 ? NamedTextColor.YELLOW : NamedTextColor.RED);
++
++        final RuntimeMXBean runtimeBean = ManagementFactory.getRuntimeMXBean();
++        final long uptime = runtimeBean.getUptime();
++        final String uptimeStr = formatUptime(uptime);
++
+         for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
+             final TickData.TickReportData report = region.getData().getRegionSchedulingHandle().getTickReport15s(currTime);
+             tpsByRegion.add(report == null ? 20.0 : report.tpsData().segmentAll().average());
+@@ -188,31 +202,27 @@
+         final double loadRate = ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask.loadRate(currTime);
+ 
+         totalUtil += globalTickReport.utilisation();
++        final TextColor utilisationColor = CommandUtil.getUtilisationColourRegion(totalUtil / (double)maxThreadCount);
+ 
+         tpsByRegion.sort(null);
+         if (!tpsByRegion.isEmpty()) {
+             minTps = tpsByRegion.getDouble(0);
+             maxTps = tpsByRegion.getDouble(tpsByRegion.size() - 1);
+-
+             final int middle = tpsByRegion.size() >> 1;
+             if ((tpsByRegion.size() & 1) == 0) {
+-                // even, average the two middle points
+                 medianTps = (tpsByRegion.getDouble(middle - 1) + tpsByRegion.getDouble(middle)) / 2.0;
+             } else {
+-                // odd, can just grab middle
+                 medianTps = tpsByRegion.getDouble(middle);
+             }
+         } else {
+-            // no regions = green
+             minTps = medianTps = maxTps = 20.0;
+         }
+ 
+         final List<ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>>
+-            regionsBelowThreshold = new ArrayList<>();
++                regionsBelowThreshold = new ArrayList<>();
+ 
+         for (int i = 0, len = regions.size(); i < len; ++i) {
+             final TickData.TickReportData report = reportsByRegion.get(i);
+-
+             regionsBelowThreshold.add(new ObjectObjectImmutablePair<>(regions.get(i), report));
+         }
+ 
+@@ -217,11 +227,18 @@
+             final TickData.TickReportData report2 = p2.right();
+             final double util1 = report1 == null ? 0.0 : report1.utilisation();
+             final double util2 = report2 == null ? 0.0 : report2.utilisation();
+-
+-            // we want the largest first
+             return Double.compare(util2, util1);
+         });
+ 
++        long totalChunks = 0;
++        long totalEntities = 0;
++
++        for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
++            final TickRegions.RegionStats stats = region.getData().getRegionStats();
++            totalChunks += stats.getChunkCount();
++            totalEntities += stats.getEntityCount();
++        }
++
+         final TextComponent.Builder lowestRegionsBuilder = Component.text();
+ 
+         if (sender instanceof Player) {
+@@ -236,23 +253,18 @@
+         }
+         for (int i = 0, len = Math.min(lowestRegionsCount, regionsBelowThreshold.size()); i < len; ++i) {
+             final ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>
+-                pair = regionsBelowThreshold.get(i);
++                    pair = regionsBelowThreshold.get(i);
+ 
+             final TickData.TickReportData report = pair.right();
+             final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
+-                pair.left();
++                    pair.left();
+ 
+-            if (report == null) {
+-                // skip regions with no data
+-                continue;
+-            }
++            if (report == null) continue;
+ 
+             final ServerLevel world = region.regioniser.world;
+             final ChunkPos chunkCenter = region.getCenterChunk();
+-            if (chunkCenter == null) {
+-                // region does not exist anymore
+-                continue;
+-            }
++            if (chunkCenter == null) continue;
++
+             final int centerBlockX = ((chunkCenter.x() << 4) | 7);
+             final int centerBlockZ = ((chunkCenter.z() << 4) | 7);
+             final double util = report.utilisation();
+@@ -255,75 +267,102 @@
+             final double mspt = report.timePerTickData().segmentAll().average() / 1.0E6;
+ 
+             final int yLoc = 80;
+-            final String location = "[w:'" + world.getWorld().getName() + "'," + centerBlockX + "," + yLoc + "," + centerBlockZ + "]";
+-            final Component line = Component.text()
+-                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text("Region around block ", PRIMARY))
+-                .append(Component.text(location, INFORMATION))
+-                .append(Component.text(":\n", PRIMARY))
+-
+-                .append(Component.text("    ", PRIMARY))
+-                .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), CommandUtil.getUtilisationColourRegion(util)))
+-                .append(Component.text("% util at ", PRIMARY))
+-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), CommandUtil.getColourForMSPT(mspt)))
+-                .append(Component.text(" MSPT at ", PRIMARY))
+-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), CommandUtil.getColourForTPS(tps)))
+-                .append(Component.text(" TPS\n", PRIMARY))
++            final String location = world.getWorld().getName() + " (" + centerBlockX + ", " + centerBlockZ + ")";
+ 
+-                .append(Component.text("    ", PRIMARY))
+-                .append(formatRegionStats(region.getData().getRegionStats(), (i + 1) != len))
+-                .build()
+-
+-                .clickEvent(ClickEvent.clickEvent(ClickEvent.Action.RUN_COMMAND, Payload.string("/minecraft:execute as @s in " + world.getWorld().getKey().toString() + " run tp " + centerBlockX + ".5 " + yLoc + " " + centerBlockZ + ".5")))
+-                .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, Component.text("Click to teleport to " + location, SECONDARY)));
++            final Component line = Component.text()
++                    .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                    .append(Component.text("Region at ", PRIMARY))
++                    .append(Component.text(location, INFORMATION))
++                    .append(Component.text(":\n", PRIMARY))
++
++                    .append(Component.text("    ", PRIMARY))
++                    .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), CommandUtil.getUtilisationColourRegion(util)))
++                    .append(Component.text("% util", PRIMARY))
++                    .append(Component.text(" | ", SECONDARY))
++                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), CommandUtil.getColourForMSPT(mspt)))
++                    .append(Component.text(" mspt", PRIMARY))
++                    .append(Component.text(" | ", SECONDARY))
++                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), CommandUtil.getColourForTPS(tps)))
++                    .append(Component.text(" TPS\n", PRIMARY))
++
++                    .append(Component.text("    ", PRIMARY))
++                    .append(formatRegionStats(region.getData().getRegionStats(), (i + 1) != len))
++                    .build()
++
++                    .clickEvent(ClickEvent.clickEvent(ClickEvent.Action.RUN_COMMAND, Payload.string("/minecraft:execute as @s in " + world.getWorld().getKey().toString() + " run tp " + centerBlockX + ".5 " + yLoc + " " + centerBlockZ + ".5")))
++                    .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, Component.text("Click to teleport to " + location, SECONDARY)));
+ 
+             lowestRegionsBuilder.append(line);
+         }
+ 
+         sender.sendMessage(
+-            Component.text()
+-                .append(Component.text("Server Health Report\n", HEADER, TextDecoration.BOLD))
+-
+-                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text("Online Players: ", PRIMARY))
+-                .append(Component.text(Bukkit.getOnlinePlayers().size() + "\n", INFORMATION))
+-
+-                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text("Total regions: ", PRIMARY))
+-                .append(Component.text(regions.size() + "\n", INFORMATION))
+-
+-                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text("Utilisation: ", PRIMARY))
+-                .append(Component.text(ONE_DECIMAL_PLACES.get().format(totalUtil * 100.0), CommandUtil.getUtilisationColourRegion(totalUtil / (double)maxThreadCount)))
+-                .append(Component.text("% / ", PRIMARY))
+-                .append(Component.text(ONE_DECIMAL_PLACES.get().format(maxThreadCount * 100.0), INFORMATION))
+-                .append(Component.text("%\n", PRIMARY))
+-
+-                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text("Load rate: ", PRIMARY))
+-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(loadRate) + ", ", INFORMATION))
+-                .append(Component.text("Gen rate: ", PRIMARY))
+-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(genRate) + "\n", INFORMATION))
+-
+-                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text("Lowest Region TPS: ", PRIMARY))
+-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps) + "\n", CommandUtil.getColourForTPS(minTps)))
+-
+-
+-                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text("Median Region TPS: ", PRIMARY))
+-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(medianTps) + "\n", CommandUtil.getColourForTPS(medianTps)))
+-
+-                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+-                .append(Component.text("Highest Region TPS: ", PRIMARY))
+-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(maxTps) + "\n", CommandUtil.getColourForTPS(maxTps)))
+-
+-                .append(Component.text("Highest ", HEADER, TextDecoration.BOLD))
+-                .append(Component.text(Integer.toString(lowestRegionsCount), INFORMATION, TextDecoration.BOLD))
+-                .append(Component.text(" utilisation regions\n", HEADER, TextDecoration.BOLD))
+-
+-                .append(lowestRegionsBuilder.build())
+-                .build()
++                Component.text()
++                        .append(Component.text("Server Health Report", HEADER, TextDecoration.BOLD))
++                        .append(Component.text(" (Uptime: ", SECONDARY))
++                        .append(Component.text(uptimeStr, utilisationColor))
++                        .append(Component.text(")\n", SECONDARY))
++
++                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                        .append(Component.text("Online Players: ", PRIMARY))
++                        .append(Component.text(Bukkit.getOnlinePlayers().size(), INFORMATION))
++                        .append(Component.newline())
++
++
++                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                        .append(Component.text("Total regions: ", PRIMARY))
++                        .append(Component.text(regions.size(), INFORMATION))
++                        .append(Component.text(", ", PRIMARY))
++                        .append(Component.text("Total Chunks: ", PRIMARY))
++                        .append(Component.text(NO_DECIMAL_PLACES.get().format(totalChunks), INFORMATION))
++                        .append(Component.text(", ", PRIMARY))
++                        .append(Component.text("Total Entities: ", PRIMARY))
++                        .append(Component.text(NO_DECIMAL_PLACES.get().format(totalEntities) + "\n", INFORMATION))
++
++                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                        .append(Component.text("Utilisation: ", PRIMARY))
++                        .append(Component.text(ONE_DECIMAL_PLACES.get().format(totalUtil * 100.0), utilisationColor))
++                        .append(Component.text("%", PRIMARY))
++                        .append(Component.text(" / ", SECONDARY))
++                        .append(Component.text(ONE_DECIMAL_PLACES.get().format(maxThreadCount * 100.0), INFORMATION))
++                        .append(Component.text("%\n", PRIMARY))
++
++                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                        .append(Component.text("Load rate: ", PRIMARY))
++                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(loadRate), INFORMATION))
++                        .append(Component.text(", ", PRIMARY))
++                        .append(Component.text("Gen rate: ", PRIMARY))
++                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(genRate) + "\n", INFORMATION))
++
++                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                        .append(Component.text("Memory: ", PRIMARY))
++                        .append(Component.text(NO_DECIMAL_PLACES.get().format(usedMemory), memColor))
++                        .append(Component.text(" MB", memColor))
++                        .append(Component.text(" / ", SECONDARY))
++                        .append(Component.text(NO_DECIMAL_PLACES.get().format(maxMemory), INFORMATION))
++                        .append(Component.text(" MB", INFORMATION))
++                        .append(Component.text(" (", SECONDARY))
++                        .append(Component.text(ONE_DECIMAL_PLACES.get().format(memPercent) + "%", memColor))
++                        .append(Component.text(")", SECONDARY))
++                        .append(Component.newline())
++
++                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                        .append(Component.text("Lowest Region TPS: ", PRIMARY))
++                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps) + "\n", CommandUtil.getColourForTPS(minTps)))
++
++                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                        .append(Component.text("Median Region TPS: ", PRIMARY))
++                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(medianTps) + "\n", CommandUtil.getColourForTPS(medianTps)))
++
++                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
++                        .append(Component.text("Highest Region TPS: ", PRIMARY))
++                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(maxTps) + "\n", CommandUtil.getColourForTPS(maxTps)))
++
++                        .append(Component.text("Highest ", HEADER, TextDecoration.BOLD))
++                        .append(Component.text(Integer.toString(lowestRegionsCount), INFORMATION, TextDecoration.BOLD))
++                        .append(Component.text(" utilisation regions\n", HEADER, TextDecoration.BOLD))
++
++                        .append(lowestRegionsBuilder.build())
++                        .build()
+         );
+ 
+         return true;
+@@ -400,4 +439,21 @@
+         }
+         return new ArrayList<>();
+     }
+-}
++
++    // Luminol start - Improved Server Health Report
++    private static @NotNull String formatUptime(long uptimeMillis) {
++        long days = TimeUnit.MILLISECONDS.toDays(uptimeMillis);
++        long hours = TimeUnit.MILLISECONDS.toHours(uptimeMillis) % 24;
++        long minutes = TimeUnit.MILLISECONDS.toMinutes(uptimeMillis) % 60;
++        long seconds = TimeUnit.MILLISECONDS.toSeconds(uptimeMillis) % 60;
++
++        StringBuilder sb = new StringBuilder();
++        if (days > 0) sb.append(days).append("d ");
++        if (hours > 0) sb.append(hours).append("h ");
++        if (minutes > 0) sb.append(minutes).append("m ");
++        sb.append(seconds).append("s");
++
++        return sb.toString();
++    }
++    // Luminol end
++}
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1739,7 +1739,46 @@
+         // Folia end - region threading
+         //this.tickCount++; // Folia - region threading
+         //this.tickRateManager.tick(); // Folia - region threading
++        // KioCG start - ChunkHot
++        final ca.spottedleaf.moonrise.common.list.IteratorSafeOrderedReferenceSet<net.minecraft.world.level.chunk.LevelChunk> chunks = new ca.spottedleaf.moonrise.common.list.IteratorSafeOrderedReferenceSet<>();
++        if (region != null){
++            for (net.minecraft.world.level.chunk.LevelChunk chunk : region.world.getCurrentWorldData().getTickingChunks()) {
++            /* wait for rewrite - temporarily crash fix
++            for (net.minecraft.server.level.ServerChunkCache.ChunkAndHolder chunkAndHolder : region.world.getCurrentWorldData().getTickingChunks()){
++                final net.minecraft.world.level.chunk.LevelChunk chunk = chunkAndHolder.chunk();
++            */
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(region.world, chunk.locX, chunk.locZ)){
++                    continue;
++                }
++
++                chunks.add(chunk);
++            }
++        }
++        if (region != null && io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() % 20 == 0){
++            final java.util.Iterator<net.minecraft.world.level.chunk.LevelChunk> chunkIterator = chunks.unsafeIterator();
++            while (chunkIterator.hasNext()){
++                final net.minecraft.world.level.chunk.LevelChunk targetChunk = chunkIterator.next();
++
++                targetChunk.getChunkHot().nextTick();
++                targetChunk.getChunkHot().start();
++            }
++        }
++        //KioCG end
+         this.tickChildren(haveTime, region); // Folia - region threading
++        // KioCG start - ChunkHot
++        if (region != null && io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() % 20 == 0){
++            final java.util.Iterator<net.minecraft.world.level.chunk.LevelChunk> chunkIterator = chunks.unsafeIterator();
++            while (chunkIterator.hasNext()){
++                final net.minecraft.world.level.chunk.LevelChunk targetChunk = chunkIterator.next();
++
++                if (!targetChunk.getChunkHot().isStarted()){
++                    continue;
++                }
++
++                targetChunk.getChunkHot().stop();
++            }
++        }
++        //KioCG end
+         if (false && nano - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) { // Folia - region threading
+             this.lastServerStatus = nano;
+             this.status = this.buildServerStatus();
+@@ -711,8 +711,8 @@
+         }
+         // Paper end - Configurable player collision; Handle collideRule team for player collision toggle
+         this.server.enablePlugins(org.bukkit.plugin.PluginLoadOrder.POSTWORLD);
+-        this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
+-        this.server.spark.enableAfterPlugins(this.server); // Paper - spark
++        if (false) this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark // Luminol - Force disable builtin spark
++        if (false) this.server.spark.enableAfterPlugins(this.server); // Paper - spark // Luminol - Force disable builtin spark
+         io.papermc.paper.command.brigadier.PaperCommands.INSTANCE.setValid(); // Paper - reset invalid state for event fire below
+         io.papermc.paper.plugin.lifecycle.event.LifecycleEventRunner.INSTANCE.callReloadableRegistrarEvent(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, io.papermc.paper.command.brigadier.PaperCommands.INSTANCE, org.bukkit.plugin.Plugin.class, io.papermc.paper.plugin.lifecycle.event.registrar.ReloadableRegistrarEvent.Cause.INITIAL); // Paper - call commands event for regular plugins
+         this.server.getCommandMap().registerServerAliases(); // Paper - relocate initial CommandMap#registerServerAliases() call
+@@ -1126,7 +1126,7 @@
+         Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
+         // CraftBukkit start
+         if (this.server != null) {
+-            this.server.spark.disable(); // Paper - spark
++            if (false) this.server.spark.disable(); // Paper - spark // Luminol - Force disable builtin spark
+             this.server.disablePlugins();
+             this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
+         }
+@@ -1387,7 +1387,7 @@
+             this.statusIcon = this.loadStatusIcon().orElse(null);
+             this.status = this.buildServerStatus();
+ 
+-            this.server.spark.enableBeforePlugins(); // Paper - spark
++            if (false) this.server.spark.enableBeforePlugins(); // Paper - spark // Luminol - Force disable builtin spark
+             // Folia start - region threading
+             if (true) {
+                 io.papermc.paper.threadedregions.RegionizedServer.getInstance().init(); // Folia - region threading - only after loading worlds
+@@ -1701,7 +1701,7 @@
+             }
+ 
+             if (this.emptyTicks >= emptyTickThreshold) {
+-                this.server.spark.tickStart(); // Paper - spark
++                if (false) this.server.spark.tickStart(); // Paper - spark // Luminol - Force disable builtin spark
+                 if (this.emptyTicks == emptyTickThreshold) {
+                     LOGGER.info("Server empty for {} seconds, pausing", this.pauseWhenEmptySeconds());
+                     this.autoSave();
+@@ -1720,7 +1720,7 @@
+                 // Paper end - avoid issues with certain tasks not processing during sleep
+                 //this.server.spark.executeMainThreadTasks(); // Paper - spark // Folia - region threading
+                 this.tickConnection();
+-                this.server.spark.tickEnd(((double)(System.nanoTime() - this.currentTickStart) / 1000000D)); // Paper - spark
++                if (false) this.server.spark.tickEnd(((double)(System.nanoTime() - this.currentTickStart) / 1000000D)); // Paper - spark // Luminol - Force disable builtin spark
+                 return;
+             }
+         }
+@@ -1733,7 +1733,7 @@
+         };
+         // Folia end - region threading
+ 
+-        this.server.spark.tickStart(); // Paper - spark
++        if (false) this.server.spark.tickStart(); // Paper - spark // Luminol - Force disable builtin spark
+         new com.destroystokyo.paper.event.server.ServerTickStartEvent((int)region.getCurrentTick()).callEvent(); // Paper - Server Tick Events // Folia - region threading
+         // Folia start - region threading
+         if (region != null) {
+@@ -1859,7 +1859,7 @@
+         long remaining = scheduledEnd - endTime; // Folia - region ticking
+         new com.destroystokyo.paper.event.server.ServerTickEndEvent((int)io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick(), ((double)(endTime - startTime) / 1000000D), remaining).callEvent(); // Folia - region ticking
+         // Paper end - Server Tick Events
+-        this.server.spark.tickEnd(((double)(endTime - startTime) / 1000000D)); // Paper - spark // Folia - region threading
++        if (false) this.server.spark.tickEnd(((double)(endTime - startTime) / 1000000D)); // Paper - spark // Folia - region threading // Luminol - Force disable builtin spark
+         // Folia - region threading
+     }
+ 
+
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -240,7 +240,7 @@
+         this.paperConfigurations.initializeWorldDefaultsConfiguration(this.registryAccess());
+         // Paper end - initialize global and world-defaults configuration
+         fun.bm.mili.lmili.config.ConfigManager.loadConfigFiles(); // Luminol - load config file
+-        this.server.spark.enableEarlyIfRequested(); // Paper - spark
++        if (false) this.server.spark.enableEarlyIfRequested(); // Paper - spark // Luminol - Force disable builtin spark
+         // Paper start - fix converting txt to json file; convert old users earlier after PlayerList creation but before file load/save
+         if (this.convertOldUsers()) {
+             this.services().nameToIdCache().save(false); // Paper
+@@ -250,7 +250,7 @@
+         org.spigotmc.WatchdogThread.doStart(org.spigotmc.SpigotConfig.timeoutTime, org.spigotmc.SpigotConfig.restartOnCrash); // Paper - start watchdog thread
+         consoleThread.start(); // Paper - Enhance console tab completions for brigadier commands; start console thread after MinecraftServer.console & PaperConfig are initialized
+         io.papermc.paper.command.PaperCommands.registerCommands(this); // Paper - setup /paper command
+-        this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
++        if (false) this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark // Luminol - Force disable builtin spark
+         com.destroystokyo.paper.Metrics.PaperMetrics.startMetrics(); // Paper - start metrics
+         com.destroystokyo.paper.VersionHistoryManager.INSTANCE.getClass(); // Paper - load version history now
+ 
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -1476,6 +1476,8 @@
+     public void tickNonPassenger(final Entity entity) {
+         // Paper start - log detailed entity tick information
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread("Cannot tick an entity off-main");
++        LevelChunk levelChunk = entity.shouldTickHot() ? this.getChunkIfLoaded(entity.moonrise$getSectionX(),entity.moonrise$getSectionZ()) : null; // KioCG
++        if (levelChunk != null) levelChunk.getChunkHot().startTicking(); try { // KioCG
+         try {
+             // Folia - region threading
+             // Paper end - log detailed entity tick information
+@@ -1517,6 +1519,7 @@
+         } finally {
+             // Folia - region threading
+         }
++        } finally { if (levelChunk != null) levelChunk.getChunkHot().stopTickingAndCount(); } // KioCG
+         // Paper end - log detailed entity tick information
+     }
+ 
+@@ -1529,6 +1532,8 @@
+             final int timerId = isActive ? entity.getType().tickTimerId : entity.getType().inactiveTickTimerId;
+             final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle foliaProfiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler();
+             foliaProfiler.startTimer(timerId);
++            LevelChunk levelChunk = !(entity instanceof Player) ? this.getChunkIfLoaded(entity.blockPosition()) : null; // KioCG
++            if (levelChunk != null) levelChunk.getChunkHot().startTicking(); try { // KioCG
+             try {
+                 // Folia end - profiler
+             entity.setOldPosAndRot();
+@@ -1565,6 +1570,7 @@
+                 this.tickPassenger(entity, passenger, isActive); // Paper - EAR 2
+             }
+             } finally { foliaProfiler.stopTimer(timerId); } // Folia - profiler
++            } finally { if (levelChunk != null) levelChunk.getChunkHot().stopTickingAndCount(); } // KioCG
+         }
+     }
+ 
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -441,7 +441,9 @@
+     public boolean isRealPlayer; // Paper
+     public com.destroystokyo.paper.event.entity.@Nullable PlayerNaturallySpawnCreaturesEvent playerNaturallySpawnedEvent; // Paper - PlayerNaturallySpawnCreaturesEvent
+     public org.bukkit.event.player.PlayerQuitEvent.@Nullable QuitReason quitReason = null; // Paper - Add API for quit reason; there are a lot of changes to do if we change all methods leading to the event
+-
++    public volatile boolean isTpsBarVisible = false; //Luminol - Tps bar
++    public volatile boolean isMemBarVisible = false; //Luminol - Memory bar
++    public volatile boolean isRegionBarVisible = false; //Luminol - Region bar
+     // Paper start - rewrite chunk system
+     private ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.PlayerChunkLoaderData chunkLoader;
+     private final ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.ViewDistanceHolder viewDistanceHolder = new ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.ViewDistanceHolder();
+@@ -879,6 +881,9 @@
+ 
+     @Override
+     public void tick() {
++        // Luminol start - Status bars
++        this.statusBarList.tick();
++        // Luminol end - Status bars
+         // CraftBukkit start
+         if (this.joining) {
+             this.joining = false;
+@@ -942,8 +947,35 @@
+         this.trackEnteredOrExitedLavaOnVehicle();
+         this.updatePlayerAttributes();
+         this.advancements.flushDirty(this, true);
++
++        // KioCG start - ChunkHot
++        if (this.tickCount % 20 == 0){
++            this.nearbyChunkHot = this.refreshNearbyChunkHot();
++        }
++        // KioCG end
+     }
+ 
++    // KioCG start - ChunkHot
++    private volatile long nearbyChunkHot = 0;
++
++    public long getNearbyChunkHot() { return this.nearbyChunkHot; }
++
++    private long refreshNearbyChunkHot() {
++        long total = 0L;
++        int searchRadius = ((ServerLevel) this.level()).moonrise$getViewDistanceHolder().getViewDistances().tickViewDistance();
++        for (int i = this.moonrise$getSectionX() - searchRadius; i <= this.moonrise$getSectionX() + searchRadius; ++i) {
++            for (int j = this.moonrise$getSectionZ() - searchRadius; j <= this.moonrise$getSectionZ() + searchRadius; ++j) {
++                net.minecraft.world.level.chunk.LevelChunk targetChunk = this.level().getChunkIfLoaded(i, j);
++                if (targetChunk != null) {
++                    total += targetChunk.getChunkHot().getAverage();
++                }
++            }
++        }
++        return total;
++    }
++    // KioCG end
++
++
+     private void updatePlayerAttributes() {
+         AttributeInstance blockInteractionRange = this.getAttribute(Attributes.BLOCK_INTERACTION_RANGE);
+         if (blockInteractionRange != null) {
+
+diff --git a/net/minecraft/world/entity/AreaEffectCloud.java b/net/minecraft/world/entity/AreaEffectCloud.java
+--- a/net/minecraft/world/entity/AreaEffectCloud.java
++++ b/net/minecraft/world/entity/AreaEffectCloud.java
+@@ -415,4 +415,11 @@
+             return super.applyImplicitComponent(type, value);
+         }
+     }
++
++    // KioCG start
++    @Override
++    public boolean shouldTickHot() {
++        return false;
++    }
++    // KioCG end
+ }
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -6380,4 +6380,6 @@
+         return ((ServerLevel) this.level()).isPositionEntityTicking(this.blockPosition());
+     }
+     // Paper end
++
++    public boolean shouldTickHot() { return this.tickCount > 20 * 10 && this.isAlive(); } // KioCG
+ }
+
+diff --git a/net/minecraft/world/entity/LightningBolt.java b/net/minecraft/world/entity/LightningBolt.java
+--- a/net/minecraft/world/entity/LightningBolt.java
++++ b/net/minecraft/world/entity/LightningBolt.java
+@@ -283,4 +283,11 @@
+     public final boolean hurtServer(final ServerLevel level, final DamageSource source, final float damage) {
+         return false;
+     }
++
++    // KioCG start
++    @Override
++    public boolean shouldTickHot() {
++        return false;
++    }
++    // KioCG end
+ }
+
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -1730,4 +1730,11 @@
+     public float chargeSpeedModifier() {
+         return 1.0F;
+     }
++
++    // KioCG start
++    @Override
++    public boolean shouldTickHot() {
++        return super.shouldTickHot() && (!this.removeWhenFarAway(0.0) || this.isPersistenceRequired() || this.requiresCustomPersistence());
++    }
++    // KioCG end
+ }
+
+diff --git a/net/minecraft/world/entity/animal/equine/TraderLlama.java b/net/minecraft/world/entity/animal/equine/TraderLlama.java
+--- a/net/minecraft/world/entity/animal/equine/TraderLlama.java
++++ b/net/minecraft/world/entity/animal/equine/TraderLlama.java
+@@ -164,4 +164,11 @@
+             super.start();
+         }
+     }
++
++    // KioCG start
++    @Override
++    public boolean shouldTickHot() {
++        return super.shouldTickHot() && !this.canDespawn();
++    }
++    // KioCG end
+ }
+
+diff --git a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTrader.java b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTrader.java
+--- a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTrader.java
++++ b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTrader.java
+@@ -271,4 +271,11 @@
+             return !pos.closerToCenterThan(this.trader.position(), distance);
+         }
+     }
++
++    // KioCG start
++    @Override
++    public boolean shouldTickHot() {
++        return false;
++    }
++    // KioCG end
+ }
+
+diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world/entity/player/Player.java
+--- a/net/minecraft/world/entity/player/Player.java
++++ b/net/minecraft/world/entity/player/Player.java
+@@ -170,6 +170,7 @@
+     private ItemStack lastItemInMainHand = ItemStack.EMPTY;
+     private final ItemCooldowns cooldowns = this.createItemCooldowns();
+     private Optional<GlobalPos> lastDeathLocation = Optional.empty();
++    public fun.bm.mili.lmili.functions.bars.TickableStatusBarList statusBarList = new fun.bm.mili.lmili.functions.bars.TickableStatusBarList(this); // Luminol status bars
+     public @Nullable FishingHook fishing;
+     public float hurtDir;
+     public boolean affectsSpawning = true; // Paper - Affects Spawning API
+@@ -680,6 +681,7 @@
+         this.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(this.abilities.getWalkingSpeed());
+         this.enderChestInventory.fromSlots(input.listOrEmpty("EnderItems", ItemStackWithSlot.CODEC));
+         this.setLastDeathLocation(input.read("LastDeathLocation", GlobalPos.CODEC));
++        this.statusBarList.load(input); // Luminol - Status bars
+     }
+ 
+     @Override
+@@ -699,6 +701,7 @@
+         output.store("abilities", Abilities.Packed.CODEC, this.abilities.pack());
+         this.enderChestInventory.storeAsSlots(output.list("EnderItems", ItemStackWithSlot.CODEC));
+         this.lastDeathLocation.ifPresent(pos -> output.store("LastDeathLocation", GlobalPos.CODEC, pos));
++        this.statusBarList.save(output); // Luminol - Status bars
+     }
+ 
+     @Override
+@@ -2258,4 +2261,12 @@
+         public static final Player.BedSleepingProblem NOT_SAFE = new Player.BedSleepingProblem(Component.translatable("block.minecraft.bed.not_safe"));
+         public static final Player.BedSleepingProblem EXPLOSION = new Player.BedSleepingProblem(null); // Paper - Added to properly handle explosions in bed events
+     }
++
++    // KioCG start
++    @Override
++    public boolean shouldTickHot() {
++        return false;
++    }
++    // KioCG end
++
+ }
+
+diff --git a/net/minecraft/world/entity/projectile/Projectile.java b/net/minecraft/world/entity/projectile/Projectile.java
+--- a/net/minecraft/world/entity/projectile/Projectile.java
++++ b/net/minecraft/world/entity/projectile/Projectile.java
+@@ -512,4 +512,11 @@
+     public interface ProjectileFactory<T extends Projectile> {
+         T create(final ServerLevel level, LivingEntity entity, ItemStack itemStack);
+     }
++
++    // KioCG start
++    @Override
++    public boolean shouldTickHot() {
++        return false;
++    }
++    // KioCG end
+ }
+
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -143,6 +143,7 @@
+     private final RegistryAccess registryAccess;
+     private final DamageSources damageSources;
+     private final PalettedContainerFactory palettedContainerFactory;
++    public final fun.bm.mili.lmili.utils.thread.RegionizedBlockableEventLoop regionizedBlockableEventLoop = new fun.bm.mili.lmili.utils.thread.RegionizedBlockableEventLoop(this); // Luminol - Threading utilies
+     private final java.util.concurrent.atomic.AtomicLong subTickCount = new java.util.concurrent.atomic.AtomicLong(); //private long subTickCount; // Folia - region threading
+ 
+     // CraftBukkit start
+
+diff --git a/net/minecraft/world/level/chunk/LevelChunk.java b/net/minecraft/world/level/chunk/LevelChunk.java
+--- a/net/minecraft/world/level/chunk/LevelChunk.java
++++ b/net/minecraft/world/level/chunk/LevelChunk.java
+@@ -112,6 +112,7 @@
+     // Paper start - rewrite chunk system
+     private boolean postProcessingDone;
+     private ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder chunkAndHolder;
++    private final com.kiocg.ChunkHot chunkHot = new com.kiocg.ChunkHot(); public com.kiocg.ChunkHot getChunkHot() { return this.chunkHot; } // KioCG
+ 
+     @Override
+     public final boolean moonrise$isPostProcessingDone() {
+@@ -961,6 +962,7 @@
+                         ProfilerFiller profiler = Profiler.get();
+                         profiler.push(this::getType);
+                         foliaProfiler.startTimer(timerId); try { // Folia - profiler
++                        LevelChunk.this.chunkHot.startTicking(); // KioCG
+                         BlockState blockState = LevelChunk.this.getBlockState(pos);
+                         if (this.blockEntity.getType().isValid(blockState)) {
+                             this.ticker.tick(LevelChunk.this.level, this.blockEntity.getBlockPos(), blockState, this.blockEntity);
+@@ -981,7 +983,7 @@
+                                 );
+                             } // Paper - Remove the Block Entity if it's invalid
+                         }
+-                        } finally { foliaProfiler.stopTimer(timerId); } // Folia - profiler
++                        } finally { foliaProfiler.stopTimer(timerId);   LevelChunk.this.chunkHot.stopTickingAndCount();  } // Folia - profiler // KioCG
+ 
+                         profiler.pop();
+                     } catch (Throwable t) {
+
+diff --git a/net/minecraft/world/level/redstone/NeighborUpdater.java b/net/minecraft/world/level/redstone/NeighborUpdater.java
+--- a/net/minecraft/world/level/redstone/NeighborUpdater.java
++++ b/net/minecraft/world/level/redstone/NeighborUpdater.java
+@@ -81,7 +81,10 @@
+                 return;
+             }
+             // CraftBukkit end
++            net.minecraft.world.level.chunk.LevelChunk levelChunk = level.getChunkIfLoaded(pos); // KioCG
++            if (levelChunk != null) levelChunk.getChunkHot().startTicking(); try { // KioCG
+             state.handleNeighborChanged(level, pos, changedBlock, orientation, movedByPiston);
++            } finally { if (levelChunk != null) levelChunk.getChunkHot().stopTickingAndCount(); } // KioCG
+             // Spigot start
+         } catch (StackOverflowError ex) {
+             level.lastPhysicsProblem = pos.immutable();
+

@@ -1,0 +1,2805 @@
+diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
+--- a/net/minecraft/network/Connection.java
++++ b/net/minecraft/network/Connection.java
+@@ -1067,4 +1067,127 @@
+         }
+     }
+     // Paper end - Optimize network
++    // Luminol start - async protocol switcher
++    public <T extends PacketListener> void setupInboundProtocolAsync(
++            ProtocolInfo<T> protocol,
++            T packetListener,
++            @Nullable Runnable callback,
++            boolean resumeAutoReading
++    ) {
++        this.validateListener(protocol, packetListener);
++        if (protocol.flow() != this.getReceiving()) {
++            throw new IllegalStateException("Invalid inbound protocol: " + protocol.id());
++        } else {
++            this.packetListener = packetListener;
++            this.disconnectListener = null;
++
++            UnconfiguredPipelineHandler.InboundConfigurationTask configMessage = UnconfiguredPipelineHandler.setupInboundProtocol(protocol);
++            BundlerInfo bundlerInfo = protocol.bundlerInfo();
++            if (bundlerInfo != null) {
++                PacketBundlePacker newBundler = new PacketBundlePacker(bundlerInfo);
++                configMessage = configMessage.andThen(context -> context.pipeline().addAfter("decoder", "bundler", newBundler));
++            }
++
++            // Here we could execute it in event loop async to prevent waiting io task on main
++            // stop reading new packets to prevent some packets came into pipeline too early
++            this.channel.config().setAutoRead(false);
++
++            // do our configuration task
++            final UnconfiguredPipelineHandler.InboundConfigurationTask finalInboundConfigurationTask = configMessage;
++            Runnable toExecute = () -> this.channel.writeAndFlush(finalInboundConfigurationTask).addListener(future -> {
++                try {
++                    if (future.isSuccess()) {
++                        if (callback != null) callback.run(); // retire callback if there have one
++                        return;
++                    }
++
++                    final Throwable ex = future.cause();
++
++                    // here we process our exceptions like that blocking one
++                    if (ex instanceof ClosedChannelException) {
++                        LOGGER.info("Connection closed during protocol change");
++                    } else {
++                        this.channel.pipeline().fireExceptionCaught(ex);
++                    }
++                }finally {
++                    // reset auto back and resume reading if needed
++                    if (resumeAutoReading) {
++                        this.channel.config().setAutoRead(true);
++                        this.channel.read();
++                    }
++                }
++            });
++
++            // we need to do this inside the event loop
++            if (!this.channel.eventLoop().inEventLoop()) {
++                this.channel.eventLoop().execute(toExecute);
++                return;
++            }
++
++            toExecute.run();
++        }
++    }
++
++    public void setupOutboundProtocolAsync(
++            ProtocolInfo<?> protocol,
++            @Nullable Runnable callback,
++            boolean resumeAutoReading
++    ) {
++        if (protocol.flow() != this.getSending()) {
++            throw new IllegalStateException("Invalid outbound protocol: " + protocol.id());
++        } else {
++            UnconfiguredPipelineHandler.OutboundConfigurationTask configMessage = UnconfiguredPipelineHandler.setupOutboundProtocol(protocol);
++            BundlerInfo bundlerInfo = protocol.bundlerInfo();
++            if (bundlerInfo != null) {
++                PacketBundleUnpacker newUnbundler = new PacketBundleUnpacker(bundlerInfo);
++                configMessage = configMessage.andThen(
++                        context -> context.pipeline().addAfter("encoder", "unbundler", newUnbundler)
++                );
++            }
++
++            boolean isLoginProtocol = protocol.id() == ConnectionProtocol.LOGIN;
++
++            // Here we could execute it in event loop async to prevent waiting io task on main
++            // stop reading new packets to prevent some packets came into pipeline too early
++            this.channel.config().setAutoRead(false);
++
++            // do our configuration task
++            final UnconfiguredPipelineHandler.OutboundConfigurationTask finalOutboundConfigurationTask = configMessage;
++            final Runnable writeTask = () -> this.channel.writeAndFlush(
++                    finalOutboundConfigurationTask.andThen(context -> this.sendLoginDisconnect = isLoginProtocol)
++            ).addListener(future -> {
++                try {
++                    if (future.isSuccess()) {
++                        if (callback != null) callback.run(); // retire callback if there have one
++                        return;
++                    }
++
++                    final Throwable ex = future.cause();
++
++                    // here we process our exceptions like that blocking one
++                    if (ex instanceof ClosedChannelException) {
++                        LOGGER.info("Connection closed during protocol change");
++                    } else {
++                        this.channel.pipeline().fireExceptionCaught(ex);
++                    }
++                }finally {
++                    // reset auto back and resume reading if needed
++                    if (resumeAutoReading) {
++                        this.channel.config().setAutoRead(true);
++                        this.channel.read(); // read once
++                    }
++                }
++            });
++
++            // we need to do this inside the event loop
++            if (!this.channel.eventLoop().inEventLoop()) {
++                this.channel.eventLoop().execute(writeTask);
++                return;
++            }
++
++            writeTask.run();
++        }
++    }
++    // Luminol end
++
+ }
+
+diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -197,8 +197,9 @@
+     public void handleConfigurationFinished(final ServerboundFinishConfigurationPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor());
+         this.finishCurrentTask(JoinWorldTask.TYPE);
+-        this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
++        // this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()))); // Luminol - Async protocol switch - move down
+ 
++        Runnable afterSwitch = () -> { // Luminol - Async protocol switch
+         try {
+             PlayerList playerList = this.server.getPlayerList();
+             if (playerList.getPlayer(this.gameProfile.id()) != null) {
+@@ -244,6 +245,18 @@
+             LOGGER.error("Couldn't place player in world", e);
+             this.disconnect(DISCONNECT_REASON_INVALID_DATA);
+         }
++        // Luminol start - Async protocol switch
++        };
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
++            this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
++            afterSwitch.run(); // directly run callback as we won't process any packet this time
++        } else {
++            this.connection.setupOutboundProtocolAsync(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())), () -> {
++                // push back
++                io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(afterSwitch);
++            }, false); // we will start auto read once we set up inbound handler at placeNewPlayer in PlayerList
++        }
++        // Luminol end
+     }
+ 
+     @Override
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -2900,7 +2900,13 @@
+         } // Folia end - rewrite login process - move connection ownership to global region
+         this.waitingForSwitchToConfig = true; // Folia - rewrite login process - fix bad ordering of this field write - moved down
+         this.send(ClientboundStartConfigurationPacket.INSTANCE);
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
+         this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
++        // Luminol start - Async protcol switch
++        } else {
++            this.connection.setupOutboundProtocolAsync(ConfigurationProtocols.CLIENTBOUND, null, true);
++        }
++        // Luminol end
+     }
+ 
+     @Override
+@@ -3785,12 +3791,26 @@
+         }
+ 
+         final ServerConfigurationPacketListenerImpl listener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, this.createCookie(this.player.clientInformation())); // Paper
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch
+         this.connection
+             .setupInboundProtocol(
+                 ConfigurationProtocols.SERVERBOUND,
+                 listener // Paper
+             );
+         new io.papermc.paper.event.connection.configuration.PlayerConnectionReconfigureEvent(listener.paperConnection).callEvent(); // Paper
++        } // Luminol - Async protocol switch - add "{"
++        // Luminol start - Async protocol switch - move up
++        else
++            this.connection.setupInboundProtocolAsync(
++                    ConfigurationProtocols.SERVERBOUND,
++                    listener,
++                    () -> {
++                        new io.papermc.paper.event.connection.configuration.PlayerConnectionReconfigureEvent(listener.paperConnection).callEvent(); // Paper
++                    },
++                    true
++            );
++        // Luminol end
++        // new io.papermc.paper.event.connection.configuration.PlayerConnectionReconfigureEvent(listener.paperConnection).callEvent(); // Paper // Luminol - Async protocol switch - move up
+     }
+ 
+     @Override
+
+diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+--- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+@@ -436,12 +436,30 @@
+     public void handleLoginAcknowledgement(final ServerboundLoginAcknowledgedPacket packet) {
+         net.minecraft.network.protocol.PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor()); // CraftBukkit
+         Validate.validState(this.state == ServerLoginPacketListenerImpl.State.PROTOCOL_SWITCHING, "Unexpected login acknowledgement packet");
+-        this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
++        /*this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND); // Luminol - Async protocol switch - Rewrite
+         CommonListenerCookie cookie = CommonListenerCookie.createInitial(Objects.requireNonNull(this.authenticatedProfile), this.transferred);
+         ServerConfigurationPacketListenerImpl configPacketListener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, cookie);
+         this.connection.setupInboundProtocol(ConfigurationProtocols.SERVERBOUND, configPacketListener);
+         configPacketListener.startConfiguration();
+-        this.state = ServerLoginPacketListenerImpl.State.ACCEPTED;
++        this.state = ServerLoginPacketListenerImpl.State.ACCEPTED;*/ // Luminol - Async protocol switch - Rewrite
++
++        // Luminol start - Async protocol switch
++        CommonListenerCookie cookie = CommonListenerCookie.createInitial(Objects.requireNonNull(this.authenticatedProfile), this.transferred);
++        ServerConfigurationPacketListenerImpl configPacketListener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, cookie);
++
++        Runnable afterSwitch = () -> io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(configPacketListener::startConfiguration); // push back to main thread
++
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
++            this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
++            this.connection.setupInboundProtocol(ConfigurationProtocols.SERVERBOUND, configPacketListener);
++            afterSwitch.run();
++            return;
++        }
++
++        this.connection.setupInboundProtocolAsync(ConfigurationProtocols.SERVERBOUND, configPacketListener, () -> {
++            this.connection.setupOutboundProtocolAsync(ConfigurationProtocols.CLIENTBOUND, afterSwitch, true); // start auto read when everything is ready
++        }, false); // we will resume auto reading once the outbound protocol is also setup
++        // Luminol end
+     }
+ 
+     @Override
+
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -237,9 +237,11 @@
+         // only after setting the connection listener to game type, add the connection to this regions list
+         level.getCurrentWorldData().addConnection(player);
+         // Folia end - rewrite login process
++        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Luminol - Async protocol switch // we will run async switch once these main thread logics became done
+         connection.setupInboundProtocol(
+             GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection), playerConnection
+         );
++        } // Luminol - Async protocol switch
+         playerConnection.suspendFlushing();
+         GameRules gameRules = level.getGameRules();
+         boolean immediateRespawn = gameRules.get(GameRules.IMMEDIATE_RESPAWN);
+@@ -403,6 +405,17 @@
+             );
+         }
+         // Paper end - Send empty chunk
++        // Luminol start - Async protocol switch
++        if (fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
++            // auto read will be enabled once the async switch is done
++            connection.setupInboundProtocolAsync(
++                    GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection),
++                    playerConnection,
++                    null, // we don't need to do anything more
++                    true // start auto read which we have disabled in configuration handler
++            );
++        }
++        // Luminol end
+     }
+ 
+     public void updateEntireScoreboard(final ServerScoreboard scoreboard, final ServerPlayer player) {
+
+
+// === Merged from: 0028-Gale-Replace-AI-attributes-with-optimized-collection.patch ===
+// Subject: Gale: Replace AI attributes with optimized collections
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/net/minecraft/world/entity/ai/attributes/AttributeMap.java b/net/minecraft/world/entity/ai/attributes/AttributeMap.java
+--- a/net/minecraft/world/entity/ai/attributes/AttributeMap.java
++++ b/net/minecraft/world/entity/ai/attributes/AttributeMap.java
+@@ -14,9 +14,11 @@
+ import org.jspecify.annotations.Nullable;
+ 
+ public class AttributeMap {
+-    private final Map<Holder<Attribute>, AttributeInstance> attributes = new Object2ObjectOpenHashMap<>();
+-    private final Set<AttributeInstance> attributesToSync = new ObjectOpenHashSet<>();
+-    private final Set<AttributeInstance> attributesToUpdate = new ObjectOpenHashSet<>();
++    // Gale start - Lithium - replace AI attributes with optimized collections
++    private final Map<Holder<Attribute>, AttributeInstance> attributes = new it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap<>(0);
++    private final Set<AttributeInstance> attributesToSync = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>(0);
++    private final Set<AttributeInstance> attributesToUpdate = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>(0);
++    // Gale end - Lithium - replace AI attributes with optimized collections
+     private final AttributeSupplier supplier;
+ 
+     public AttributeMap(final AttributeSupplier supplier) {
+
+
+// === Merged from: 0029-Gale-Skip-entity-move-if-movement-is-zero.patch ===
+// Subject: Gale: Skip entity move if movement is zero
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -1151,8 +1151,14 @@
+     private double moveStartY;
+     private double moveStartZ;
+     // Paper end - detailed watchdog information
++    private boolean boundingBoxChanged = false; // Gale - VMP - skip entity move if movement is zero
+ 
+     public void move(final MoverType moverType, Vec3 delta) {
++        // Gale start - VMP - skip entity move if movement is zero
++        if (!this.boundingBoxChanged && delta.equals(Vec3.ZERO)) {
++            return;
++        }
++        // Gale end - VMP - skip entity move if movement is zero
+         final Vec3 originalMovement = delta; // Paper - Expose pre-collision velocity
+         // Paper start - detailed watchdog information
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread("Cannot move an entity off-main");
+@@ -5544,6 +5550,11 @@
+     }
+ 
+     public final void setBoundingBox(final AABB bb) {
++        // Gale start - VMP - skip entity move if movement is zero
++        if (!this.bb.equals(bb)) {
++            this.boundingBoxChanged = true;
++        }
++        // Gale end - VMP - skip entity move if movement is zero
+         // CraftBukkit start - block invalid bounding boxes
+         double minX = bb.minX,
+                 minY = bb.minY,
+
+
+// === Merged from: 0031-Leaf-Remove-useless-creating-stats-json-bases-on-pla.patch ===
+// Subject: Leaf: Remove useless creating stats json bases on player
+// Author: MrHua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -1296,6 +1296,8 @@
+             return uuidStatsFile;
+         }
+ 
++        // Leaf start - Remove useless creating stats json bases on player name logic
++        /*
+         String playerNameStatsFile = gameProfile.name() + ".json";
+         if (FileUtil.isValidPathSegment(playerNameStatsFile)) {
+             Path playerNameStatsPath = statFolder.resolve(playerNameStatsFile);
+@@ -1308,6 +1310,8 @@
+                 }
+             }
+         }
++        */
++        // Leaf end - Remove useless creating stats json bases on player name logic
+ 
+         return uuidStatsFile;
+     }
+
+
+// === Merged from: 0032-Leaf-Remove-stream-in-entity-visible-effects-filter.patch ===
+// Subject: Leaf: Remove stream in entity visible effects filter
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -1034,12 +1034,15 @@
+     }
+ 
+     private void updateSynchronizedMobEffectParticles() {
+-        List<ParticleOptions> visibleEffectParticles = this.activeEffects
+-            .values()
+-            .stream()
+-            .filter(MobEffectInstance::isVisible)
+-            .map(MobEffectInstance::getParticleOptions)
+-            .toList();
++        // Leaf start - Remove stream in entity visible effects filter
++        List<ParticleOptions> visibleEffectParticles = new java.util.ArrayList<>();
++
++        for (MobEffectInstance effect : this.activeEffects.values()) {
++            if (effect.isVisible()) {
++                visibleEffectParticles.add(effect.getParticleOptions());
++            }
++        }
++        // Leaf end - Remove stream in entity visible effects filter
+         this.entityData.set(DATA_EFFECT_PARTICLES, visibleEffectParticles);
+         this.entityData.set(DATA_EFFECT_AMBIENCE_ID, areAllEffectsAmbient(this.activeEffects.values()));
+     }
+
+
+// === Merged from: 0033-Leaf-Replace-brain-maps-with-optimized-collection.patch ===
+// Subject: Leaf: Replace brain maps with optimized collection
+// Author: MrHua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/ai/Brain.java b/net/minecraft/world/entity/ai/Brain.java
+--- a/net/minecraft/world/entity/ai/Brain.java
++++ b/net/minecraft/world/entity/ai/Brain.java
+@@ -37,14 +37,14 @@
+ 
+ public class Brain<E extends LivingEntity> {
+     private static final int SCHEDULE_UPDATE_DELAY = 20;
+-    private final Map<MemoryModuleType<?>, MemorySlot<?>> memories = Maps.newHashMap();
+-    private final Map<SensorType<? extends Sensor<? super E>>, Sensor<? super E>> sensors = Maps.newLinkedHashMap();
++    private final Map<MemoryModuleType<?>, MemorySlot<?>> memories = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>(); // Leaf - Replace brain maps with optimized collection
++    private final Map<SensorType<? extends Sensor<? super E>>, Sensor<? super E>> sensors = new it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap<>(); // Leaf - Replace brain maps with optimized collection
+     private final Map<Integer, Map<Activity, Set<BehaviorControl<? super E>>>> availableBehaviorsByPriority = Maps.newTreeMap();
+     private @Nullable EnvironmentAttribute<Activity> schedule;
+-    private final Map<Activity, Set<Pair<MemoryModuleType<?>, MemoryStatus>>> activityRequirements = Maps.newHashMap();
+-    private final Map<Activity, Set<MemoryModuleType<?>>> activityMemoriesToEraseWhenStopped = Maps.newHashMap();
+-    private Set<Activity> coreActivities = Sets.newHashSet();
+-    private final Set<Activity> activeActivities = Sets.newHashSet();
++    private final Map<Activity, Set<Pair<MemoryModuleType<?>, MemoryStatus>>> activityRequirements = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>(); // Leaf - Replace brain maps with optimized collection
++    private final Map<Activity, Set<MemoryModuleType<?>>> activityMemoriesToEraseWhenStopped = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>(); // Leaf - Replace brain maps with optimized collection
++    private Set<Activity> coreActivities = new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>(); // Leaf - Replace brain maps with optimized collection
++    private final Set<Activity> activeActivities = new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>(); // Leaf - Replace brain maps with optimized collection
+     private Activity defaultActivity = Activity.IDLE;
+     private long lastScheduleUpdate = -9999L;
+ 
+
+
+// === Merged from: 0035-Leaves-Disable-moved-wrongly-threshold.patch ===
+// Subject: Leaves: Disable moved wrongly threshold
+// Author: adabugra <57899270+adabugra@users.noreply.github.com>
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -644,7 +644,7 @@
+                     return;
+                 }
+                 // Paper end - Prevent moving into unloaded chunks
+-                if (movedDist - expectedDist > Math.max(100.0, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) i * speed)) && !this.isSingleplayerOwner()) {
++                if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(100.0, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) i * speed)) && !this.isSingleplayerOwner()) { // Leaves - disable can
+                     // CraftBukkit end
+                     LOGGER.warn(
+                         "{} (vehicle of {}) moved too quickly! {},{},{}", vehicle.getPlainTextName(), this.player.getPlainTextName(), xDist, yDist, zDist
+@@ -674,7 +674,7 @@
+                 zDist = targetZ - vehicle.getZ();
+                 movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
+                 boolean fail = false;
+-                if (movedDist > org.spigotmc.SpigotConfig.movedWronglyThreshold) { // Spigot
++                if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist > org.spigotmc.SpigotConfig.movedWronglyThreshold) { // Spigot // Leaves - disable can
+                     fail = true;
+                     LOGGER.warn("{} (vehicle of {}) moved wrongly! {}", vehicle.getPlainTextName(), this.player.getPlainTextName(), Math.sqrt(movedDist));
+                 }
+@@ -1613,7 +1613,7 @@
+ 
+                                     if (this.shouldCheckPlayerMovement(isFallFlying)) {
+                                         float metersPerTick = isFallFlying ? 300.0F : 100.0F;
+-                                        if (movedDist - expectedDist > Math.max(metersPerTick, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) deltaPackets * speed))) {
++                                        if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(metersPerTick, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) deltaPackets * speed))) { // Leaves - disable can
+                                             // CraftBukkit end
+                                             // Paper start - Add fail move event
+                                             io.papermc.paper.event.player.PlayerFailMoveEvent event = fireFailMove(io.papermc.paper.event.player.PlayerFailMoveEvent.FailReason.MOVED_TOO_QUICKLY,
+@@ -1674,7 +1674,8 @@
+                                 zDist = targetZ - this.player.getZ();
+                                 movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
+                                 boolean movedWrongly = false; // Paper - Add fail move event; rename
+-                                if (!this.player.isChangingDimension()
++                                if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning // Leaves - disable can
++                                            && !this.player.isChangingDimension()
+                                     && movedDist > org.spigotmc.SpigotConfig.movedWronglyThreshold // Spigot
+                                     && !this.player.isSleeping()
+                                     && !this.player.isCreative()
+
+
+// === Merged from: 0036-Leaves-Configurable-collision-behavior.patch ===
+// Subject: Leaves: Configurable collision behavior
+// Author: Helvetica Volubi <suisuroru@blue-millennium.fun>
+
+diff --git a/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java b/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java
+--- a/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java
++++ b/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java
+@@ -101,6 +101,14 @@
+                (box1.minZ - box2.maxZ) < -COLLISION_EPSILON && (box1.maxZ - box2.minZ) > COLLISION_EPSILON;
+     }
+ 
++    // Leaves start - Configurable collision behavior
++    public static boolean voxelShapeIntersectVanilla(final AABB box1, final AABB box2) {
++        return box1.minX < box2.maxX && box1.maxX > box2.minX &&
++               box1.minY < box2.maxY && box1.maxY > box2.minY &&
++               box1.minZ < box2.maxZ && box1.maxZ > box2.minZ;
++    }
++    // Leaves end - Configurable collision behavior
++
+     // assume !isEmpty(target) && abs(source_move) >= COLLISION_EPSILON
+     public static double collideX(final AABB target, final AABB source, final double source_move) {
+         if ((source.minY - target.maxY) < -COLLISION_EPSILON && (source.maxY - target.minY) > COLLISION_EPSILON &&
+@@ -2033,7 +2041,7 @@
+                                                 continue;
+                                             }
+                                         } else {
+-                                            if (!voxelShapeIntersect(aabb, singleAABB)) {
++                                            if (shouldSkip(aabb, blockCollision, singleAABB)) { // Leaves - Configurable collision behavior
+                                                 continue;
+                                             }
+                                         }
+@@ -2087,6 +2095,18 @@
+         return ret;
+     }
+ 
++    // Leaves start - Configurable collision behavior
++    private static boolean shouldSkip(AABB aabb, VoxelShape blockCollision, AABB singleAABB) {
++        boolean isBlockShape = blockCollision == Shapes.block();
++        return switch (fun.bm.mili.lmili.config.modules.fixes.CollisionBehaviorConfig.behaviorMode) {
++            case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.VANILLA -> !voxelShapeIntersectVanilla(aabb, singleAABB);
++            case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.PAPER -> !voxelShapeIntersect(aabb, singleAABB);
++            default -> isBlockShape && !voxelShapeIntersectVanilla(aabb, singleAABB) || !isBlockShape && !voxelShapeIntersect(aabb, singleAABB);
++            // All other value as BLOCK_SHAPE_VANILLA to process
++        };
++    }
++    // Leaves end - Configurable collision behavior
++
+     public static boolean getEntityHardCollisions(final Level world, final Entity entity, AABB aabb,
+                                                   final List<AABB> into, final int collisionFlags, final Predicate<Entity> predicate) {
+         final boolean checkOnly = (collisionFlags & COLLISION_FLAG_CHECK_ONLY) != 0;
+
+
+// === Merged from: 0037-Leaves-Fix-chunk-reload-detector.patch ===
+// Subject: Leaves: Fix chunk reload detector
+// Author: Helvetica Volubi <suisuroru@blue-millennium.fun>
+
+diff --git a/net/minecraft/server/level/ServerEntity.java b/net/minecraft/server/level/ServerEntity.java
+--- a/net/minecraft/server/level/ServerEntity.java
++++ b/net/minecraft/server/level/ServerEntity.java
+@@ -357,7 +357,7 @@
+             if (!slots.isEmpty()) {
+                 broadcast.accept(new ClientboundSetEquipmentPacket(this.entity.getId(), slots, true)); // Paper - data sanitization
+             }
+-            ((LivingEntity) this.entity).detectEquipmentUpdates(); // CraftBukkit - SPIGOT-3789: sync again immediately after sending
++            if (this.entity.totalEntityAge == 0) ((LivingEntity) this.entity).detectEquipmentUpdates(); // CraftBukkit - SPIGOT-3789: sync again immediately after sending // Leaves - fix chunk reload detector (#492)
+         }
+ 
+         if (!this.entity.getPassengers().isEmpty()) {
+
+
+// === Merged from: 0038-Leaves-Fix-SculkCatalyst-exp-skip.patch ===
+// Subject: Leaves: Fix SculkCatalyst exp skip
+// Author: Helvetica Volubi <suisuroru@blue-millennium.fun>
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1403,7 +1403,7 @@
+         }
+ 
+         // SPIGOT-5478 must be called manually now
+-        if (event.shouldDropExperience()) this.dropExperience(this.level(), source.getEntity()); // Paper - tie to event
++        if (shouldDropExperience(event.shouldDropExperience(), event.forceUseEventDropStatus())) this.dropExperience(this.level(), source.getEntity()); // Paper - tie to event // Leaves - exp fix
+         // we clean the player's inventory after the EntityDeathEvent is called so plugins can get the exact state of the inventory.
+         if (!event.getKeepInventory()) {
+             // Paper start - PlayerDeathEvent#getItemsToKeep
+@@ -1450,6 +1450,15 @@
+         this.connection.markClientUnloadedAfterDeath();
+     }
+ 
++    // Leaves start - exp fix
++    private boolean shouldDropExperience(boolean eventResult, boolean forceUseEvent) {
++        if (forceUseEvent) {
++            return eventResult;
++        }
++        return wasExperienceConsumed() ? false : eventResult;
++    }
++    // Leaves end - exp fix
++
+     private void tellNeutralMobsThatIDied() {
+         AABB aabb = new AABB(this.blockPosition()).inflate(32.0, 10.0, 32.0);
+         this.level()
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -296,6 +296,7 @@
+     public @Nullable Vec3 currentImpulseImpactPos;
+     // CraftBukkit start
+     public int expToDrop;
++    public int expToReward; // Leaves - exp fix
+     public @Nullable List<DefaultDrop> deathDropItems = null;
+     public final org.bukkit.craftbukkit.attribute.CraftAttributeMap craftAttributes;
+     public boolean collides = true;
+@@ -1943,7 +1944,7 @@
+         }
+ 
+         this.dropEquipment(level);
+-        this.postDeathEventTasks.add(() -> this.dropExperience(level, source.getEntity())); // Paper
++        this.postDeathEventTasks.add(() -> { if (!this.wasExperienceConsumed()) this.dropExperience(level, source.getEntity()); }); // Paper // Leaves - exp fix
+     }
+ 
+     protected void dropEquipment(final ServerLevel level) {
+
+diff --git a/net/minecraft/world/level/block/entity/SculkCatalystBlockEntity.java b/net/minecraft/world/level/block/entity/SculkCatalystBlockEntity.java
+--- a/net/minecraft/world/level/block/entity/SculkCatalystBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/SculkCatalystBlockEntity.java
+@@ -97,8 +97,7 @@
+         public boolean handleGameEvent(final ServerLevel level, final Holder<GameEvent> event, final GameEvent.Context context, final Vec3 sourcePosition) {
+             if (event.is(GameEvent.ENTITY_DIE) && context.sourceEntity() instanceof LivingEntity mob) {
+                 if (!mob.wasExperienceConsumed()) {
+-                    DamageSource lastDamageSource = mob.getLastDamageSource();
+-                    int experienceWouldDrop = mob.getExperienceReward(level, Optionull.map(lastDamageSource, DamageSource::getEntity));
++                    int experienceWouldDrop = mob.expToReward; // Leaves - exp fix
+                     if (mob.shouldDropExperience() && experienceWouldDrop > 0) {
+                         this.sculkSpreader.addCursors(BlockPos.containing(sourcePosition.relative(Direction.UP, 0.5)), experienceWouldDrop);
+                         this.tryAwardItSpreadsAdvancement(level, mob);
+
+
+// === Merged from: 0039-Leaves-Optimized-dragon-respawn.patch ===
+// Subject: Leaves: Optimized dragon respawn
+// Author: Helvetica Volubi <suisuroru@blue-millennium.fun>
+
+diff --git a/net/minecraft/world/level/dimension/end/EnderDragonFight.java b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+--- a/net/minecraft/world/level/dimension/end/EnderDragonFight.java
++++ b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+@@ -317,7 +317,67 @@
+         return false;
+     }
+ 
++    // Leaves start - optimizedDragonRespawn
++    private int cachePortalChunkIteratorX = -8;
++    private int cachePortalChunkIteratorZ = -8;
++    private int cachePortalOriginIteratorY = -1;
++
+     public BlockPattern.@Nullable BlockPatternMatch findExitPortal() {
++        if (fun.bm.lophine.carpet.config.modules.GeneralCompatConfig.optimizedDragonRespawn) { // Lophine - redirect
++            int i, j;
++            for (i = cachePortalChunkIteratorX; i <= 8; ++i) {
++                for (j = cachePortalChunkIteratorZ; j <= 8; ++j) {
++                    LevelChunk worldChunk = this.level.getChunk(i, j);
++                    for (BlockEntity blockEntity : worldChunk.getBlockEntities().values()) {
++                        if (blockEntity instanceof net.minecraft.world.level.block.entity.TheEndGatewayBlockEntity) {
++                            continue;
++                        }
++                        if (blockEntity instanceof TheEndPortalBlockEntity) {
++                            BlockPattern.BlockPatternMatch blockPatternMatch = this.exitPortalPattern.find(this.level, blockEntity.getBlockPos());
++                            if (blockPatternMatch != null) {
++                                BlockPos blockPos = blockPatternMatch.getBlock(3, 3, 3).getPos();
++                                if (this.exitPortalLocation == null) {
++                                    this.exitPortalLocation = blockPos;
++                                }
++                                //No need to judge whether optimizing option is open
++                                cachePortalChunkIteratorX = i;
++                                cachePortalChunkIteratorZ = j;
++                                return blockPatternMatch;
++                            }
++                        }
++                    }
++                }
++            }
++
++            if (this.needsStateScanning || this.exitPortalLocation == null) {
++                if (cachePortalOriginIteratorY != -1) {
++                    i = cachePortalOriginIteratorY;
++                } else {
++                    i = this.level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, EndPodiumFeature.getLocation(BlockPos.ZERO)).getY();
++                }
++                boolean notFirstSearch = false;
++                for (j = i; j >= 0; --j) {
++                    BlockPattern.BlockPatternMatch result2 = null;
++                    if (notFirstSearch) {
++                        result2 = org.leavesmc.leaves.util.BlockPatternHelper.partialSearchAround(this.exitPortalPattern, this.level, new BlockPos(EndPodiumFeature.getLocation(BlockPos.ZERO).getY(), j, EndPodiumFeature.getLocation(BlockPos.ZERO).getZ()));
++                    } else {
++                        result2 = this.exitPortalPattern.find(this.level, new BlockPos(EndPodiumFeature.getLocation(BlockPos.ZERO).getX(), j, EndPodiumFeature.getLocation(BlockPos.ZERO).getZ()));
++                    }
++                    if (result2 != null) {
++                        if (this.exitPortalLocation == null) {
++                            this.exitPortalLocation = result2.getBlock(3, 3, 3).getPos();
++                        }
++                        cachePortalOriginIteratorY = j;
++                        return result2;
++                    }
++                    notFirstSearch = true;
++                }
++            }
++
++            return null;
++        }
++        // Leaves end - optimizedDragonRespawn
++
+         ChunkPos chunkOrigin = ChunkPos.containing(this.origin);
+ 
+         for (int x = -8 + chunkOrigin.x(); x <= 8 + chunkOrigin.x(); x++) {
+@@ -623,8 +683,12 @@
+         }
+         return false; // CraftBukkit - return value
+     }
+-
+     public boolean respawnDragon(final List<EndCrystal> crystals) { // CraftBukkit - return boolean
++        // Leaves - start optimizedDragonRespawn
++        cachePortalChunkIteratorX = -8;
++        cachePortalChunkIteratorZ = -8;
++        cachePortalOriginIteratorY = -1;
++        // Leaves - end optimizedDragonRespawn
+         if (this.dragonKilled && this.respawnStage == null) {
+             for (BlockPattern.BlockPatternMatch portal = this.findExitPortal(); portal != null; portal = this.findExitPortal()) {
+                 for (int x = 0; x < this.exitPortalPattern.getWidth(); x++) {
+
+
+// === Merged from: 0042-Kaiiju-Do-not-pathfind-outside-region.patch ===
+// Subject: Kaiiju: Do not pathfind outside region
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java b/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
+--- a/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
++++ b/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
+@@ -117,7 +117,9 @@
+ 
+     private boolean tryComputePath(final Mob body, final WalkTarget walkTarget, final long timestamp) {
+         BlockPos targetPos = walkTarget.getTarget().currentBlockPosition();
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(body.level(), targetPos)) // Kaiiju - Don't pathfind outside region
+         this.path = body.getNavigation().createPath(targetPos, 0);
++        else this.path = null; // Kaiiju - Don't pathfind outside region
+         this.speedModifier = walkTarget.getSpeedModifier();
+         Brain<?> brain = body.getBrain();
+         if (this.reachedTarget(body, walkTarget)) {
+
+
+// === Merged from: 0044-Kaiiju-Vanilla-end-portal-teleportation.patch ===
+// Subject: Kaiiju: Vanilla end portal teleportation
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4647,15 +4647,19 @@
+                         targetPos, 16, // load 16 blocks to be safe from block physics
+                         ca.spottedleaf.concurrentutil.util.Priority.HIGH,
+                         (chunks) -> {
+-                            net.minecraft.world.level.levelgen.feature.EndPlatformFeature.createEndPlatform(destination, targetPos.below(), true, null);
+-
++                            //net.minecraft.world.level.levelgen.feature.EndPlatformFeature.createEndPlatform(destination, targetPos.below(), true, null);  // Kaiiju - Vanilla end teleportation - moved down
++                            // Kaiiju start - Vanilla end teleportation
++                            Vec3 finalPos;
++                            if (this instanceof Player) finalPos = Vec3.atBottomCenterOf(targetPos.below());
++                            else finalPos = Vec3.atBottomCenterOf(targetPos);
++                            // Kaiiju end
+                             // the portal obsidian is placed at targetPos.y - 2, so if we want to place the entity
+                             // on the obsidian, we need to spawn at targetPos.y - 1
+                             portalInfoCompletable.complete(
+                                 new net.minecraft.world.level.portal.TeleportTransition(
+-                                    destination, Vec3.atBottomCenterOf(targetPos.below()), Vec3.ZERO, Direction.WEST.toYRot(), 0.0f,
++                                    destination, finalPos, this.getDeltaMovement(), Direction.WEST.toYRot(), 0.0f, // Kaiiju - Vanilla end teleportation
+                                     false, false,
+-                                    Relative.union(Relative.DELTA, Set.of(Relative.X_ROT)),
++                                    /*Relative.union(Relative.DELTA, Set.of(Relative.X_ROT))*/Set.of(), // Kaiiju - Vanilla end teleportation
+                                     TeleportTransition.PLAY_PORTAL_SOUND.then(TeleportTransition.PLACE_PORTAL_TICKET),
+                                     org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.END_PORTAL,
+                                     TeleportTransition.PassengerTeleportationMode.POSITION_RIDER
+@@ -4682,11 +4686,15 @@
+                         ca.spottedleaf.concurrentutil.util.Priority.HIGH,
+                         (chunks) -> {
+                             BlockPos adjustedSpawn = destination.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, spawnPos);
+-
++                            // Kaiiju start - Vanilla end teleportation
++                            Vec3 finalPos;
++                            if (this instanceof Player) finalPos = Vec3.atBottomCenterOf(adjustedSpawn.below());
++                            else finalPos = Vec3.atBottomCenterOf(adjustedSpawn);
++                            // Kaiiju end
+                             // done
+                             portalInfoCompletable.complete(
+                                 new net.minecraft.world.level.portal.TeleportTransition(
+-                                    destination, Vec3.atBottomCenterOf(adjustedSpawn), Vec3.ZERO, 0.0f, 0.0f,
++                                    destination, finalPos, this.getDeltaMovement(), 0.0f, 0.0f, // Kaiiju - Vanilla end teleportation
+                                     false, false,
+                                     Relative.union(Relative.DELTA, Relative.ROTATION),
+                                     TeleportTransition.PLAY_PORTAL_SOUND.then(TeleportTransition.PLACE_PORTAL_TICKET),
+@@ -4885,6 +4893,10 @@
+             return false;
+         }
+         // Luminol end
++        // Kaiiju start - sync end platform spawning & entity teleportation
++        final java.util.function.Consumer<Entity> tpComplete = type == PortalType.END && destination.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ?
++              e -> net.minecraft.world.level.levelgen.feature.EndPlatformFeature.createEndPlatform(destination, ServerLevel.END_SPAWN_POINT.below(), true, null) : teleportComplete;
++        // Kaiiju end
+ 
+         Vec3 initialPosition = this.position();
+         ChunkPos initialPositionChunk = new ChunkPos(
+@@ -4949,9 +4961,14 @@
+                         info.postTeleportTransition().onTransition(teleported);
+                     }
+ 
+-                    if (teleportComplete != null) {
++                    // Kaiiju start - vanilla end teleportation
++                    /*if (teleportComplete != null) {
+                         teleportComplete.accept(teleported);
++                    }*/
++                    if (tpComplete != null){
++                        tpComplete.accept(teleported);
+                     }
++                    // Kaiiju end
+                 }
+             );
+         });
+
+
+// === Merged from: 0045-Paper-Prevent-zombie-reinforcements-loading-chunks.patch ===
+// Subject: Paper: Prevent zombie reinforcements loading chunks
+// Author: MrHua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/monster/zombie/Zombie.java b/net/minecraft/world/entity/monster/zombie/Zombie.java
+--- a/net/minecraft/world/entity/monster/zombie/Zombie.java
++++ b/net/minecraft/world/entity/monster/zombie/Zombie.java
+@@ -344,6 +344,13 @@
+                 int yt = y + Mth.nextInt(this.random, 7, 40) * Mth.nextInt(this.random, -1, 1);
+                 int zt = z + Mth.nextInt(this.random, 7, 40) * Mth.nextInt(this.random, -1, 1);
+                 BlockPos spawnPos = new BlockPos(xt, yt, zt);
++
++                // Paper start - Prevent reinforcement checks from loading chunks
++                if (this.level().getChunkIfLoadedImmediately(spawnPos.getX() >> 4, spawnPos.getZ() >> 4) == null) {
++                    continue;
++                }
++                // Paper end - Prevent reinforcement checks from loading chunks
++
+                 if (SpawnPlacements.isSpawnPositionOk(type, level, spawnPos)
+                     && SpawnPlacements.checkSpawnRules(type, level, EntitySpawnReason.REINFORCEMENT, spawnPos, level.getRandom())) {
+                     reinforcement.setPos(xt, yt, zt);
+
+
+// === Merged from: 0046-Petal-Reduce-sensor-work.patch ===
+// Subject: Petal: Reduce sensor work
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -835,11 +835,12 @@
+             return;
+         }
+         // Paper end - Allow nerfed mobs to jump and float
++        int idBasedTickCount = this.tickCount + this.getId(); // Luminol - Petal - Move up
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("sensing");
+-        this.sensing.tick();
++        if (idBasedTickCount % fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Luminol - Petal - Reduce sensor work
+         profiler.pop();
+-        int idBasedTickCount = this.tickCount + this.getId();
++        //int idBasedTickCount = this.tickCount + this.getId(); // Luminol - Petal - Move up
+         if (idBasedTickCount % 2 != 0 && this.tickCount > 1) {
+             profiler.push("targetSelector");
+             this.targetSelector.tickRunningGoals(false);
+
+
+// === Merged from: 0047-Pufferfish-Reduce-chunk-loading-lookups.patch ===
+// Subject: Pufferfish: Reduce chunk loading & lookups
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/net/minecraft/world/entity/monster/EnderMan.java b/net/minecraft/world/entity/monster/EnderMan.java
+--- a/net/minecraft/world/entity/monster/EnderMan.java
++++ b/net/minecraft/world/entity/monster/EnderMan.java
+@@ -298,11 +298,18 @@
+     private boolean teleport(final double x, final double y, final double z) {
+         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(x, y, z);
+ 
+-        while (pos.getY() > this.level().getMinY() && !this.level().getBlockState(pos).blocksMotion()) {
++        // Pufferfish start - single chunk lookup
++        net.minecraft.world.level.chunk.LevelChunk chunk = this.level().getChunkIfLoaded(pos);
++        if (chunk == null) {
++            return false;
++        }
++        // Pufferfish end
++        while (pos.getY() > this.level().getMinY() && !chunk.getBlockState(pos).blocksMotion()) { // Pufferfish
++
+             pos.move(Direction.DOWN);
+         }
+ 
+-        BlockState blockState = this.level().getBlockState(pos);
++        BlockState blockState = chunk.getBlockState(pos); // Pufferfish
+         boolean couldStandOn = blockState.blocksMotion();
+         boolean isWet = blockState.getFluidState().is(FluidTags.WATER);
+         if (couldStandOn && !isWet) {
+
+
+// === Merged from: 0048-Pufferfish-Throttle-goal-selector-during-inactive-ti.patch ===
+// Subject: Pufferfish: Throttle goal selector during inactive ticking
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -216,11 +216,13 @@
+     }
+ 
+     // Paper start
++    int _pufferfish_inactiveTickDisableCounter = 0; // Pufferfish - throttle inactive goal selector ticking
+     @Override
+     public void inactiveTick() {
+         super.inactiveTick();
+         if (!this.aware) return; // Paper - Do not tick AI for inactive unaware mobs
+-        if (this.goalSelector.inactiveTick()) {
++        boolean isThrottled = fun.bm.mili.lmili.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig.enabled && _pufferfish_inactiveTickDisableCounter++ % 20 != 0; // Pufferfish - throttle inactive goal selector ticking
++        if (this.goalSelector.inactiveTick() && !isThrottled) { // Pufferfish
+             this.goalSelector.tick();
+         }
+         if (this.targetSelector.inactiveTick()) {
+
+
+// === Merged from: 0049-Pufferfish-Reduce-projectile-chunk-loading.patch ===
+// Subject: Pufferfish: Reduce projectile chunk loading
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -323,6 +323,10 @@
+ 
+     private RegionizedServer.WorldLevelData tickData;
+ 
++    // Luminol start - Pufferfish projectile limiter
++    public long pufferfish$loadedThisTick = 0L;
++    public long pufferfish$loadedTick = 0L;
++    // Luminol end
+     // connections
+     private static final Connection[] EMPTY_CONNECTION_ARRAY = new Connection[0];
+     private final ReferenceList<Connection> connections = new ReferenceList<>(EMPTY_CONNECTION_ARRAY);
+
+diff --git a/net/minecraft/world/entity/projectile/Projectile.java b/net/minecraft/world/entity/projectile/Projectile.java
+--- a/net/minecraft/world/entity/projectile/Projectile.java
++++ b/net/minecraft/world/entity/projectile/Projectile.java
+@@ -58,6 +58,38 @@
+         this.setOwner(EntityReference.of(owner));
+     }
+ 
++    // Pufferfish start
++    private int loadedLifetime = 0;
++    @Override
++    public void setPos(double x, double y, double z) {
++        var currRegionData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
++        // we might run this on a chunk system worker(chunk gen), so skip this check if no world data was fetched
++        if (currRegionData == null || currRegionData.world != this.level()) {
++            return;
++        }
++        long currentTick = currRegionData.getRedstoneGameTime();
++        if (currRegionData.pufferfish$loadedTick != currentTick) {
++            currRegionData.pufferfish$loadedTick = currentTick;
++            currRegionData.pufferfish$loadedThisTick = 0L;
++        }
++        int previousX = Mth.floor(this.getX()) >> 4, previousZ = Mth.floor(this.getZ()) >> 4;
++        int newX = Mth.floor(x) >> 4, newZ = Mth.floor(z) >> 4;
++        if (previousX != newX || previousZ != newZ) {
++            boolean isLoaded = ((net.minecraft.server.level.ServerChunkCache) this.level().getChunkSource()).getChunkAtIfLoadedImmediately(newX, newZ) != null;
++            if (!isLoaded) {
++                if (currRegionData.pufferfish$loadedThisTick > fun.bm.mili.lmili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerTick) {
++                    if (++this.loadedLifetime > fun.bm.mili.lmili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile) {
++                        this.discard();
++                    }
++                    return;
++                }
++                currRegionData.pufferfish$loadedThisTick++;
++            }
++        }
++        super.setPos(x, y, z);
++    }
++    // Pufferfish end
++
+     // Folia start - region threading
+     // In general, this is an entire mess. At the time of writing, there are fifty usages of getOwner.
+     // Usage of this function is to avoid concurrency issues, even if it sacrifices behavior.
+
+
+// === Merged from: 0050-Purpur-Lobotomize-stuck-villagers.patch ===
+// Subject: Purpur: Lobotomize stuck villagers
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/net/minecraft/world/entity/npc/villager/Villager.java b/net/minecraft/world/entity/npc/villager/Villager.java
+--- a/net/minecraft/world/entity/npc/villager/Villager.java
++++ b/net/minecraft/world/entity/npc/villager/Villager.java
+@@ -190,6 +190,53 @@
+         this.setCanPickUpLoot(true);
+     }
+ 
++    // Purpur start
++    private boolean isLobotomized = false; public boolean isLobotomized() { return this.isLobotomized; } // Purpur
++    private int notLobotomizedCount = 0; // Purpur
++
++    private boolean checkLobotomized() {
++        int interval = fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeCheckInterval;
++        boolean shouldCheckForTradeLocked = fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeWaitUntilTradeLocked;
++        if (this.notLobotomizedCount > 3) {
++            // check half as often if not lobotomized for the last 3+ consecutive checks
++            interval *= 2;
++        }
++        if (this.level().getGameTime() % interval == 0) {
++            // offset Y for short blocks like dirt_path/farmland
++            this.isLobotomized = !(shouldCheckForTradeLocked && this.getVillagerXp() == 0) && !canTravelFrom(net.minecraft.core.BlockPos.containing(this.position().x, this.getBoundingBox().minY + 0.0625D, this.position().z));
++
++            if (this.isLobotomized) {
++                this.notLobotomizedCount = 0;
++            } else {
++                this.notLobotomizedCount++;
++            }
++        }
++        return this.isLobotomized;
++    }
++    // Purpur end
++
++    private boolean canTravelFrom(net.minecraft.core.BlockPos pos) {
++        return canTravelTo(pos.east()) || canTravelTo(pos.west()) || canTravelTo(pos.north()) || canTravelTo(pos.south());
++    }
++
++    private boolean canTravelTo(net.minecraft.core.BlockPos pos) {
++        net.minecraft.world.level.block.state.BlockState state = this.level().getBlockStateIfLoaded(pos);
++        if (state == null) {
++            // chunk not loaded
++            return false;
++        }
++        net.minecraft.world.level.block.Block bottom = state.getBlock();
++        if (bottom instanceof net.minecraft.world.level.block.FenceBlock ||
++                bottom instanceof net.minecraft.world.level.block.FenceGateBlock ||
++                bottom instanceof net.minecraft.world.level.block.WallBlock) {
++            // bottom block is too tall to get over
++            return false;
++        }
++        net.minecraft.world.level.block.Block top = level().getBlockState(pos.above()).getBlock();
++        // only if both blocks have no collision
++        return !bottom.hasCollision && !top.hasCollision;
++    }
++
+     @Override
+     public Brain<Villager> getBrain() {
+         return (Brain<Villager>)super.getBrain();
+@@ -259,11 +306,20 @@
+         // Paper start - EAR 2
+         this.customServerAiStep(level, false);
+     }
+-    protected void customServerAiStep(ServerLevel level, final boolean inactive) {
++    protected void customServerAiStep(ServerLevel level, boolean inactive) { // Purpur - not final
+         // Paper end - EAR 2
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("villagerBrain");
++        // Purpur start
++        if (fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeEnabled) {
++            // treat as inactive if lobotomized
++            inactive = inactive || checkLobotomized();
++        } else {
++            this.isLobotomized = false;
++        }
++        // Purpur end
+         if (!inactive) this.getBrain().tick(level, this); // Paper - EAR 2
++        else if (this.isLobotomized && shouldRestock(level)) restock(); // Purpur - Lobotomize stuck villagers
+         profiler.pop();
+         if (this.assignProfessionWhenSpawned) {
+             this.assignProfessionWhenSpawned = false;
+
+
+// === Merged from: 0052-SparklyPaper-Skip-distanceToSqr-call-inServerEntity-.patch ===
+// Subject: SparklyPaper: Skip distanceToSqr call
+// Author: MrHua269 <wangxyper@163.com>
+
+diff --git a/net/minecraft/server/level/ServerEntity.java b/net/minecraft/server/level/ServerEntity.java
+--- a/net/minecraft/server/level/ServerEntity.java
++++ b/net/minecraft/server/level/ServerEntity.java
+@@ -202,6 +202,8 @@
+ 
+                 if (this.entity.needsSync || this.trackDelta || this.entity instanceof LivingEntity livingEntity && livingEntity.isFallFlying()) {
+                     Vec3 movement = this.entity.getDeltaMovement();
++
++                    if (movement != this.lastSentMovement) { // SparklyPaper start - skip distanceToSqr call in ServerEntity#sendChanges if the delta movement hasn't changed
+                     double diff = movement.distanceToSqr(this.lastSentMovement);
+                     if (diff > 1.0E-7 || diff > 0.0 && movement.lengthSqr() == 0.0) {
+                         this.lastSentMovement = movement;
+@@ -219,6 +221,7 @@
+                             this.synchronizer.sendToTrackingPlayers(new ClientboundSetEntityMotionPacket(this.entity.getId(), this.lastSentMovement));
+                         }
+                     }
++                    } // SparklyPaper end
+                 }
+ 
+                 if (packet != null) {
+
+
+// === Merged from: 0053-Correct-player-respawn-place.patch ===
+// Subject: Correct player respawn place
+// Author: Helvetica Volubi <suisuroru@blue-millennium.fun>
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -513,8 +513,10 @@
+         double amountX = selectMaxX - selectMinX;
+         double amountZ = selectMaxZ - selectMinZ;
+ 
+-        int selectX = amountX < 1.0 ? Mth.floor(worldBorder.getCenterX()) : (int)Mth.floor((amountX + 1.0) * random.nextDouble() + selectMinX);
+-        int selectZ = amountZ < 1.0 ? Mth.floor(worldBorder.getCenterZ()) : (int)Mth.floor((amountZ + 1.0) * random.nextDouble() + selectMinZ);
++        // Luminol start - Correct player respawn place
++        int selectX = amountX < 0.0 ? Mth.floor(worldBorder.getCenterX()) : (int)Mth.floor(amountX * random.nextDouble() + selectMinX);
++        int selectZ = amountZ < 0.0 ? Mth.floor(worldBorder.getCenterZ()) : (int)Mth.floor(amountZ * random.nextDouble() + selectMinZ);
++        // Luminol end - Correct player respawn place
+ 
+         return new BlockPos(selectX, 0, selectZ);
+     }
+@@ -525,10 +527,20 @@
+     }
+ 
+     private static BlockPos findSpawnAround(ServerLevel world, BlockPos selected) {
++        // Luminol start - Correct player respawn place
++        BlockPos inChunk = PlayerSpawnFinder.getLevelRespawnPos(world, selected.getX(), selected.getZ());
++        if (inChunk != null) {
++            AABB checkVolume = PlayerSpawnFinder.PLAYER_DIMENSIONS.makeBoundingBox((double)inChunk.getX() + 0.5, (double)inChunk.getY(), (double)inChunk.getZ() + 0.5);
++
++            if (world.noCollision(null, checkVolume, true)) {
++                return inChunk;
++            }
++        }
++        // Luminol end - Correct player respawn place
+         // try hard to find, so that we don't attempt another chunk load
+         for (int dz = -SPAWN_RADIUS_SELECTION_SEARCH; dz <= SPAWN_RADIUS_SELECTION_SEARCH; ++dz) {
+             for (int dx = -SPAWN_RADIUS_SELECTION_SEARCH; dx <= SPAWN_RADIUS_SELECTION_SEARCH; ++dx) {
+-                BlockPos inChunk = PlayerSpawnFinder.getLevelRespawnPos(world, selected.getX() + dx, selected.getZ() + dz);
++                inChunk = PlayerSpawnFinder.getLevelRespawnPos(world, selected.getX() + dx, selected.getZ() + dz); // Luminol - Correct player respawn place
+                 if (inChunk == null) {
+                     continue;
+                 }
+
+
+// === Merged from: 0054-Do-not-fire-pre-creature-spawn-event-unless-some-plu.patch ===
+// Subject: Do not fire pre creature spawn event unless some plugin
+// Author: MrHua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
+--- a/net/minecraft/world/level/NaturalSpawner.java
++++ b/net/minecraft/world/level/NaturalSpawner.java
+@@ -391,16 +391,20 @@
+     ) {
+         // Paper start - PreCreatureSpawnEvent
+         EntityType<?> type = currentSpawnData.type();
+-        com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent event = new com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent(
+-                org.bukkit.craftbukkit.util.CraftLocation.toBukkit(pos, level),
+-                org.bukkit.craftbukkit.entity.CraftEntityType.minecraftToBukkit(type), org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL
+-        );
+-        if (!event.callEvent()) {
+-            if (event.shouldAbortSpawn()) {
+-                return PreSpawnStatus.ABORT;
++        // Luminol start - Do not fire pre creature spawn event unless some plugin is listening it
++        if (com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent.getHandlerList().getRegisteredListeners().length != 0) {
++            com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent event = new com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent(
++                    org.bukkit.craftbukkit.util.CraftLocation.toBukkit(pos, level),
++                    org.bukkit.craftbukkit.entity.CraftEntityType.minecraftToBukkit(type), org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL
++            );
++            if (!event.callEvent()) {
++                if (event.shouldAbortSpawn()) {
++                    return PreSpawnStatus.ABORT;
++                }
++                return PreSpawnStatus.CANCELLED;
+             }
+-            return PreSpawnStatus.CANCELLED;
+         }
++        // Luminol end - Do not fire pre creature spawn event unless some plugin is listening it
+         final boolean success = type.getCategory() != MobCategory.MISC
+         // Paper end - PreCreatureSpawnEvent
+             && (type.canSpawnFarFromPlayer() || !(nearestPlayerDistanceSqr > type.getCategory().getDespawnDistance() * type.getCategory().getDespawnDistance()))
+
+
+// === Merged from: 0055-Do-not-setTarget-for-entity-which-is-out-of-currentt.patch ===
+// Subject: Do not setTarget for entity which is out of currenttickregion
+// Author: MrHua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -301,6 +301,11 @@
+         if (Objects.equals(currentTarget, target)) {
+             return false;
+         }
++        // Luminol start - Fix off-region targeting
++        if (target != null && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(target)) {
++            return false;
++        }
++        // Luminol end
+         LivingEntity originalTarget = target;
+         target = asValidTarget(target);
+         if (reason != null) {
+
+
+// === Merged from: 0057-Fix-a-series-issue-around-entity-memory-typed-Global.patch ===
+// Subject: Fix a series issue around entity memory typed GlobalPos
+// Author: MrHua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/ai/Brain.java b/net/minecraft/world/entity/ai/Brain.java
+--- a/net/minecraft/world/entity/ai/Brain.java
++++ b/net/minecraft/world/entity/ai/Brain.java
+@@ -418,6 +418,24 @@
+                         continue;
+                     }
+                 }
++
++                //type: position_tracker and walk_target
++                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForPositionTracker) {
++                    net.minecraft.world.entity.ai.behavior.PositionTracker tracker = null;
++
++                    if (value instanceof net.minecraft.world.entity.ai.behavior.PositionTracker positionTracker) {
++                        tracker = positionTracker;
++                    }
++
++                    if (value instanceof net.minecraft.world.entity.ai.memory.WalkTarget walkTarget) {
++                        tracker = walkTarget.getTarget();
++                    }
++
++                    if (tracker != null && !tracker.checkThread(owner.level())) {
++                        this.eraseMemory(entry.getKey());
++                        continue;
++                    }
++                }
+                 // Luminol end
+             }
+             slot.tick();
+
+diff --git a/net/minecraft/world/entity/ai/behavior/BehaviorUtils.java b/net/minecraft/world/entity/ai/behavior/BehaviorUtils.java
+--- a/net/minecraft/world/entity/ai/behavior/BehaviorUtils.java
++++ b/net/minecraft/world/entity/ai/behavior/BehaviorUtils.java
+@@ -81,6 +81,11 @@
+     public static void setWalkAndLookTargetMemories(
+         final LivingEntity walker, final PositionTracker target, final float speedModifier, final int closeEnoughDistance
+     ) {
++        // Luminol - Do not set walk target if target position is out of current tick region
++        if (!target.checkThread(walker.level())) {
++            return;
++        }
++        // Luminol end
+         WalkTarget walkTarget = new WalkTarget(target, speedModifier, closeEnoughDistance);
+         walker.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, target);
+         walker.getBrain().setMemory(MemoryModuleType.WALK_TARGET, walkTarget);
+
+diff --git a/net/minecraft/world/entity/ai/behavior/BlockPosTracker.java b/net/minecraft/world/entity/ai/behavior/BlockPosTracker.java
+--- a/net/minecraft/world/entity/ai/behavior/BlockPosTracker.java
++++ b/net/minecraft/world/entity/ai/behavior/BlockPosTracker.java
+@@ -37,4 +37,11 @@
+     public String toString() {
+         return "BlockPosTracker{blockPos=" + this.blockPos + ", centerPosition=" + this.centerPosition + "}";
+     }
++
++    // Luminol start - Fix a series issue around entity memory typed GlobalPos and WalkTarget
++    @Override
++    public boolean checkThread(net.minecraft.world.level.Level currOwnedByLevel) {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(currOwnedByLevel, this.blockPos);
++    }
++    // Luminol end
+ }
+
+diff --git a/net/minecraft/world/entity/ai/behavior/EntityTracker.java b/net/minecraft/world/entity/ai/behavior/EntityTracker.java
+--- a/net/minecraft/world/entity/ai/behavior/EntityTracker.java
++++ b/net/minecraft/world/entity/ai/behavior/EntityTracker.java
+@@ -55,4 +55,11 @@
+     public String toString() {
+         return "EntityTracker for " + this.entity;
+     }
++
++    // Luminol start - Fix a series issue around entity memory typed GlobalPos and WalkTarget
++    @Override
++    public boolean checkThread(net.minecraft.world.level.Level currOwnedByLevel) {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.entity);
++    }
++    // Luminol end
+ }
+
+diff --git a/net/minecraft/world/entity/ai/behavior/PositionTracker.java b/net/minecraft/world/entity/ai/behavior/PositionTracker.java
+--- a/net/minecraft/world/entity/ai/behavior/PositionTracker.java
++++ b/net/minecraft/world/entity/ai/behavior/PositionTracker.java
+@@ -10,4 +10,6 @@
+     BlockPos currentBlockPosition();
+ 
+     boolean isVisibleBy(final LivingEntity body);
++
++    boolean checkThread(net.minecraft.world.level.Level currOwnedByLevel); // Luminol - Fix a series issue around entity memory typed GlobalPos and WalkTarget
+ }
+
+diff --git a/net/minecraft/world/entity/ai/behavior/SleepInBed.java b/net/minecraft/world/entity/ai/behavior/SleepInBed.java
+--- a/net/minecraft/world/entity/ai/behavior/SleepInBed.java
++++ b/net/minecraft/world/entity/ai/behavior/SleepInBed.java
+@@ -57,6 +57,11 @@
+             }
+         }
+ 
++        // Luminol - Prevent off-tick-region chunk operations
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, target.pos())) {
++            return false;
++        }
++        // Luminol -end
+         BlockState blockState = level.getBlockStateIfLoaded(target.pos()); // Paper - Prevent sync chunk loads when villagers try to find beds
+         if (blockState == null) return false; // Paper - Prevent sync chunk loads when villagers try to find beds
+         return target.pos().closerToCenterThan(body.position(), 2.0) && blockState.is(BlockTags.BEDS) && !blockState.getValue(BedBlock.OCCUPIED);
+
+diff --git a/net/minecraft/world/entity/animal/allay/AllayAi.java b/net/minecraft/world/entity/animal/allay/AllayAi.java
+--- a/net/minecraft/world/entity/animal/allay/AllayAi.java
++++ b/net/minecraft/world/entity/animal/allay/AllayAi.java
+@@ -112,6 +112,17 @@
+         Optional<GlobalPos> likedNoteblockPos = brain.getMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION);
+         if (likedNoteblockPos.isPresent()) {
+             GlobalPos position = likedNoteblockPos.get();
++            // Luminol start - Do not like item if they were out of current tickregion
++            final net.minecraft.world.level.Level targetLevel = net.minecraft.server.MinecraftServer.getServer().getLevel(position.dimension());
++            final BlockPos targetPos = position.pos();
++
++            // thread checks
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(targetLevel, targetPos)) {
++                brain.eraseMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION); // The memory value is not being belong to current tick region anymore
++                return Optional.empty();
++            }
++            // Luminol end
++
+             if (shouldDepositItemsAtLikedNoteblock(allay, brain, position)) {
+                 return Optional.of(new BlockPosTracker(position.pos().above()));
+             }
+
+diff --git a/net/minecraft/world/entity/animal/sniffer/Sniffer.java b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
+--- a/net/minecraft/world/entity/animal/sniffer/Sniffer.java
++++ b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
+@@ -279,7 +279,17 @@
+ 
+     private boolean canDig(final BlockPos position) {
+         return this.level().getBlockState(position).is(BlockTags.SNIFFER_DIGGABLE_BLOCK)
+-            && this.getExploredPositions().noneMatch(explored -> GlobalPos.of(this.level().dimension(), position).equals(explored))
++            && this.getExploredPositions().noneMatch(explored -> { // Luminol start - Do not pathfind out of tickregion
++                // thread checks
++                final net.minecraft.world.level.Level targetLevel = net.minecraft.server.MinecraftServer.getServer().getLevel(explored.dimension());
++                final BlockPos targetPos = explored.pos();
++
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(targetLevel, targetPos)) {
++                    return false;
++                }
++
++                return GlobalPos.of(this.level().dimension(), position).equals(explored); // Original logic
++            }) // Luminol end
+             && Optional.ofNullable(this.getNavigation().createPath(position, 1)).map(Path::canReach).orElse(false);
+     }
+ 
+
+
+// === Merged from: 0058-Fix-creative-player-item-pick.patch ===
+// Subject: Fix creative player item pick
+// Author: Helvetica Volubi <suisuroru@blue-millennium.fun>
+
+diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/world/entity/item/ItemEntity.java
+--- a/net/minecraft/world/entity/item/ItemEntity.java
++++ b/net/minecraft/world/entity/item/ItemEntity.java
+@@ -420,7 +420,7 @@
+             Item item = itemStack.getItem();
+             int orgCount = itemStack.getCount();
+             // CraftBukkit start - fire PlayerPickupItemEvent
+-            int canHold = player.getInventory().canHold(itemStack);
++            int canHold = player.hasInfiniteMaterials() ? orgCount : player.getInventory().canHold(itemStack); // Luminol - Fix creative item picking
+             int remaining = orgCount - canHold;
+             boolean flyAtPlayer = false; // Paper
+ 
+
+
+// === Merged from: 0059-Fix-entity-portal-teleport-speed.patch ===
+// Subject: Fix entity portal-teleport speed
+// Author: Helvetica Volubi <suisuroru@blue-millennium.fun>
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -1504,7 +1504,27 @@
+         foliaProfiler.startTimer(timerId);
+         try {
+         // Folia end - profiler
++        // Luminol start - Entity portal-teleport speed fix
+         if (isActive) { // Paper - EAR 2
++            if (!(entity instanceof Player) && entity.teleportTickType == 2) { // Luminol - after portal compensate tick
++                entity.tick();
++                entity.tick();
++                entity.teleportTickType = 0;
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
++                    return;
++                }
++                if (entity.handlePortal()) {
++                    return;
++                }
++            } else if (!(entity instanceof Player) && entity.teleportTickType == 1) { // Luminol - portal teleport only
++                entity.teleportTickType++;
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
++                    return;
++                }
++                if (entity.handlePortal()) {
++                    return;
++                }
++            } else {
+         entity.tick();
+         // Folia start - region threading
+         if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
+@@ -1515,6 +1535,8 @@
+             // portalled
+             return;
+         }
++        }
++        // Luminol end - Entity portal-teleport speed fix
+         // Folia end - region threading
+         } else {entity.inactiveTick();} // Paper - EAR 2
+         profiler.pop();
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -387,6 +387,7 @@
+     public long activatedTick = Integer.MIN_VALUE;
+     public boolean isTemporarilyActive;
+     public long activatedImmunityTick = Integer.MIN_VALUE;
++    public int teleportTickType = 0;// Luminol - Entity portal-teleport speed fix
+ 
+     public void inactiveTick() {
+     }
+@@ -3597,6 +3598,7 @@
+         } else {
+             if (this.portalProcess == null || !this.portalProcess.isSamePortal(portal)) {
+                 this.portalProcess = new PortalProcessor(portal, pos.immutable());
++                this.teleportTickType = 1; // Luminol - Entity portal-teleport speed fix
+             } else if (!this.portalProcess.isInsidePortalThisTick()) {
+                 this.portalProcess.updateEntryPosition(pos.immutable());
+                 this.portalProcess.setAsInsidePortalThisTick(true);
+
+
+// === Merged from: 0060-Fix-unpatched-task-returning-of-ServerConfigurationP.patch ===
+// Subject: Fix unpatched task returning of
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -312,13 +312,14 @@
+     // Paper start
+     @Override
+     public void disconnectAsync(final net.minecraft.network.DisconnectionDetails disconnectionInfo) {
+-        if (this.cserver.isPrimaryThread()) {
++        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) { // Luminol - Fix unpatched task returning of ServerConfigurationPacketListenerImpl#disconnectAsync
+             this.disconnect(disconnectionInfo);
+             return;
+         }
+ 
+         this.connection.setReadOnly();
+-        this.server.scheduleOnMain(() -> {
++        // this.server.scheduleOnMain(() -> { // Luminol - Fix unpatched task returning of ServerConfigurationPacketListenerImpl#disconnectAsync
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> { // Luminol - Fix unpatched task returning of ServerConfigurationPacketListenerImpl#disconnectAsync
+             this.disconnect(disconnectionInfo); // Currently you cannot cancel disconnect during the config stage
+         });
+     }
+
+
+// === Merged from: 0064-Fix-possible-delayed-POI-updates-while-block-updatin.patch ===
+// Subject: Fix possible delayed POI updates while block updating
+// Author: Bacteriawa <A3167717663@hotmail.com>
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -2579,11 +2579,12 @@
+         Optional<Holder<PoiType>> newType = PoiTypes.forState(newState);
+         if (!Objects.equals(oldType, newType)) {
+             BlockPos immutable = pos.immutable();
+-            oldType.ifPresent(poiType -> io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(this, immutable.getX() >> 4, immutable.getZ() >> 4, () -> { // Folia - region threading
++            final java.util.concurrent.Executor scheduler = this.regionizedBlockableEventLoop.asExecutor(pos, true); // Luminol - Instant POI updates
++            oldType.ifPresent(poiType -> /*io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(this, immutable.getX() >> 4, immutable.getZ() >> 4,*/scheduler.execute( () -> { // Folia - region threading // Luminol - Instant POI updates
+                 this.getPoiManager().remove(immutable);
+                 this.debugSynchronizers.dropPoi(immutable);
+             }));
+-            newType.ifPresent(poiType -> io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(this, immutable.getX() >> 4, immutable.getZ() >> 4, () -> { // Folia - region threading
++            newType.ifPresent(poiType -> /*io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(this, immutable.getX() >> 4, immutable.getZ() >> 4,*/scheduler.execute( () -> { // Folia - region threading // Luminol - Instant POI updates
+                 // Paper start - Remove stale POIs
+                 if (oldType.isEmpty() && this.getPoiManager().exists(immutable, _ -> true)) {
+                     this.getPoiManager().remove(immutable);
+
+diff --git a/net/minecraft/world/entity/npc/villager/Villager.java b/net/minecraft/world/entity/npc/villager/Villager.java
+--- a/net/minecraft/world/entity/npc/villager/Villager.java
++++ b/net/minecraft/world/entity/npc/villager/Villager.java
+@@ -730,7 +730,8 @@
+             this.brain.getMemory(memoryType).ifPresent(memory -> {
+                 ServerLevel poiLevel = server.getLevel(memory.dimension());
+                 if (poiLevel != null) {
+-                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(poiLevel, memory.pos().getX() >> 4, memory.pos().getZ() >> 4, () -> { // Folia - region threading
++                    poiLevel.regionizedBlockableEventLoop.asExecutor(memory.pos(), false, true).execute(() -> { // Luminol - Fix possible delayed POI updates while block updating
++                    /*io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(poiLevel, memory.pos().getX() >> 4, memory.pos().getZ() >> 4, () -> { // Folia - region threading // Luminol - Fix possible delayed POI updates while block updating*/ // Luminol - Fix possible delayed POI updates while block updating
+                     PoiManager poiManager = poiLevel.getPoiManager();
+                     Optional<Holder<PoiType>> type = poiManager.getType(memory.pos());
+                     BiPredicate<Villager, Holder<PoiType>> poiTypePredicate = POI_MEMORIES.get(memoryType);
+@@ -738,7 +739,8 @@
+                         poiManager.release(memory.pos());
+                         poiLevel.debugSynchronizers().updatePoi(memory.pos());
+                     }
+-                    }); // Folia - region threading
++                    // }); // Folia - region threading // Luminol - Fix possible delayed POI updates while block updating
++                    }); // Luminol - Fix possible delayed POI updates while block updating
+                 }
+             });
+         }
+
+
+// === Merged from: 0065-Prevent-tamable-animals-check-can-teleport-in-an-unl.patch ===
+// Subject: Prevent tamable animals check can teleport in an
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/TamableAnimal.java b/net/minecraft/world/entity/TamableAnimal.java
+--- a/net/minecraft/world/entity/TamableAnimal.java
++++ b/net/minecraft/world/entity/TamableAnimal.java
+@@ -318,7 +318,8 @@
+             return false;
+         }
+ 
+-        BlockState blockStateBelow = this.level().getBlockState(pos.below());
++        BlockState blockStateBelow = this.level().getBlockStateIfLoaded(pos.below()); // Luminol - Prevent tamable animals check can teleport in an unloaded chunk
++        if (blockStateBelow == null) return false;  // Luminol - Prevent tamable animals check can teleport in an unloaded chunk
+         if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {
+             return false;
+         }
+
+
+// === Merged from: 0066-Fix-misbehaved-ender-pearls-when-player-switched-dim.patch ===
+// Subject: Fix misbehaved ender pearls when player switched dimension
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+@@ -264,7 +264,8 @@
+             int previousChunkZ = SectionPos.blockToSectionCoord(this.position().z());
+             Entity owner = this.owner != null ? findOwnerIncludingDeadPlayer(serverLevel, this.owner.getUUID()) : null;
+             if (owner instanceof ServerPlayer serverPlayer
+-                && !owner.isAlive()
++                // && !owner.isAlive() // Luminol - Fix misbehaved ender pearls when player switched dimension
++                && (owner.getBukkitEntity().taskScheduler.isRetired() || serverPlayer.getHealth() <= 0.0D) // Luminol - Fix misbehaved ender pearls when player switched dimension
+                 && !serverPlayer.wonGame
+                 && serverPlayer.level().getGameRules().get(GameRules.ENDER_PEARLS_VANISH_ON_DEATH)) {
+                 this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
+
+
+// === Merged from: 0067-Fix-off-region-leashing.patch ===
+// Subject: Fix off region leashing
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/Leashable.java b/net/minecraft/world/entity/Leashable.java
+--- a/net/minecraft/world/entity/Leashable.java
++++ b/net/minecraft/world/entity/Leashable.java
+@@ -95,10 +95,24 @@
+             if (leashUuid.isPresent()) {
+                 Entity leasher = serverLevel.getEntity(leashUuid.get());
+                 if (leasher != null) {
++                    // Luminol start - Fix off region leashing
++                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(leasher)) {
++                        entity.spawnAtLocation(serverLevel, Items.LEAD);
++                        entity.setLeashData(null);
++                        return;
++                    }
++                    // Luminol end
+                     setLeashedTo(entity, leasher, true);
+                     return;
+                 }
+             } else if (pos.isPresent()) {
++                // Luminol start - Fix off region leashing
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, pos.get())) {
++                    entity.spawnAtLocation(serverLevel, Items.LEAD);
++                    entity.setLeashData(null);
++                    return;
++                }
++                // Luminol end
+                 setLeashedTo(entity, LeashFenceKnotEntity.getOrCreateKnot(serverLevel, pos.get()), true);
+                 return;
+             }
+
+
+// === Merged from: 0070-Sync-dragon-part-when-teleportation-or-firstly-creat.patch ===
+// Subject: Sync dragon part when teleportation or firstly created
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java
+@@ -93,6 +93,7 @@
+         if (entity instanceof ThrownEnderpearl enderpearl) {
+             this.addEnderPearl(CoordinateUtils.getChunkKey(enderpearl.chunkPosition()), enderpearl.getId()); // Folia - region threading
+         }
++        if (entity instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon dragon) dragon.syncDragonPartsAfterTeleportTransform(); // Luminol - Sync dragon part when teleportation or firstly created
+         entity.registerScheduler(); // Paper - optimise Folia entity scheduler
+     }
+ 
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4459,6 +4459,7 @@
+         Entity copy = this.getType().create(destination, EntitySpawnReason.DIMENSION_TRAVEL);
+         copy.restoreFrom(this);
+         copy.transform(pos, yaw, pitch, velocity);
++        if (copy instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon dragon) dragon.syncDragonPartsAfterTeleportTransform(); // Luminol - Sync dragon part when teleportation or firstly created
+         // vanilla code used to call remove _after_ copying, and some stuff is required to be after copy - so add hook here
+         // for example, clearing of inventory after switching dimensions
+         this.postRemoveAfterChangingDimensions();
+
+diff --git a/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java b/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
+--- a/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
++++ b/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
+@@ -1011,4 +1011,12 @@
+         return 500;
+     }
+     // Paper end - init expToDrop for already dying spawned dragon
++
++    // Luminol start - Sync dragon part when teleportation or firstly created
++    public void syncDragonPartsAfterTeleportTransform() {
++        for (EnderDragonPart part : this.subEntities) {
++            this.tickPart(part, 0.0, 0.0, 0.0); // offset -> 0.0
++        }
++    }
++    // Luminol end
+ }
+
+
+// === Merged from: 0071-Correct-volatile-reference-get-in-RegionizedTaskQueu.patch ===
+// Subject: Correct volatile reference get in RegionizedTaskQueue
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+--- a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
++++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+@@ -533,7 +533,7 @@
+             }
+ 
+             private ReferenceCountData getReferenceCounterVolatile() {
+-                return (ReferenceCountData)REFERENCE_COUNTER_HANDLE.get(this);
++                return (ReferenceCountData)REFERENCE_COUNTER_HANDLE.getVolatile(this); // Luminol - Correct volatile reference get in RegionizedTaskQueue
+             }
+ 
+             private ReferenceCountData compareAndExchangeReferenceCounter(final ReferenceCountData expect, final ReferenceCountData update) {
+
+
+// === Merged from: 0072-Do-not-pathfind-out-of-tickregion-Recompute-or-drop-.patch ===
+// Subject: Do not pathfind out of tickregion & Recompute or drop
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java b/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java
+--- a/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java
+@@ -60,6 +60,17 @@
+ 
+             if (!this.isDone()) {
+                 Vec3 target = this.path.getNextEntityPos(this.mob);
++                // Luminol - Recompute path when path finding out of current tick region
++                if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
++                    // we assume that:
++                    // 1. The code above doesn't touch the 'main thread context' with the position from 'this.path'
++                    // 2. The pathfinder could correctly recompute or discard the incorrect target position and this situation is happening rarely
++                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.mob.level(), target)) {
++                        this.hasDelayedRecomputation = true;
++                        return;
++                    }
++                }
++                // Luminol end
+                 this.mob.getMoveControl().setWantedPosition(target.x, target.y, target.z, this.speedModifier);
+             }
+         }
+
+diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+--- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+@@ -1,6 +1,7 @@
+ package net.minecraft.world.entity.ai.navigation;
+ 
+ import com.google.common.collect.ImmutableSet;
++import java.util.HashSet;
+ import java.util.Set;
+ import java.util.stream.Collectors;
+ import java.util.stream.Stream;
+@@ -102,6 +103,19 @@
+         if (this.tick - this.timeLastRecompute <= 20L || !this.canUpdatePath()) { // Folia - region threading
+             this.hasDelayedRecomputation = true;
+         } else if (this.targetPos != null) {
++            // Luminol - Recompute path when path finding out of current tick region
++            if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
++                // The target seems to be pointed to a position out of current region, so reset if it is
++                // also it will interrupt the pathfinding
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.mob.level(), this.targetPos)) {
++                    // also we need to reset the path field so all of it will be stopped
++                    this.path = null;
++
++                    this.targetPos = null;
++                    return;
++                }
++            }
++            // Luminol end
+             this.path = null;
+             this.path = this.createPath(this.targetPos, this.reachRange);
+             this.timeLastRecompute = this.tick; // Folia - region threading
+@@ -188,6 +202,18 @@
+             }
+         }
+         // Paper end - EntityPathfindEvent
++        // Luminol - Do not path find for targets out of current region
++        if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.doNotPathfindToNotOwnedTargets) {
++            // filter the targets not owned by current region
++            targets = new HashSet<>(targets); // well no idea about how to determine if this should be copied to a modifiable one
++            targets.removeIf(pos -> !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.mob.level(), pos));
++
++            // return if no available (observe the logic in the first if block)
++            if (targets.isEmpty()) {
++                return null;
++            }
++        }
++        // Luminol end
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("pathfind");
+         BlockPos fromPos = above ? this.mob.blockPosition().above() : this.mob.blockPosition();
+@@ -286,6 +312,17 @@
+ 
+             if (!this.isDone()) {
+                 Vec3 target = this.path.getNextEntityPos(this.mob);
++                // Luminol - Recompute path when path finding out of current tick region
++                if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
++                    // we assume that:
++                    // 1. The code above doesn't touch the 'main thread context' with the position from 'this.path'
++                    // 2. The pathfinder could correctly recompute or discard the incorrect target position and this situation is happening rarely
++                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.mob.level(), target)) {
++                        this.hasDelayedRecomputation = true;
++                        return;
++                    }
++                }
++                // Luminol end
+                 this.mob.getMoveControl().setWantedPosition(target.x, this.getGroundY(target), target.z, this.speedModifier);
+             }
+         }
+
+
+// === Merged from: 0073-Do-not-enable-any-debug-subscriptions.patch ===
+// Subject: Do not enable any debug subscriptions
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -3527,7 +3527,8 @@
+     }
+ 
+     public Set<DebugSubscription<?>> debugSubscriptions() {
+-        return !this.server.debugSubscribers().hasRequiredPermissions(this) ? Set.of() : this.requestedDebugSubscriptions;
++        // return !this.server.debugSubscribers().hasRequiredPermissions(this) ? Set.of() : this.requestedDebugSubscriptions; // Luminol - Do not enable any debug subscriptions
++        return Set.of(); // Luminol - Do not enable any debug subscriptions
+     }
+ 
+     public record RespawnConfig(LevelData.RespawnData respawnData, boolean forced) {
+
+
+// === Merged from: 0074-Fix-riding-statistics-desync.patch ===
+// Subject: Fix riding statistics desync
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -2560,7 +2560,7 @@
+         }
+     }
+ 
+-    private void checkRidingStatistics(final double dx, final double dy, final double dz) {
++    public void checkRidingStatistics(final double dx, final double dy, final double dz) { // Luminol - Fix riding statics desync (make public)
+         if (this.isPassenger() && !didNotMove(dx, dy, dz)) {
+             int distance = Math.round((float)Math.sqrt(dx * dx + dy * dy + dz * dz) * 100.0F);
+             Entity vehicle = this.getVehicle();
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4215,7 +4215,13 @@
+             }
+         }
+ 
++        // Luminol start  - Fix riding statics desync
+         public void adjustRiders(boolean teleport) {
++            this.adjustRiders(teleport, false);
++        }
++
++        public void adjustRiders(boolean teleport, boolean syncStatics) {
++        // Luminol end - Fix riding statics desync
+             java.util.ArrayDeque<EntityTreeNode> queue = new java.util.ArrayDeque<>();
+             queue.add(this);
+ 
+@@ -4228,14 +4234,24 @@
+ 
+                 for (EntityTreeNode passenger : passengers) {
+                     queue.add(passenger);
++                    // Luminol start  - Fix riding statics desync
++                    final double oldX = passenger.root.getX();
++                    final double oldY = passenger.root.getY();
++                    final double oldZ = passenger.root.getZ();
++                    // Luminol end - Fix riding statics desync
+                     curr.root.positionRider(passenger.root, teleport ? Entity::snapTo : Entity::setPos);
++                    // Luminol start  - Fix riding statics desync
++                    if (syncStatics && passenger.root instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
++                        serverPlayer.checkRidingStatistics(serverPlayer.getX() - oldX, serverPlayer.getY() - oldY, serverPlayer.getZ() - oldZ);
++                    }
++                    // Luminol end - Fix riding statics desync
+                 }
+             }
+         }
+     }
+ 
+     public void repositionAllPassengers(boolean teleport) {
+-        this.makePassengerTree().adjustRiders(teleport);
++        this.makePassengerTree().adjustRiders(teleport, true); // Luminol - Fix riding statics desync
+     }
+ 
+     protected EntityTreeNode makePassengerTree() {
+
+
+// === Merged from: 0076-Leaf-Replace-criterion-map-with-optimized-collection.patch ===
+// Subject: Leaf: Replace criterion map with optimized collection
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/server/PlayerAdvancements.java b/net/minecraft/server/PlayerAdvancements.java
+--- a/net/minecraft/server/PlayerAdvancements.java
++++ b/net/minecraft/server/PlayerAdvancements.java
+@@ -59,7 +59,7 @@
+     private @Nullable AdvancementHolder lastSelectedTab;
+     private boolean isFirstPacket = true;
+     private final Codec<PlayerAdvancements.Data> codec;
+-    private final Map<CriterionTrigger<?>, Map<PlayerAdvancements.TriggerInstanceKey, ? extends CriterionTriggerInstance>> activeTriggers = new IdentityHashMap<>();
++    private final Map<CriterionTrigger<?>, Map<PlayerAdvancements.TriggerInstanceKey, ? extends CriterionTriggerInstance>> activeTriggers = new it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap<>(); // Leaf - Replace criterion map with optimized collection
+ 
+     public PlayerAdvancements(
+         final DataFixer dataFixer, final PlayerList playerList, final ServerAdvancementManager manager, final Path playerSavePath, final ServerPlayer player
+
+
+// === Merged from: 0077-Leaf-Reduce-worldgen-allocations.patch ===
+// Subject: Leaf: Reduce worldgen allocations
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/level/levelgen/NoiseChunk.java b/net/minecraft/world/level/levelgen/NoiseChunk.java
+--- a/net/minecraft/world/level/levelgen/NoiseChunk.java
++++ b/net/minecraft/world/level/levelgen/NoiseChunk.java
+@@ -373,7 +373,17 @@
+     }
+ 
+     protected DensityFunction wrap(final DensityFunction function) {
+-        return this.wrapped.computeIfAbsent(function, this::wrapNew);
++        // Leaf start - Reduce worldgen allocations
++        // Avoid lambda allocation
++        DensityFunction func = this.wrapped.get(function);
++
++        if (func == null) {
++            func = this.wrapNew(function);
++            this.wrapped.put(function, func);
++        }
++
++        return func;
++        // Leaf end - Reduce worldgen allocations
+     }
+ 
+     private DensityFunction wrapNew(final DensityFunction function) {
+
+diff --git a/net/minecraft/world/level/levelgen/SurfaceRules.java b/net/minecraft/world/level/levelgen/SurfaceRules.java
+--- a/net/minecraft/world/level/levelgen/SurfaceRules.java
++++ b/net/minecraft/world/level/levelgen/SurfaceRules.java
+@@ -666,8 +666,13 @@
+     private record SequenceRule(List<SurfaceRules.SurfaceRule> rules) implements SurfaceRules.SurfaceRule {
+         @Override
+         public @Nullable BlockState tryApply(final int blockX, final int blockY, final int blockZ) {
+-            for (SurfaceRules.SurfaceRule rule : this.rules) {
+-                BlockState state = rule.tryApply(blockX, blockY, blockZ);
++            // Leaf start - Reduce worldgen allocations
++            // Avoid iterator allocation
++            int size = this.rules.size();
++            //noinspection ForLoopReplaceableByForEach
++            for (int i = 0; i < size; i++) {
++                BlockState state = this.rules.get(i).tryApply(blockX, blockY, blockZ);
++                // Leaf end - Reduce worldgen allocations
+                 if (state != null) {
+                     return state;
+                 }
+
+diff --git a/net/minecraft/world/level/levelgen/material/MaterialRuleList.java b/net/minecraft/world/level/levelgen/material/MaterialRuleList.java
+--- a/net/minecraft/world/level/levelgen/material/MaterialRuleList.java
++++ b/net/minecraft/world/level/levelgen/material/MaterialRuleList.java
+@@ -8,13 +8,17 @@
+ public record MaterialRuleList(NoiseChunk.BlockStateFiller[] materialRuleList) implements NoiseChunk.BlockStateFiller {
+     @Override
+     public @Nullable BlockState calculate(final DensityFunction.FunctionContext context) {
+-        for (NoiseChunk.BlockStateFiller rule : this.materialRuleList) {
+-            BlockState state = rule.calculate(context);
+-            if (state != null) {
+-                return state;
+-            }
++        // Leaf start - Reduce worldgen allocations
++        // Avoid iterator allocation
++        BlockState state = null;
++        int length = this.materialRuleList.length;
++
++        for (int i = 0; state == null && i < length; i++) {
++            NoiseChunk.BlockStateFiller rule = this.materialRuleList[i];
++            state = rule.calculate(context);
+         }
+ 
+-        return null;
++        return state;
++        // Leaf end - Reduce worldgen allocations
+     }
+ }
+
+
+// === Merged from: 0080-Leaf-Skip-negligible-planar-movement-multiplication.patch ===
+// Subject: Leaf: Skip negligible planar movement multiplication
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -1299,8 +1299,18 @@
+                     }
+                 }
+ 
++                // Gale start - skip negligible planar movement multiplication
++                Vec3 oldDeltaMovement = this.getDeltaMovement();
++
++                if (oldDeltaMovement.x < -1e-6 || oldDeltaMovement.x > 1e-6 || oldDeltaMovement.z < -1e-6 || oldDeltaMovement.z > 1e-6) {
++                    // Gale end - skip negligible planar movement multiplication
+                 float blockSpeedFactor = this.getBlockSpeedFactor();
+-                this.setDeltaMovement(this.getDeltaMovement().multiply(blockSpeedFactor, 1.0, blockSpeedFactor));
++                    // Gale start - skip negligible planar movement multiplication
++                    if (blockSpeedFactor < 1 - 1e-6 || blockSpeedFactor > 1 + 1e-6) {
++                        this.setDeltaMovement(oldDeltaMovement.multiply(blockSpeedFactor, 1.0, blockSpeedFactor));
++                    }
++                }
++                // Gale end - skip negligible planar movement multiplication
+                 profiler.pop();
+             }
+         }
+
+
+// === Merged from: 0081-Leaf-Initialize-line-of-sight-cache-with-low-capacit.patch ===
+// Subject: Leaf: Initialize line of sight cache with low capacity
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/ai/sensing/Sensing.java b/net/minecraft/world/entity/ai/sensing/Sensing.java
+--- a/net/minecraft/world/entity/ai/sensing/Sensing.java
++++ b/net/minecraft/world/entity/ai/sensing/Sensing.java
+@@ -9,8 +9,10 @@
+ 
+ public class Sensing {
+     private final Mob mob;
+-    private final IntSet seen = new IntOpenHashSet();
+-    private final IntSet unseen = new IntOpenHashSet();
++    // Gale start - initialize line of sight cache with low capacity
++    private final IntSet seen = new IntOpenHashSet(2);
++    private final IntSet unseen = new IntOpenHashSet(2);
++    // Gale end - initialize line of sight cache with low capacity
+ 
+     public Sensing(final Mob mob) {
+         this.mob = mob;
+
+
+// === Merged from: 0082-Leaf-Reduce-block-destruction-packet-allocations.patch ===
+// Subject: Leaf: Reduce block destruction packet allocations
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -1883,6 +1883,15 @@
+ 
+     @Override
+     public void destroyBlockProgress(final int id, final BlockPos blockPos, final int progress) {
++        // Gale start - SportPaper - reduce block destruction packet allocations
++        var players = this.server.getPlayerList().getPlayers();
++
++        if (players.isEmpty()) {
++            return;
++        }
++
++        ClientboundBlockDestructionPacket packet = new ClientboundBlockDestructionPacket(id, blockPos, progress);
++        // Gale end - SportPaper - reduce block destruction packet allocations
+         // CraftBukkit start
+         Player breakerPlayer = null;
+         Entity entity = this.getEntity(id);
+@@ -1899,7 +1908,7 @@
+                 .callEvent();
+         }
+         // Paper end - Add BlockBreakProgressUpdateEvent
+-        for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
++        for (ServerPlayer player : players) { // Gale - SportPaper - reduce block destruction packet allocations
+             if (player.level() == this && player.getId() != id) {
+                 double xd = blockPos.getX() - player.getX();
+                 double yd = blockPos.getY() - player.getY();
+@@ -1910,7 +1919,7 @@
+                         continue;
+                     }
+                     // CraftBukkit end
+-                    player.connection.send(new ClientboundBlockDestructionPacket(id, blockPos, progress));
++                    player.connection.send(packet); // Gale - SportPaper - reduce block destruction packet allocations
+                 }
+             }
+         }
+
+
+// === Merged from: 0083-Leaf-Check-targeting-range-before-getting-visibility.patch ===
+// Subject: Leaf: Check targeting range before getting visibility
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/ai/targeting/TargetingConditions.java b/net/minecraft/world/entity/ai/targeting/TargetingConditions.java
+--- a/net/minecraft/world/entity/ai/targeting/TargetingConditions.java
++++ b/net/minecraft/world/entity/ai/targeting/TargetingConditions.java
+@@ -79,9 +79,18 @@
+             }
+ 
+             if (this.range > 0.0) {
+-                double modifier = this.testInvisible ? target.getVisibilityPercent(targeter) : 1.0;
+-                double visibilityDistance = Math.max(this.range * modifier, 2.0);
++                // Gale start - Airplane - check targeting range before getting visibility
++                // modifier = invisibility percent, visibilityDistance = follow range adjusted for invisibility, distanceToSqr = distance
+                 double distanceToSqr = targeter.distanceToSqr(target.getX(), target.getY(), target.getZ());
++                double followRangeRaw = this.range;
++
++                if (distanceToSqr > followRangeRaw * followRangeRaw) { // the actual follow range will always be this value or smaller, so if the distance is larger then it never will return true after getting invis
++                    return false;
++                }
++
++                double modifier = this.testInvisible ? target.getVisibilityPercent(targeter) : 1.0;
++                double visibilityDistance = Math.max(followRangeRaw * modifier, 2.0);
++                // Gale end - Airplane - check targeting range before getting visibility
+                 if (distanceToSqr > visibilityDistance * visibilityDistance) {
+                     return false;
+                 }
+
+
+// === Merged from: 0084-Leaf-Block-goal-does-not-load-chunks.patch ===
+// Subject: Leaf: Block goal does not load chunks
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/ai/goal/MoveToBlockGoal.java b/net/minecraft/world/entity/ai/goal/MoveToBlockGoal.java
+--- a/net/minecraft/world/entity/ai/goal/MoveToBlockGoal.java
++++ b/net/minecraft/world/entity/ai/goal/MoveToBlockGoal.java
+@@ -119,6 +119,7 @@
+                 for (int x = 0; x <= r; x = x > 0 ? -x : 1 - x) {
+                     for (int z = x < r && x > -r ? r : 0; z <= r; z = z > 0 ? -z : 1 - z) {
+                         pos.setWithOffset(mobPos, x, y - 1, z);
++                        if (!this.mob.level().hasChunkAt(pos)) continue; // Gale - Airplane - block goal does not load chunks - if this block isn't loaded, continue
+                         if (this.mob.isWithinHome(pos) && this.isValidTarget(this.mob.level(), pos)) {
+                             this.blockPos = pos;
+                             this.mob.movingTarget = pos == BlockPos.ZERO ? null : pos.immutable(); // Paper
+
+
+// === Merged from: 0085-Leaf-Remove-stream-in-BlockBehaviour-cache-blockstat.patch ===
+// Subject: Leaf: Remove stream in BlockBehaviour cache blockstate
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/level/block/state/BlockBehaviour.java b/net/minecraft/world/level/block/state/BlockBehaviour.java
+--- a/net/minecraft/world/level/block/state/BlockBehaviour.java
++++ b/net/minecraft/world/level/block/state/BlockBehaviour.java
+@@ -1063,7 +1063,7 @@
+             private static final Direction[] DIRECTIONS = Direction.values();
+             private static final int SUPPORT_TYPE_COUNT = SupportType.values().length;
+             public final VoxelShape collisionShape;
+-            public final boolean largeCollisionShape;
++            public boolean largeCollisionShape; // Luminol - make mutable
+             private final boolean[] faceSturdy;
+             public final boolean isCollisionShapeFullBlock;
+ 
+@@ -1080,8 +1080,14 @@
+                     );
+                 }
+ 
+-                this.largeCollisionShape = Arrays.stream(Direction.Axis.values())
+-                    .anyMatch(axis -> this.collisionShape.min(axis) < 0.0 || this.collisionShape.max(axis) > 1.0);
++                // Leaf start - Remove stream in BlockBehaviour cache blockstate
++                for (Direction.Axis axis : Direction.Axis.values()) {
++                    if (this.collisionShape.min(axis) < 0.0 || this.collisionShape.max(axis) > 1.0) {
++                        this.largeCollisionShape = true;
++                        break;
++                    }
++                }
++                // Leaf end - Remove stream in BlockBehaviour cache blockstate
+                 this.faceSturdy = new boolean[DIRECTIONS.length * SUPPORT_TYPE_COUNT];
+ 
+                 for (Direction direction : DIRECTIONS) {
+
+
+// === Merged from: 0086-Leaf-Optimize-nearby-alive-players-for-spawning.patch ===
+// Subject: Leaf Optimize nearby alive players for spawning
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/EntitySelector.java b/net/minecraft/world/entity/EntitySelector.java
+--- a/net/minecraft/world/entity/EntitySelector.java
++++ b/net/minecraft/world/entity/EntitySelector.java
+@@ -30,7 +30,7 @@
+     // Paper end - Ability to control player's insomnia and phantoms
+     // Paper start - Affects Spawning API
+     public static final Predicate<Entity> PLAYER_AFFECTS_SPAWNING = (entity) -> {
+-        return !entity.isSpectator() && entity.isAlive() && entity instanceof Player player && player.affectsSpawning;
++        return !entity.isSpectator() && entity.isAlive() && entity instanceof Player player && player.affectsSpawning; // Leaf - Optimize nearby alive players for spawning - diff on change
+     };
+     // Paper end - Affects Spawning API
+ 
+
+diff --git a/net/minecraft/world/entity/monster/zombie/Zombie.java b/net/minecraft/world/entity/monster/zombie/Zombie.java
+--- a/net/minecraft/world/entity/monster/zombie/Zombie.java
++++ b/net/minecraft/world/entity/monster/zombie/Zombie.java
+@@ -354,7 +354,7 @@
+                 if (SpawnPlacements.isSpawnPositionOk(type, level, spawnPos)
+                     && SpawnPlacements.checkSpawnRules(type, level, EntitySpawnReason.REINFORCEMENT, spawnPos, level.getRandom())) {
+                     reinforcement.setPos(xt, yt, zt);
+-                    if (!level.hasNearbyAlivePlayerThatAffectsSpawning(xt, yt, zt, 7.0) // Paper - affects spawning api
++                    if (!level.hasNearbyAlivePlayerThatAffectsSpawningForZombie(xt, yt, zt, 7.0) // Paper - affects spawning api // Leaf - Optimize nearby alive players for spawning
+                         && level.isUnobstructed(reinforcement)
+                         && level.noCollision(reinforcement)
+                         && (reinforcement.canSpawnInLiquids() || !level.containsAnyLiquid(reinforcement.getBoundingBox()))) {
+
+diff --git a/net/minecraft/world/level/BaseSpawner.java b/net/minecraft/world/level/BaseSpawner.java
+--- a/net/minecraft/world/level/BaseSpawner.java
++++ b/net/minecraft/world/level/BaseSpawner.java
+@@ -66,7 +66,7 @@
+     }
+ 
+     public boolean isNearPlayer(final Level level, final BlockPos pos) {
+-        return level.hasNearbyAlivePlayerThatAffectsSpawning(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, this.requiredPlayerRange); // Paper - Affects Spawning API
++        return level.hasNearbyAlivePlayerThatAffectsSpawningForSpawner(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, this.requiredPlayerRange); // Paper - Affects Spawning API // Leaf - Optimize nearby alive players for spawning
+     }
+ 
+     public void clientTick(final Level level, final BlockPos pos) {
+
+diff --git a/net/minecraft/world/level/EntityGetter.java b/net/minecraft/world/level/EntityGetter.java
+--- a/net/minecraft/world/level/EntityGetter.java
++++ b/net/minecraft/world/level/EntityGetter.java
+@@ -118,6 +118,89 @@
+         // Paper end - optimise collisions
+     }
+ 
++    // Leaf start - Optimize nearby alive players for spawning
++    default boolean hasNearbyAlivePlayerThatAffectsSpawningForSpawner(double x, double y, double z, double range) {
++        if (range > 33) {
++            return hasNearbyAlivePlayerThatAffectsSpawningForLargerRangeSpawner(x, y, z, range);
++        }
++
++        final net.minecraft.core.BlockPos.MutableBlockPos mutablePos = new net.minecraft.core.BlockPos.MutableBlockPos();
++
++        mutablePos.set(x, y, z);
++
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> players = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel) this).moonrise$getNearbyPlayers().getPlayers(
++            mutablePos, ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.GENERAL // NearbyPlayers.GENERAL_AREA_VIEW_DISTANCE: 33
++        );
++
++        if (players == null) {
++            return false;
++        }
++
++        final net.minecraft.server.level.ServerPlayer[] raw = players.getRawDataUnchecked();
++        final int len = players.size();
++
++        java.util.Objects.checkFromIndexSize(0, len, raw.length);
++
++        for (int i = 0; i < len; ++i) {
++            final net.minecraft.server.level.ServerPlayer player = raw[i];
++            final double distanceSqr = player.distanceToSqr(x, y, z);
++
++            if (range < 0.0D || distanceSqr < range * range) {
++                if (!player.isSpectator() && player.isAlive() && player.affectsSpawning) { // combines NO_SPECTATORS and LIVING_ENTITY_STILL_ALIVE with an "affects spawning" check
++                    return true;
++                }
++            }
++        }
++
++        return false;
++    }
++
++    default boolean hasNearbyAlivePlayerThatAffectsSpawningForLargerRangeSpawner(double x, double y, double z, double range) {
++        for (Player player : this.players()) {
++            double distanceSqr = player.distanceToSqr(x, y, z);
++            if (range < 0.0D || distanceSqr < range * range) {
++                if (!player.isSpectator() && player.isAlive() && player.affectsSpawning) { // combines NO_SPECTATORS and LIVING_ENTITY_STILL_ALIVE with an "affects spawning" check
++                    return true;
++                }
++            }
++        }
++
++        return false;
++    }
++
++    default boolean hasNearbyAlivePlayerThatAffectsSpawningForZombie(int x, int y, int z, double range) {
++        final net.minecraft.core.BlockPos.MutableBlockPos mutablePos = new net.minecraft.core.BlockPos.MutableBlockPos();
++
++        mutablePos.set(x, y, z);
++
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> players = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel) this).moonrise$getNearbyPlayers().getPlayers(
++            mutablePos, ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.SPAWN_RANGE // NearbyPlayers.PLAYER_SPAWN_TRACK_RANGE: 8
++        );
++
++        if (players == null) {
++            return false;
++        }
++
++        final net.minecraft.server.level.ServerPlayer[] raw = players.getRawDataUnchecked();
++        final int len = players.size();
++
++        java.util.Objects.checkFromIndexSize(0, len, raw.length);
++
++        for (int i = 0; i < len; ++i) {
++            final net.minecraft.server.level.ServerPlayer player = raw[i];
++            final double distanceSqr = player.distanceToSqr(x, y, z);
++
++            if (range < 0.0D || distanceSqr < range * range) {
++                if (!player.isSpectator() && player.isAlive() && player.affectsSpawning) { // combines NO_SPECTATORS and LIVING_ENTITY_STILL_ALIVE with an "affects spawning" check
++                    return true;
++                }
++            }
++        }
++
++        return false;
++    }
++    // Leaf end - Optimize nearby alive players for spawning
++
+     // Paper start - Affects Spawning API
+     default @Nullable Player findNearbyPlayer(Entity entity, double range, @Nullable Predicate<Entity> predicate) {
+         return this.getNearestPlayer(entity.getX(), entity.getY(), entity.getZ(), range, predicate);
+
+
+// === Merged from: 0087-Some-optimizations-from-krypton.patch ===
+// Subject: Some optimizations from krypton
+// Author: mrhua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/network/Utf8String.java b/net/minecraft/network/Utf8String.java
+--- a/net/minecraft/network/Utf8String.java
++++ b/net/minecraft/network/Utf8String.java
+@@ -33,6 +33,22 @@
+     }
+ 
+     public static void write(final ByteBuf output, final CharSequence value, final int maxLength) {
++        // Luminol start - Krypton optimizations
++        if (true) {
++            if (value.length() > maxLength) {
++                throw new EncoderException("String too big (was " + value.length() + " characters, max " + maxLength + ")");
++            }
++            int utf8Bytes = ByteBufUtil.utf8Bytes(value);
++            int maxBytesPermitted = ByteBufUtil.utf8MaxBytes(maxLength);
++            if (utf8Bytes > maxBytesPermitted) {
++                throw new EncoderException("String too big (was " + utf8Bytes + " bytes encoded, max " + maxBytesPermitted + ")");
++            } else {
++                VarInt.write(output, utf8Bytes);
++                output.writeCharSequence(value, StandardCharsets.UTF_8);
++            }
++            return;
++        }
++        // Luminol end
+         if (value.length() > maxLength) {
+             throw new EncoderException("String too big (was " + value.length() + " characters, max " + maxLength + ")");
+         }
+
+diff --git a/net/minecraft/network/VarInt.java b/net/minecraft/network/VarInt.java
+--- a/net/minecraft/network/VarInt.java
++++ b/net/minecraft/network/VarInt.java
+@@ -60,7 +60,8 @@
+             int s = (value & 0x7F | 0x80) << 8 | (value >>> 7);
+             output.writeShort(s);
+         } else {
+-            writeSlow(output, value);
++            // writeSlow(output, value); // Luminol - Krypton optimizations
++            writeVarIntFull(output, value); // Luminol - Krypton optimizations
+         }
+         return output;
+     }
+@@ -74,4 +75,27 @@
+         output.writeByte(value);
+         return output;
+     }
++    // Luminol start - Krypton optimizations
++    private static void writeVarIntFull(ByteBuf buf, int value) {
++        // See https://steinborn.me/posts/performance/how-fast-can-you-write-a-varint/
++        if ((value & (0xFFFFFFFF << 7)) == 0) {
++            buf.writeByte(value);
++        } else if ((value & (0xFFFFFFFF << 14)) == 0) {
++            int w = (value & 0x7F | 0x80) << 8 | (value >>> 7);
++            buf.writeShort(w);
++        } else if ((value & (0xFFFFFFFF << 21)) == 0) {
++            int w = (value & 0x7F | 0x80) << 16 | ((value >>> 7) & 0x7F | 0x80) << 8 | (value >>> 14);
++            buf.writeMedium(w);
++        } else if ((value & (0xFFFFFFFF << 28)) == 0) {
++            int w = (value & 0x7F | 0x80) << 24 | (((value >>> 7) & 0x7F | 0x80) << 16)
++                    | ((value >>> 14) & 0x7F | 0x80) << 8 | (value >>> 21);
++            buf.writeInt(w);
++        } else {
++            int w = (value & 0x7F | 0x80) << 24 | ((value >>> 7) & 0x7F | 0x80) << 16
++                    | ((value >>> 14) & 0x7F | 0x80) << 8 | ((value >>> 21) & 0x7F | 0x80);
++            buf.writeInt(w);
++            buf.writeByte(value >>> 28);
++        }
++    }
++    // Luminol end
+ }
+
+
+// === Merged from: 0090-Do-not-load-too-far-poi-chunk-in-poi-compete-scan.patch ===
+// Subject: Do not load too far poi chunk in poi compete scan
+// Author: MrHua269 <mrhua269@gmail.com>
+
+diff --git a/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java b/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
+--- a/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
++++ b/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
+@@ -24,8 +24,18 @@
+                             return true;
+                         }
+                         // Folia end - region threading
+-                        level.getPoiManager()
+-                            .getType(pos.pos())
++                        // Luminol start - POI fixes
++                        var blockPosOfJobSite = pos.pos();
++                        var sectionPosOfJobSite = net.minecraft.core.SectionPos.asLong(blockPosOfJobSite);
++                        var poiManager = level.getPoiManager();
++                        // we don't care if we should clear the memory of JOB_SITE
++                        // as it will be automatically removed in SetWalkTargetFromBlockMemory
++                        // so simply break down if it's not loaded
++                        var poiChunk = fun.bm.mili.lmili.config.modules.fixes.POIRangeFixes.doNotCompetePOIIfUnloaded ? poiManager.get(sectionPosOfJobSite) : poiManager.getOrLoad(sectionPosOfJobSite);
++                        poiChunk.flatMap(poiSection -> poiSection.getType(blockPosOfJobSite))
++                        // Luminol end - POI fixes
++                        /*level.getPoiManager() // Luminol - POI fixes
++                            .getType(pos.pos())*/ // Luminol - POI fixes
+                             .ifPresent(
+                                 // Paper start - Improve performance of PoiCompetitorScan by unrolling stream
+                                 // The previous logic used Stream#reduce to simulate a form of single-iteration bubble sort
+
+
+// === Merged from: 0111-Global-Entities-Counter.patch ===
+// Subject: Global-Entities-Counter
+// Author: xucy10 <someonm20141923@outlook.com>
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -557,6 +557,9 @@
+     }
+     // Luminol end
+ 
++    public int uniqueId = -1; // Mili - Global Entities Counter
++    public boolean underGlobalEntitiesCounter = false; // Mili - Global Entities Counter
++
+     public final TickRegions.TickRegionData regionData;
+ 
+     public RegionizedWorldData(final ServerLevel world, final TickRegions.TickRegionData regionData) {
+@@ -569,6 +572,13 @@
+         this.turbo = new io.papermc.paper.redstone.RedstoneWireTurbo((RedStoneWireBlock)Blocks.REDSTONE_WIRE);
+         this.regionData = regionData;
+ 
++        // Mili start - Global Entities Counter
++        if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++            uniqueId = fun.bm.mili.utils.EntitiesCounterUtil.generateUniqueId();
++            underGlobalEntitiesCounter = true;
++        }
++        // Mili end - Global Entities Counter
++
+         // tasks may be drained before the region ticks, so we must set up the tick data early just in case
+         this.updateTickData();
+     }
+
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -511,6 +511,23 @@
+         this.chunkMap.tick(haveTime);
+         profiler.pop();
+         this.clearCache();
++        // Mili start - Global Entities Counter
++        if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++            io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.level.getCurrentWorldData();
++            if (regionizedWorldData != null) {
++                if (regionizedWorldData.underGlobalEntitiesCounter) {
++                    if (regionizedWorldData.getLocalPlayers().isEmpty()) {
++                        fun.bm.mili.utils.EntitiesCounterUtil.onWorldDataUnload(level, regionizedWorldData.uniqueId);
++                        regionizedWorldData.underGlobalEntitiesCounter = false;
++                    }
++                } else {
++                    if (!regionizedWorldData.getLocalPlayers().isEmpty()) {
++                        regionizedWorldData.underGlobalEntitiesCounter = true;
++                    }
++                }
++            }
++        }
++        // Mili end - Global Entities Counter
+     }
+ 
+     private void tickChunks() {
+@@ -575,7 +592,13 @@
+             }
+             spawnCookie = NaturalSpawner.createState(chunkCount, regionizedWorldData.getLoadedEntities(), this::getFullChunk, null, true); // Folia - region threading - note: function only cares about loaded entities, doesn't need all
+         } else {
++            // Mili start - Global Entities Counter
++            if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++                spawnCookie = fun.bm.mili.utils.EntitiesCounterUtil.runRemainingTasks(level, regionizedWorldData.getLoadedEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
++            } else {
+             spawnCookie = NaturalSpawner.createState(chunkCount, regionizedWorldData.getLoadedEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false); // Folia - region threading - note: function only cares about loaded entities, doesn't need all
++            }
++            // Mili end - Global Entities Counter
+         }
+         } finally { foliaProfiler.stopTimer(ca.spottedleaf.leafprofiler.LProfilerRegistry.MOB_SPAWN_ENTITY_COUNT); } // Folia - profiler
+         // Paper end - Optional per player mob spawns
+@@ -583,7 +606,7 @@
+         boolean doMobSpawning = this.level.getGameRules().get(GameRules.SPAWN_MOBS) && !this.level.getLocalPlayers().isEmpty(); // CraftBukkit // Folia - region threading
+         int tickSpeed = this.level.getGameRules().get(GameRules.RANDOM_TICK_SPEED);
+         List<MobCategory> spawningCategories;
+-        if (doMobSpawning && (this.spawnEnemies || this.spawnFriendlies)) { // Paper
++        if (spawnCookie != null && doMobSpawning && (this.spawnEnemies || this.spawnFriendlies)) { // Paper // Mili - Global Entities Counter
+             // Paper start - PlayerNaturallySpawnCreaturesEvent
+             for (ServerPlayer player : this.level.getLocalPlayers()) { // Folia - region threading
+                 int chunkRange = Math.min(level.spigotConfig.mobSpawnRange, player.getBukkitEntity().getViewDistance());
+@@ -643,7 +666,7 @@
+             this.level.tickThunder(chunk);
+         }
+ 
+-        if (!spawningCategories.isEmpty()) {
++        if (spawnCookie != null && !spawningCategories.isEmpty()) { // Mili - Global Entities Counter
+             if (this.level.getWorldBorder().isWithinBounds(chunkPos)) { // Paper - rewrite chunk system
+                 NaturalSpawner.spawnForChunk(this.level, chunk, spawnCookie, spawningCategories);
+             }
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -817,6 +817,22 @@
+     }
+ 
+     public void tick(BooleanSupplier haveTime, final io.papermc.paper.threadedregions.TickRegions.TickRegionData region) { // Folia - regionised ticking
++        // Mili start - Global Entities Counter
++        if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++            io.papermc.paper.threadedregions.RegionizedWorldData data = this.getCurrentWorldData();
++            if (data != null && data.underGlobalEntitiesCounter) {
++                fun.bm.mili.utils.EntitiesCounterUtil.tick(this, data.uniqueId, (ca.spottedleaf.moonrise.common.list.ReferenceList<Entity>) data.getLoadedEntities(), data.spawnChunkTracker);
++            }
++        }
++        // Mili end - Global Entities Counter
++        // Mili start - Cross Region Helper
++        if (fun.bm.mili.config.modules.experiment.CrossRegionHelperConfig.enabled) {
++            io.papermc.paper.threadedregions.RegionizedWorldData data = this.getCurrentWorldData();
++            if (data != null) {
++                fun.bm.mili.utils.CrossRegionHelper.onRegionTick(this, data);
++            }
++        }
++        // Mili end - Cross Region Helper
+         final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.getCurrentWorldData(); // Folia - regionised ticking
+         final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle foliaProfiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler(); // Folia - profiler
+         ProfilerFiller profiler = Profiler.get();
+
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -826,6 +826,44 @@
+                 }
+             }
+         } else {
++            // Mili start - fix some bug if player is cross scheduler >> to remove monster if the region don't have any valid player
++            if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
++                List<net.minecraft.server.level.ServerPlayer> playerList = this.level().getServer().getPlayerList().getPlayers();
++                if (!playerList.isEmpty()) {
++                    double d = -1.0;
++                    Vec3 vec3 = null;
++                    for (net.minecraft.server.level.ServerPlayer player1 : playerList) {
++                        if (player1.level() != this.level()) continue;
++                        double d1 = player1.distanceToSqr(this.position());
++                        if (d == -1.0 || d1 < d) {
++                            d = d1;
++                            vec3 = player1.position();
++                        }
++                    }
++                    if (vec3 != null) {
++                        // copy from PaperMC
++                        // Paper start - Configurable despawn distances
++                        final io.papermc.paper.configuration.WorldConfiguration.Entities.Spawning.DespawnRangePair despawnRangePair = this.level().paperConfig().entities.spawning.despawnRanges.get(this.getType().getCategory());
++                        final io.papermc.paper.configuration.type.DespawnRange.Shape shape = this.level().paperConfig().entities.spawning.despawnRangeShape;
++                        final double dy = Math.abs(vec3.y - this.getY());
++                        final double dySqr = Mth.square(dy);
++                        final double dxSqr = Mth.square(vec3.x - this.getX());
++                        final double dzSqr = Mth.square(vec3.z - this.getZ());
++                        final double distanceSquared = dxSqr + dzSqr + dySqr;
++                        // Despawn if hard/soft limit is exceeded
++                        if (despawnRangePair.hard().shouldDespawn(shape, dxSqr, dySqr, dzSqr, dy) && this.removeWhenFarAway(distanceSquared)) {
++                            this.discard(EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
++                        }
++
++                        if (despawnRangePair.soft().shouldDespawn(shape, dxSqr, dySqr, dzSqr, dy)) {
++                            if (this.noActionTime > 600 && this.random.nextInt(800) == 0 && this.removeWhenFarAway(distanceSquared)) {
++                                this.discard(EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
++                            }
++                        }
++                    }
++                }
++            }
++            // Mili end
+             this.noActionTime = 0;
+         }
+     }
+
+diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
+--- a/net/minecraft/world/level/NaturalSpawner.java
++++ b/net/minecraft/world/level/NaturalSpawner.java
+@@ -121,7 +121,7 @@
+         return new NaturalSpawner.SpawnState(spawnableChunkCount, mobCounts, spawnPotential, localMobCapCalculator);
+     }
+ 
+-    private static Biome getRoughBiome(final BlockPos pos, final ChunkAccess chunk) {
++    public static Biome getRoughBiome(final BlockPos pos, final ChunkAccess chunk) { // Mili - private -> public
+         return chunk.getNoiseBiome(QuartPos.fromBlock(pos.getX()), QuartPos.fromBlock(pos.getY()), QuartPos.fromBlock(pos.getZ())).value();
+     }
+ 
+@@ -629,7 +629,7 @@
+         private @Nullable EntityType<?> lastCheckedType;
+         private double lastCharge;
+ 
+-        private SpawnState(
++        public SpawnState( // Mili - private -> public
+             final int spawnableChunkCount,
+             final Object2IntOpenHashMap<MobCategory> mobCategoryCounts,
+             final PotentialCalculator spawnPotential,
+
+
+// === Merged from: 0112-Add-null-check-in-RegionizedWorldData-conections.patch ===
+// Subject: Add-null-check-in-RegionizedWorldData-conections
+// Author: xucy10 <someonm20141923@outlook.com>
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -170,14 +170,17 @@
+             }
+             from.portalRateThrottler.destroy();
+             // Luminol end
++            Set<Connection> cons = new java.util.HashSet<>(from.connections.size()); // Mili - save all connections we have processed in connection process
+             // connections
+             for (final Connection conn : from.connections) {
+                 final ServerPlayer player = conn.getPlayer();
++                if (player == null) continue; // Mili - skip null player connections
+                 final ChunkPos pos = player.chunkPosition();
+                 // Note: It is impossible for an entity in the world to _not_ be in an entity chunk, which means
+                 // the chunk holder must _exist_, and so the region section exists.
+                 regionToData.get(CoordinateUtils.getChunkKey(pos.x() >> chunkToRegionShift, pos.z() >> chunkToRegionShift))
+                     .connections.add(conn);
++                cons.add(conn); // Mili - save all connections we have processed in connection process
+             }
+             // entities
+             for (final ServerPlayer player : from.localPlayers) {
+@@ -188,6 +191,13 @@
+                 into.localPlayers.add(player);
+                 player.getBukkitEntity().updateRegion(into);
+                 into.nearbyPlayers.addPlayer(player);
++                // Mili start - we need to process the connection if player's connection is not processed, if connection.player is null, next tick will clean up it
++                final Connection conn = player.connection.connection;
++                if (!cons.contains(conn)) {
++                    regionToData.get(CoordinateUtils.getChunkKey(pos.x() >> chunkToRegionShift, pos.z() >> chunkToRegionShift))
++                            .connections.add(conn);
++                }
++                // Mili end
+             }
+             for (final Entity entity : from.allEntities) {
+                 final ChunkPos pos = entity.chunkPosition();
+@@ -542,6 +552,7 @@
+     private static void cleanUpConnection(final Connection conn) {
+         // note: ALL connections HERE have a player
+         final ServerPlayer player = conn.getPlayer();
++        if (player == null) return; // Mili - skip null player connections
+         // now that the connection is removed, we can allow this region to die
+         player.level().moonrise$getChunkTaskScheduler().chunkHolderManager.removeTicketAtLevel(
+             ServerGamePacketListenerImpl.DISCONNECT_TICKET, player.connection.disconnectPos,
+
+
+// === Merged from: 0118-Rendering-optimization-integration-121-mili-foliaSer.patch ===
+// Subject: Rendering optimization integration 121 mili foliaServer File Patches
+// Author: xucy10 <xucy0609@gmail.com>
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1765,6 +1765,15 @@
+         }
+         //KioCG end
+         this.tickChildren(haveTime, region); // Folia - region threading
++        // Mili start - dynamic view distance manager tick
++        if (region != null && io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() % 20 == 0) {
++            try {
++                fun.bm.mili.utils.DynamicViewDistanceManager.tick();
++            } catch (Exception e) {
++                LOGGER.warn("Dynamic view distance manager tick failed", e);
++            }
++        }
++        // Mili end - dynamic view distance manager tick
+         // KioCG start - ChunkHot
+         if (region != null && io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() % 20 == 0){
+             final java.util.Iterator<net.minecraft.world.level.chunk.LevelChunk> chunkIterator = chunks.unsafeIterator();
+
+diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+--- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+@@ -46,6 +46,7 @@
+     private boolean closed = false;
+     private volatile int latency; // Paper - improve keepalives - make volatile
+     private final io.papermc.paper.util.KeepAlive keepAlive; // Paper - improve keepalives
++    private volatile long lastKeepAliveResponse; // Mili - async keepalive
+     private volatile boolean suspendFlushingOnServerThread = false;
+     // CraftBukkit start
+     public final org.bukkit.craftbukkit.CraftServer cserver;
+@@ -70,6 +71,8 @@
+         this.pluginMessagerChannels = cookie.channels();
+         this.keepAlive = cookie.keepAlive();
+         // Paper end
++        this.lastKeepAliveResponse = this.keepAlive.lastKeepAliveTx; // Mili - async keepalive
++        fun.bm.mili.utils.AsyncKeepaliveManager.register(this); // Mili - async keepalive
+     }
+ 
+     // Paper start - configuration phase API
+
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -750,7 +750,14 @@
+             if (otherPlayer.getBukkitEntity().canSee(player.getBukkitEntity())) {
+                 otherPlayer.connection.send(packet);
+             } else {
+-                otherPlayer.getBukkitEntity().onEntityRemove(player);
++                // Mili fix - #406: schedule onEntityRemove on the player's region thread to avoid
++                // concurrent modification of invertedVisibilityEntities (non-thread-safe HashMap)
++                final ServerPlayer targetPlayer = otherPlayer;
++                final ServerPlayer removedPlayer = player;
++                targetPlayer.getBukkitEntity().taskScheduler.schedule(
++                    (Entity p) -> targetPlayer.getBukkitEntity().onEntityRemove(removedPlayer),
++                    null, 1L
++                );
+             }
+         }
+         // This removes the scoreboard (and player reference) for the specific player in the manager
+
+diff --git a/net/minecraft/world/entity/EntityType.java b/net/minecraft/world/entity/EntityType.java
+--- a/net/minecraft/world/entity/EntityType.java
++++ b/net/minecraft/world/entity/EntityType.java
+@@ -57,7 +57,6 @@
+     private final Holder.Reference<EntityType<?>> builtInRegistryHolder = BuiltInRegistries.ENTITY_TYPE.createIntrusiveHolder(this);
+     public static final Codec<EntityType<?>> CODEC = BuiltInRegistries.ENTITY_TYPE.byNameCodec();
+     public static final StreamCodec<RegistryFriendlyByteBuf, EntityType<?>> STREAM_CODEC = ByteBufCodecs.registry(Registries.ENTITY_TYPE);
+-    public boolean skipRaytracningCheck = false; // Leaves - entityculling skip raytrace check
+     private final EntityType.EntityFactory<T> factory;
+     private final MobCategory category;
+     private final TagKey<Block> immuneTo;
+
+diff --git a/net/minecraft/world/entity/ai/gossip/GossipType.java b/net/minecraft/world/entity/ai/gossip/GossipType.java
+--- a/net/minecraft/world/entity/ai/gossip/GossipType.java
++++ b/net/minecraft/world/entity/ai/gossip/GossipType.java
+@@ -15,9 +15,9 @@
+     public static final int REPUTATION_CHANGE_PER_TRADE = 2;
+     public final String id;
+     public final int weight;
+-    public final int max;
++    public int max; // Mili - villager infinite discounts (not final)
+     public final int decayPerDay;
+-    public final int decayPerTransfer;
++    public int decayPerTransfer; // Mili - villager infinite discounts (not final)
+     public static final Codec<GossipType> CODEC = StringRepresentable.fromEnum(GossipType::values);
+ 
+     GossipType(final String id, final int weight, final int max, final int decayPerDay, final int decayPerTransfer) {
+
+diff --git a/net/minecraft/world/item/ShearsItem.java b/net/minecraft/world/item/ShearsItem.java
+--- a/net/minecraft/world/item/ShearsItem.java
++++ b/net/minecraft/world/item/ShearsItem.java
+@@ -80,7 +80,10 @@
+ 
+             return InteractionResult.SUCCESS;
+         } else {
+-            return super.useOn(context);
++            // Mili start - shears wrench
++            InteractionResult result = org.leavesmc.leaves.util.ShearsWrenchUtil.tryApplyRotate(context, context.getLevel().getBlockState(context.getClickedPos()));
++            return result == null ? super.useOn(context) : result;
++            // Mili end - shears wrench
+         }
+     }
+ }
+
+diff --git a/net/minecraft/world/item/ShovelItem.java b/net/minecraft/world/item/ShovelItem.java
+--- a/net/minecraft/world/item/ShovelItem.java
++++ b/net/minecraft/world/item/ShovelItem.java
+@@ -17,6 +17,7 @@
+ import net.minecraft.world.level.block.LevelEvent;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.minecraft.world.item.ItemStack;
+ 
+ public class ShovelItem extends Item {
+     protected static final Map<Block, BlockState> FLATTENABLES = Maps.newHashMap(
+
+diff --git a/net/minecraft/world/item/trading/MerchantOffer.java b/net/minecraft/world/item/trading/MerchantOffer.java
+--- a/net/minecraft/world/item/trading/MerchantOffer.java
++++ b/net/minecraft/world/item/trading/MerchantOffer.java
+@@ -39,6 +39,7 @@
+     public float priceMultiplier;
+     public int xp;
+     public boolean ignoreDiscounts; // Paper - Add ignore discounts API
++    public int voidTradeUses; // Mili - force void trade
+ 
+     // CraftBukkit start
+     private org.bukkit.craftbukkit.inventory.@org.jspecify.annotations.Nullable CraftMerchantRecipe bukkitHandle;
+@@ -78,6 +79,7 @@
+         this.priceMultiplier = priceMultiplier;
+         this.xp = xp;
+         this.ignoreDiscounts = ignoreDiscounts; // Paper
++        this.voidTradeUses = 0; // Mili - force void trade
+     }
+ 
+     public MerchantOffer(final ItemCost buy, final ItemStack result, final int maxUses, final int xp, final float priceMultiplier) {
+@@ -215,7 +217,7 @@
+     }
+ 
+     public boolean isOutOfStock() {
+-        return this.uses >= this.maxUses;
++        return this.uses + this.voidTradeUses >= this.maxUses; // Mili - force void trade
+     }
+ 
+     public void setToOutOfStock() {
+
+diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
+--- a/net/minecraft/world/level/NaturalSpawner.java
++++ b/net/minecraft/world/level/NaturalSpawner.java
+@@ -90,7 +90,7 @@
+                 MobCategory category = entity.getType().getCategory();
+                 if (category != MobCategory.MISC) {
+                     // Paper start - Only count natural spawns
+-                    if (!entity.level().paperConfig().entities.spawning.countAllMobsForSpawning &&
++                    if (!fun.bm.mili.config.modules.function.TechnicalSurvivalModeConfig.enabled && !entity.level().paperConfig().entities.spawning.countAllMobsForSpawning && // Mili - mc technical survival mode
+                         !(entity.spawnReason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL ||
+                             entity.spawnReason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CHUNK_GEN)) {
+                         continue;
+
+diff --git a/net/minecraft/world/level/block/BuddingAmethystBlock.java b/net/minecraft/world/level/block/BuddingAmethystBlock.java
+--- a/net/minecraft/world/level/block/BuddingAmethystBlock.java
++++ b/net/minecraft/world/level/block/BuddingAmethystBlock.java
+@@ -58,4 +58,5 @@
+     public static boolean canClusterGrowAtState(final BlockState state) {
+         return state.isAir() || state.is(Blocks.WATER) && state.getFluidState().isFull();
+     }
++
+ }
+
+diff --git a/net/minecraft/world/level/block/GrowingPlantHeadBlock.java b/net/minecraft/world/level/block/GrowingPlantHeadBlock.java
+--- a/net/minecraft/world/level/block/GrowingPlantHeadBlock.java
++++ b/net/minecraft/world/level/block/GrowingPlantHeadBlock.java
+@@ -160,4 +160,5 @@
+     protected GrowingPlantHeadBlock getHeadBlock() {
+         return this;
+     }
++
+ }
+
+diff --git a/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java b/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
+--- a/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
+@@ -393,7 +393,7 @@
+         ItemStack oldStack = this.items.get(slot);
+         boolean same = !itemStack.isEmpty() && ItemStack.isSameItemSameComponents(oldStack, itemStack);
+         this.items.set(slot, itemStack);
+-        itemStack.limitSize(this.getMaxStackSize(itemStack));
++        itemStack.limitSize(itemStack.getMaxStackSize());
+         if (slot == 0 && !same && this.level instanceof ServerLevel serverLevel) {
+             this.cookingTotalTime = getTotalCookTime(serverLevel, this, this.recipeType, this.cookSpeedMultiplier); // Paper - cook speed multiplier API
+             this.cookingTimer = 0;
+
+diff --git a/net/minecraft/world/level/block/entity/HopperBlockEntity.java b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
+--- a/net/minecraft/world/level/block/entity/HopperBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
+@@ -270,7 +270,7 @@
+                 origItemStack.setCount(originalItemCount);
+             }
+         }
+-        if (foundItem && level.paperConfig().hopper.cooldownWhenFull) { // Inventory was full - cooldown
++        if (foundItem && level.paperConfig().hopper.cooldownWhenFull && !fun.bm.mili.config.modules.function.TechnicalSurvivalModeConfig.enabled) { // Inventory was full - cooldown // Mili - mc technical survival mode
+             hopper.setCooldown(level.spigotConfig.hopperTransfer);
+         }
+         return false;
+
+diff --git a/net/minecraft/world/level/block/entity/vault/VaultServerData.java b/net/minecraft/world/level/block/entity/vault/VaultServerData.java
+--- a/net/minecraft/world/level/block/entity/vault/VaultServerData.java
++++ b/net/minecraft/world/level/block/entity/vault/VaultServerData.java
+@@ -68,6 +68,7 @@
+         addToRewardedPlayers(player.getUUID());
+     }
+     public boolean addToRewardedPlayers(final java.util.UUID player) {
++        if (fun.bm.mili.config.modules.misc.OldMCConfig.disableVaultBlacklist) return false; // Mili - disable vault blacklist
+         final boolean removed = this.rewardedPlayers.add(player);
+     // Paper end - Vault API
+         if (this.rewardedPlayers.size() > 128) {
+
+diff --git a/net/minecraft/world/level/block/state/BlockBehaviour.java b/net/minecraft/world/level/block/state/BlockBehaviour.java
+--- a/net/minecraft/world/level/block/state/BlockBehaviour.java
++++ b/net/minecraft/world/level/block/state/BlockBehaviour.java
+@@ -794,7 +794,7 @@
+         }
+         public PushReaction getPistonPushReaction() {
+-            return !this.isDestroyable() ? PushReaction.BLOCK : this.pushReaction; // Paper - Protect Bedrock and End Portal/Frames from being destroyed
++            return !this.isDestroyable() ? PushReaction.BLOCK : this.pushReaction; // Paper - Protect Bedrock and End Portal/Frames from being destroyed // Mili - reset push reaction (getResetPushReaction unavailable in this MC version)
+         }
+ 
+         public boolean isSolidRender() {
+
+diff --git a/net/minecraft/world/level/dimension/end/EnderDragonFight.java b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+--- a/net/minecraft/world/level/dimension/end/EnderDragonFight.java
++++ b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+@@ -323,7 +323,7 @@
+     private int cachePortalOriginIteratorY = -1;
+ 
+     public BlockPattern.@Nullable BlockPatternMatch findExitPortal() {
+-        if (fun.bm.lophine.carpet.config.modules.GeneralCompatConfig.optimizedDragonRespawn) { // Lophine - redirect
++        if (true) { // Lophine - optimized dragon respawn (always on)
+             int i, j;
+             for (i = cachePortalChunkIteratorX; i <= 8; ++i) {
+                 for (j = cachePortalChunkIteratorZ; j <= 8; ++j) {
+ 

@@ -1,0 +1,211 @@
+package fun.bm.mili.lmili.thread.scheduler.internal;
+
+import fun.bm.mili.lmili.thread.scheduler.api.TaskHandle;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+
+/**
+ * {@link TaskHandle} 的默认实现。
+ *
+ * <p>基于 {@link CompletableFuture}，提供非阻塞回调和阻塞等待能力。
+ * 支持多子任务追踪：当所有子任务完成后，handle 自动标记为 completed。
+ *
+ * <h3>线程安全</h3>
+ * <p>所有状态转换都是原子性的，多线程可以安全地调用 {@link #complete()} /
+ * {@link #completeExceptionally(Throwable)} / {@link #onComplete(Consumer)}。
+ */
+public final class DefaultTaskHandle implements TaskHandle {
+
+    /** 所有子任务完成的 Future */
+    private final CompletableFuture<Void> future;
+
+    /** 追踪的子任务总数 */
+    private final int taskCount;
+
+    /** 已完成的子任务数 */
+    private final AtomicInteger completedCount;
+
+    /** 失败原因（如果有） */
+    private final AtomicReference<Throwable> failureCause;
+
+    /** 当前状态 */
+    private final AtomicReference<State> state;
+
+    /** 完成回调列表 */
+    private final java.util.List<Consumer<TaskHandle>> callbacks;
+
+    /**
+     * 创建单个任务的句柄。
+     */
+    public DefaultTaskHandle() {
+        this(1);
+    }
+
+    /**
+     * 创建追踪多个子任务的句柄。
+     *
+     * @param taskCount 子任务数量
+     */
+    public DefaultTaskHandle(int taskCount) {
+        this.taskCount = Math.max(1, taskCount);
+        this.future = new CompletableFuture<>();
+        this.completedCount = new AtomicInteger(0);
+        this.failureCause = new AtomicReference<>(null);
+        this.state = new AtomicReference<>(State.PENDING);
+        this.callbacks = new java.util.concurrent.CopyOnWriteArrayList<>();
+    }
+
+    /**
+     * 从已有的 CompletableFuture 创建 TaskHandle。
+     *
+     * @param future 底层的 CompletableFuture
+     */
+    public DefaultTaskHandle(@NotNull CompletableFuture<Void> future) {
+        this.taskCount = 1;
+        this.future = future;
+        this.completedCount = new AtomicInteger(0);
+        this.failureCause = new AtomicReference<>(null);
+        this.state = new AtomicReference<>(State.PENDING);
+        this.callbacks = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        // 注册回调以自动更新状态
+        future.whenComplete((result, throwable) -> {
+            if (throwable != null) {
+                completeExceptionally(throwable);
+            } else {
+                complete();
+            }
+        });
+    }
+
+    /**
+     * 标记一个子任务完成。
+     *
+     * <p>当所有子任务都完成后，handle 自动标记为 COMPLETED。
+     */
+    public void completeChild() {
+        int completed = completedCount.incrementAndGet();
+        if (completed >= taskCount) {
+            if (failureCause.get() != null) {
+                doComplete(State.FAILED);
+            } else {
+                doComplete(State.COMPLETED);
+            }
+        }
+    }
+
+    /**
+     * 标记整个任务完成（所有子任务都成功）。
+     */
+    public void complete() {
+        completedCount.set(taskCount);
+        doComplete(State.COMPLETED);
+    }
+
+    /**
+     * 标记任务异常终止。
+     *
+     * @param throwable 失败原因
+     */
+    public void completeExceptionally(@NotNull Throwable throwable) {
+        failureCause.compareAndSet(null, throwable);
+        doComplete(State.FAILED);
+    }
+
+    /**
+     * 标记任务取消。
+     */
+    public void cancel() {
+        doComplete(State.CANCELLED);
+    }
+
+    // ---- TaskHandle 接口实现 ----
+
+    @Override
+    @NotNull
+    public State state() {
+        return state.get();
+    }
+
+    @Override
+    public void onComplete(@NotNull Consumer<TaskHandle> callback) {
+        if (state.get() != State.PENDING) {
+            // 已完成，立即回调
+            callback.accept(this);
+        } else {
+            callbacks.add(callback);
+            // 双重检查：可能在添加回调前状态已改变
+            if (state.get() != State.PENDING) {
+                callbacks.remove(callback);
+                callback.accept(this);
+            }
+        }
+    }
+
+    @Override
+    public boolean await(long timeout, @NotNull TimeUnit unit) throws TimeoutException, InterruptedException {
+        try {
+            future.get(timeout, unit);
+            return state.get() == State.COMPLETED;
+        } catch (java.util.concurrent.ExecutionException e) {
+            return false;
+        }
+    }
+
+    @Override
+    @Nullable
+    public Throwable failureCause() {
+        return failureCause.get();
+    }
+
+    @Override
+    public int taskCount() {
+        return taskCount;
+    }
+
+    @Override
+    public int completedCount() {
+        return Math.min(completedCount.get(), taskCount);
+    }
+
+    @Override
+    @NotNull
+    public CompletableFuture<Void> toCompletableFuture() {
+        return future;
+    }
+
+    // ---- 内部方法 ----
+
+    /**
+     * 完成状态转换并触发回调。
+     */
+    private void doComplete(State newState) {
+        if (state.compareAndSet(State.PENDING, newState)) {
+            // 更新 Future
+            if (newState == State.COMPLETED) {
+                future.complete(null);
+            } else if (newState == State.FAILED) {
+                Throwable cause = failureCause.get();
+                future.completeExceptionally(cause != null ? cause : new RuntimeException("Task failed"));
+            } else {
+                future.cancel(true);
+            }
+
+            // 触发回调
+            for (Consumer<TaskHandle> callback : callbacks) {
+                try {
+                    callback.accept(this);
+                } catch (Throwable t) {
+                    // 回调异常不应影响其他回调
+                }
+            }
+        }
+    }
+}

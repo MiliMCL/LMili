@@ -86,6 +86,7 @@ public final class RegionDagExecutor {
      * 提交单个节点到线程池执行。
      *
      * <p>节点完成后（无论成功/失败），自动触发后继节点的依赖检查和调度。
+     * 如果节点失败，后继节点会被标记为失败状态而非执行。
      */
     private void submitNode(@NotNull final RegionDag dag,
                              @NotNull final RegionTickContext context,
@@ -105,13 +106,43 @@ public final class RegionDagExecutor {
             } finally {
                 // 无论成功/失败，都要 countDown 和触发后继
                 completionLatch.countDown();
+                // Mili start - fix: check if current node failed before scheduling successors
+                DagNode currentNode = dag.getNode(nodeId);
+                boolean currentNodeFailed = currentNode.state() == DagNode.NodeState.FAILED;
+                // Mili end
                 for (int succ : dag.getSuccessors(nodeId)) {
                     if (remainingDeps[succ].decrementAndGet() == 0) {
-                        submitNode(dag, context, succ, remainingDeps, completionLatch, executors);
+                        // Mili start - fix: if predecessor failed, mark successor as failed instead of executing
+                        if (currentNodeFailed) {
+                            DagNode succNode = dag.getNode(succ);
+                            succNode.fail();
+                            // Recursively mark all downstream nodes as failed
+                            markSuccessorsFailed(dag, succ, remainingDeps, completionLatch);
+                        } else {
+                            submitNode(dag, context, succ, remainingDeps, completionLatch, executors);
+                        }
+                        // Mili end
                     }
                 }
             }
         });
+    }
+
+    /**
+     * 递归标记所有后继节点为失败状态，避免执行依赖失败节点的任务。
+     */
+    private void markSuccessorsFailed(@NotNull final RegionDag dag,
+                                       final int nodeId,
+                                       final AtomicInteger[] remainingDeps,
+                                       final CountDownLatch completionLatch) {
+        for (int succ : dag.getSuccessors(nodeId)) {
+            if (remainingDeps[succ].decrementAndGet() == 0) {
+                DagNode succNode = dag.getNode(succ);
+                succNode.fail();
+                completionLatch.countDown();
+                markSuccessorsFailed(dag, succ, remainingDeps, completionLatch);
+            }
+        }
     }
 
     private void executeNode(@NotNull final DagNode node,

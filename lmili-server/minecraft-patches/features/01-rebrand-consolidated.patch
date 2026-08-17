@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Rebrand (consolidated)
+
+Consolidated from 2 original patches:
+  - 0001-Rebrand-to-Luminol.patch
+  - 0091-Luminol-Add-secure-seed-V2-with-Blake3.patch
+
+
+diff --git a/net/minecraft/server/Main.java b/net/minecraft/server/Main.java
+--- a/net/minecraft/server/Main.java
++++ b/net/minecraft/server/Main.java
+@@ -110,6 +110,7 @@
+                 JvmProfiler.INSTANCE.start(Environment.SERVER);
+             }
+ 
++            fun.bm.mili.lmili.config.ConfigManager.initConfigs(); // Luminol - Luminol config
+             io.papermc.paper.plugin.PluginInitializerManager.load(options); // Paper
+             Bootstrap.bootStrap();
+             Bootstrap.validate();
+
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -238,6 +238,7 @@
+         this.paperConfigurations.initializeGlobalConfiguration(this.registryAccess());
+         this.paperConfigurations.initializeWorldDefaultsConfiguration(this.registryAccess());
+         // Paper end - initialize global and world-defaults configuration
++        fun.bm.mili.lmili.config.ConfigManager.loadConfigFiles(); // Luminol - load config file
+         this.server.spark.enableEarlyIfRequested(); // Paper - spark
+         // Paper start - fix converting txt to json file; convert old users earlier after PlayerList creation but before file load/save
+         if (this.convertOldUsers()) {
+
+diff --git a/net/minecraft/world/level/levelgen/RandomState.java b/net/minecraft/world/level/levelgen/RandomState.java
+--- a/net/minecraft/world/level/levelgen/RandomState.java
++++ b/net/minecraft/world/level/levelgen/RandomState.java
+@@ -33,10 +33,28 @@
+     }
+ 
+     private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, final long seed) {
+-        this.random = settings.getRandomSource().newInstance(seed).forkPositional();
++        // this.random = settings.getRandomSource().newInstance(seed).forkPositional(); // Luminol - Add secure seed V2 with Blake3
++        // Luminol start - Add secure seed V2 with Blake3
++        final long[] secureWorldSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
++            ? su.plo.matter.HashingV2.expandLevelSeedTo1024Bits(seed)
++            : null;
++
++        long terrainSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
++            ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.BASE_TERRAIN)
++            : seed;
++        long aquiferSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
++            ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.AQUIFER)
++            : seed;
++        long oreSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
++            ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.ORE)
++            : seed;
++        // Luminol end
++        this.random = settings.getRandomSource().newInstance(terrainSeed).forkPositional(); // Luminol - Add secure seed V2 with Blake3
+         this.noises = noises;
+-        this.aquiferRandom = this.random.fromHashOf(Identifier.withDefaultNamespace("aquifer")).forkPositional();
+-        this.oreRandom = this.random.fromHashOf(Identifier.withDefaultNamespace("ore")).forkPositional();
++        //this.aquiferRandom = this.random.fromHashOf(Identifier.withDefaultNamespace("aquifer")).forkPositional(); // Luminol - Add secure seed V2 with Blake3
++        //this.oreRandom = this.random.fromHashOf(Identifier.withDefaultNamespace("ore")).forkPositional(); // Luminol - Add secure seed V2 with Blake3
++        this.aquiferRandom = settings.getRandomSource().newInstance(aquiferSeed).forkPositional(); // Luminol - Add secure seed V2 with Blake3
++        this.oreRandom = settings.getRandomSource().newInstance(oreSeed).forkPositional(); // Luminol - Add secure seed V2 with Blake3
+         this.noiseIntances = new ConcurrentHashMap<>();
+         this.positionalRandoms = new ConcurrentHashMap<>();
+         this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), this.random);
+@@ -64,6 +82,12 @@
+             private final Map<DensityFunction, DensityFunction> wrapped = new HashMap<>();
+ 
+             private RandomSource newLegacyInstance(final long seedOffset) {
++                // Luminol start - Add secure seed V2 with Blake3
++                if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2) {
++                    long climateSeed = su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.CLIMATE);
++                    return new su.plo.matter.WorldgenCryptoRandom(0, 0, su.plo.matter.Globals.Salt.UNDEFINED, climateSeed + seedOffset);
++                }
++                // Luminol end
+                 return new LegacyRandomSource(seed + seedOffset);
+             }
+ 
+@@ -95,7 +119,14 @@
+                         : RandomState.this.random.fromHashOf(Identifier.withDefaultNamespace("terrain"));
+                     return noise.withNewRandom(terrainRandom);
+                 } else {
+-                    return function instanceof DensityFunctions.EndIslandDensityFunction ? new DensityFunctions.EndIslandDensityFunction(seed) : function;
++                    return function instanceof DensityFunctions.EndIslandDensityFunction
++                        //? new DensityFunctions.EndIslandDensityFunction(seed) // Luminol - Add secure seed V2 with Blake3
++                        // Luminol start - Add secure seed V2 with Blake3
++                        ? new DensityFunctions.EndIslandDensityFunction((fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
++                            ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.SURFACE)
++                            : seed)
++                       // Luminol end
++                        : function;
+                 }
+             }
+ 
+

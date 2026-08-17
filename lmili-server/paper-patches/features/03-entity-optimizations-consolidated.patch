@@ -1,0 +1,271 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy <xucy0609@gmail.com>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Entity Optimizations (consolidated)
+
+Consolidated from 7 original patches:
+  - 009-Leaf-Skip-event-if-no-listeners.patch
+  - 010-Leaf-Secure-seed-and-matter-seed-command.patch
+  - 011-Leaves-Fix-SculkCatalyst-exp-skip.patch
+  - 012-Purpur-Lobotomize-stuck-villagers.patch
+  - 013-SparklyPaper-Optimize-canSee-checks.patch
+  - 016-Purpur-Barrels-and-enderchests-6-rows.patch
+  - 019-Fix-compilation-add-FoliaServerWaypointManager-cast-getBytebufAllocator-getChannel-stubs.patch
+
+
+diff --git a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+--- a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
++++ b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+@@ -36,15 +36,17 @@
+ 
+     // SimplePluginManager
+     public void callEvent(@NotNull Event event) {
++        // Leaf start - Skip event if no listeners
++        RegisteredListener[] listeners = event.getHandlers().getRegisteredListeners();
++        if (listeners.length == 0) return;
++        // Leaf end - Skip event if no listeners
++
+         if (event.isAsynchronous() && this.server.isPrimaryThread()) {
+             throw new IllegalStateException(event.getEventName() + " may only be triggered asynchronously.");
+         } else if (!event.isAsynchronous() && !this.server.isPrimaryThread() && !this.server.isStopping()) {
+             throw new IllegalStateException(event.getEventName() + " may only be triggered synchronously.");
+         }
+ 
+-        HandlerList handlers = event.getHandlers();
+-        RegisteredListener[] listeners = handlers.getRegisteredListeners();
+-
+         for (RegisteredListener registration : listeners) {
+             if (!registration.getPlugin().isEnabled()) {
+                 continue;
+-- 
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftChunk.java b/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
+--- a/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
+@@ -199,7 +199,12 @@
+     @Override
+     public boolean isSlimeChunk() {
+         // 987234911L is taken from Slime when seeing if a slime can spawn in a chunk
+-        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || WorldgenRandom.seedSlimeChunk(this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
++        // Leaf start - Matter - Secure Seed
++        boolean isSlimeChunk = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
++            ? level.getChunk(this.getX(), this.getZ()).isSlimeChunk()
++            : WorldgenRandom.seedSlimeChunk(this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
++        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || isSlimeChunk;
++        // Leaf end - Matter - Secure Seed
+     }
+ 
+     @Override
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1259,7 +1259,11 @@
+             .orElse(null);
+         RegistryAccess contextRegistryAccess = registryAccess;
+         if (worldGenSettings == null) {
+-            WorldOptions worldOptions = new WorldOptions(creator.seed(), creator.generateStructures(), creator.bonusChest());
++            // Leaf start - Matter - Secure Seed
++            WorldOptions worldOptions = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
++                ? new WorldOptions(creator.seed(), su.plo.matter.Globals.createRandomWorldSeed(), creator.generateStructures(), false)
++                : new WorldOptions(creator.seed(), creator.generateStructures(), creator.bonusChest());
++            // Leaf end - Matter - Secure Seed
+ 
+             String flatGenSettings = creator.generatorSettings();
+             if (flatGenSettings.isEmpty()) {
+-- 
+@@ -62,6 +62,9 @@
+ import net.minecraft.resources.Identifier;
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.server.MinecraftServer;
++import org.leavesmc.leaves.bytebuf.Bytebuf;
++import org.leavesmc.leaves.bytebuf.PacketType;
++import org.leavesmc.leaves.entity.photographer.PhotographerManager;
+ import net.minecraft.server.ReloadableServerRegistries;
+ import net.minecraft.server.bossevents.CustomBossEvent;
+ import net.minecraft.server.commands.ReloadCommand;
+@@ -3107,4 +3110,18 @@
+         }
+     }
+     // Folia end - region TPS API
++
++    // Mili start - Bytebuf API
++    @Override
++    public org.leavesmc.leaves.bytebuf.BytebufAllocator getBytebufAllocator() {
++        return null; // stub: not implemented in Mili
++    }
++    // Mili end
++
++    // Mili start - Photographer
++    @Override
++    public PhotographerManager getPhotographerManager() {
++        return null; // stub: not implemented in Mili
++    }
++    // Mili end
+ }
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
+@@ -1152,7 +1152,7 @@
+     }
+     private void updateWaypoint() {
+-        fun.bm.mili.lmili.utils.FoliaServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager(); // Luminol - Restore waypoints
++        fun.bm.mili.lmili.utils.FoliaServerWaypointManager manager = (fun.bm.mili.lmili.utils.FoliaServerWaypointManager) ((ServerLevel) getHandle().level()).getWaypointManager(); // Mili - Restore waypoints
+         manager.untrackWaypoint(getHandle());
+         manager.trackWaypoint(getHandle());
+     }
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -262,7 +262,7 @@
+     private long lastPlayed = 0;
+     private boolean hasPlayedBefore = false;
+     private final ConversationTracker conversationTracker = new ConversationTracker();
+-    private final Map<UUID, Set<WeakReference<Plugin>>> invertedVisibilityEntities = new HashMap<>();
++    private final Map<UUID, Set<WeakReference<Plugin>>> invertedVisibilityEntities = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>(); // SparklyPaper - optimize canSee checks
+     private final Set<UUID> unlistedEntities = new HashSet<>(); // Paper - Add Listing API for Player
+     private static final WeakHashMap<Plugin, WeakReference<Plugin>> pluginWeakReferences = new WeakHashMap<>();
+     private int hash = 0;
+@@ -2123,9 +2123,16 @@
+ 
+     @Override
+     public boolean canSee(org.bukkit.entity.Entity entity) {
+-        return this.equals(entity) || entity.isVisibleByDefault() ^ this.invertedVisibilityEntities.containsKey(entity.getUniqueId()); // SPIGOT-7312: Can always see self
++        return this.equals(entity) || entity.isVisibleByDefault() ^ (!invertedVisibilityEntities.isEmpty() && this.invertedVisibilityEntities.containsKey(entity.getUniqueId())); // SPIGOT-7312: Can always see self // SparklyPaper - optimize canSee checks
+     }
+ 
++    // SparklyPaper - optimize canSee checks
++    // The check in ChunkMap#updatePlayer already rejects if it is the same entity, so we don't need to check it twice, especially because CraftPlayer's equals check is a bit expensive
++    public boolean canSeeChunkMapUpdatePlayer(org.bukkit.entity.Entity entity) {
++        return entity.isVisibleByDefault() ^ (!invertedVisibilityEntities.isEmpty() && this.invertedVisibilityEntities.containsKey(entity.getUniqueId())); // SPIGOT-7312: Can always see self // SparklyPaper - optimize canSee checks
++    }
++    // SparklyPaper end
++
+     public boolean canSeePlayer(UUID uuid) {
+         org.bukkit.entity.Entity entity = this.getServer().getPlayer(uuid);
+ 
+-- 
+@@ -54,6 +54,8 @@
+ import io.papermc.paper.math.Angle;
+ import io.papermc.paper.math.Position;
+ import io.papermc.paper.util.MCUtil;
++import org.leavesmc.leaves.bytebuf.Bytebuf;
++import org.leavesmc.leaves.bytebuf.PacketType;
+ import it.unimi.dsi.fastutil.shorts.ShortArraySet;
+ import it.unimi.dsi.fastutil.shorts.ShortSet;
+ import java.io.ByteArrayOutputStream;
+@@ -3488,4 +3490,16 @@
+         return this.getHandle().getNearbyChunkHot();
+     }
+     // KioCG end
++
++    // Mili start - Bytebuf PacketAudience
++    @Override
++    public @org.jetbrains.annotations.NotNull Object getChannel() {
++        return new Object(); // stub: no underlying network channel for CraftPlayer
++    }
++
++    @Override
++    public void send(PacketType packetType, Bytebuf bytebuf) {
++        // stub: not implemented in Mili
++    }
++    // Mili end
+ }
+--
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftVillager.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftVillager.java
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftVillager.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftVillager.java
+@@ -244,4 +244,11 @@
+     public void restock() {
+         this.getHandle().restock();
+     }
++
++    // Purpur start
++    @Override
++    public boolean isLobotomized() {
++        return getHandle().isLobotomized();
++    }
++    // Purpur end
+ }
+-- 
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java b/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java
+--- a/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java
++++ b/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java
+@@ -968,7 +968,7 @@
+     public static EntityDeathEvent callEntityDeathEvent(ServerLevel level, net.minecraft.world.entity.LivingEntity victim, DamageSource damageSource, List<Entity.DefaultDrop> drops, boolean delayedDrops) { // Paper - Restore vanilla drops behavior
+         CraftLivingEntity entity = (CraftLivingEntity) victim.getBukkitEntity();
+         CraftDamageSource bukkitDamageSource = new CraftDamageSource(damageSource);
+-        EntityDeathEvent event = new EntityDeathEvent(entity, bukkitDamageSource, new io.papermc.paper.util.TransformingRandomAccessList<>(drops, Entity.DefaultDrop::stack, FROM_FUNCTION), victim.getExpReward(level, damageSource.getEntity())); // Paper - Restore vanilla drops behavior
++        EntityDeathEvent event = new EntityDeathEvent(entity, bukkitDamageSource, new io.papermc.paper.util.TransformingRandomAccessList<>(drops, Entity.DefaultDrop::stack, FROM_FUNCTION), victim.getExpReward(level, damageSource.getEntity()), victim.getExperienceReward(level, damageSource.getEntity())); // Paper - Restore vanilla drops behavior // Leaves - exp fix
+         populateFields(victim, event); // Paper - make cancellable
+         event.callEvent();
+ 
+@@ -978,6 +978,7 @@
+ 
+         playDeathSound(victim, event, damageSource);
+         victim.expToDrop = event.getDroppedExp();
++        victim.expToReward = event.getRewardExp(); // Leaves - exp fix
+ 
+         Runnable dropAll = () -> {
+             dropAllItems(drops, item -> victim.spawnAtLocation(level, item));
+@@ -1022,6 +1023,7 @@
+         victim.newLevel = event.getNewLevel();
+         victim.newTotalExp = event.getNewTotalExp();
+         victim.expToDrop = event.getDroppedExp();
++        victim.expToReward = event.getRewardExp(); // Leaves - exp fix
+         victim.newExp = event.getNewExp();
+ 
+         dropAllItems(drops, item -> victim.drop(item, true, false));
+-- 
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/inventory/CraftContainer.java b/src/main/java/org/bukkit/craftbukkit/inventory/CraftContainer.java
+--- a/src/main/java/org/bukkit/craftbukkit/inventory/CraftContainer.java
++++ b/src/main/java/org/bukkit/craftbukkit/inventory/CraftContainer.java
+@@ -148,9 +148,26 @@
+             case PLAYER:
+             case CHEST:
+             case ENDER_CHEST:
+-            case BARREL:
+-                this.delegate = new ChestMenu(net.minecraft.world.inventory.MenuType.GENERIC_9x3, windowId, bottom, top, top.getContainerSize() / 9);
++                // Purpur start - Barrels and enderchests 6 rows
++                this.delegate = new ChestMenu(switch (fun.bm.mili.config.modules.function.ContainerExpansionConfig.enderchestRows) {
++                    case 6 -> net.minecraft.world.inventory.MenuType.GENERIC_9x6;
++                    case 5 -> net.minecraft.world.inventory.MenuType.GENERIC_9x5;
++                    case 4 -> net.minecraft.world.inventory.MenuType.GENERIC_9x4;
++                    case 2 -> net.minecraft.world.inventory.MenuType.GENERIC_9x2;
++                    case 1 -> net.minecraft.world.inventory.MenuType.GENERIC_9x1;
++                    default -> net.minecraft.world.inventory.MenuType.GENERIC_9x3;
++                }, windowId, bottom, top, top.getContainerSize() / 9);
+                 break;
++            case BARREL:
++                this.delegate = new ChestMenu(switch (fun.bm.mili.config.modules.function.ContainerExpansionConfig.barrelRows) {
++                    case 6 -> net.minecraft.world.inventory.MenuType.GENERIC_9x6;
++                    case 5 -> net.minecraft.world.inventory.MenuType.GENERIC_9x5;
++                    case 4 -> net.minecraft.world.inventory.MenuType.GENERIC_9x4;
++                    case 2 -> net.minecraft.world.inventory.MenuType.GENERIC_9x2;
++                    case 1 -> net.minecraft.world.inventory.MenuType.GENERIC_9x1;
++                    default -> net.minecraft.world.inventory.MenuType.GENERIC_9x3;
++                    }, windowId, bottom, top, top.getContainerSize() / 9);
++                // Purpur end - Barrels and enderchests 6 rows
+             case DISPENSER:
+             case DROPPER:
+                 this.delegate = new DispenserMenu(windowId, bottom, top);
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/inventory/CraftInventory.java b/src/main/java/org/bukkit/craftbukkit/inventory/CraftInventory.java
+--- a/src/main/java/org/bukkit/craftbukkit/inventory/CraftInventory.java
++++ b/src/main/java/org/bukkit/craftbukkit/inventory/CraftInventory.java
+@@ -85,7 +85,7 @@
+ 
+     @Override
+     public void setContents(ItemStack[] items) {
+-        Preconditions.checkArgument(items.length <= this.getSize(), "Invalid inventory size (%s); expected %s or less", items.length, this.getSize());
++    // Preconditions.checkArgument(items.length <= this.getSize(), "Invalid inventory size (%s); expected %s or less", items.length, this.getSize()); // Purpur - Barrels and enderchests 6 rows
+ 
+         for (int i = 0; i < this.getSize(); i++) {
+             if (i >= items.length) {
+-- 
+

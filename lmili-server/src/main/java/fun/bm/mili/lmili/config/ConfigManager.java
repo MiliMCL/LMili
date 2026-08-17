@@ -10,10 +10,12 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentMap;
 
 public class ConfigManager {
     private static boolean initialized = false;
-    private static final Map<String, ConfigsInstance> configfiles = new HashMap<>();
+    // Mili start - fix: use ConcurrentHashMap instead of HashMap for thread safety
+    private static final ConcurrentMap<String, ConfigsInstance> configfiles = new ConcurrentHashMap<>();
     private static final Collection<Runnable> runnableBeforeFinalLoad = new ConcurrentLinkedQueue<>();
     private static final Map<TransformedConfig, String[]> needTransformedConfigs = new ConcurrentHashMap<>();
     // String[]:
