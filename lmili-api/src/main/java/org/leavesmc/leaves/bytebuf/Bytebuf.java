@@ -4,13 +4,31 @@ import com.google.gson.JsonElement;
 import org.bukkit.Bukkit;
 import org.bukkit.inventory.ItemStack;
 
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.UUID;
 
 public interface Bytebuf {
 
+    /**
+     * 获取 BytebufAllocator 实例。
+     * 优先通过 {@code Bukkit.getBytebufManager()} 获取，若方法不存在则抛出异常。
+     */
+    static BytebufAllocator getManager() {
+        try {
+            Method method = Bukkit.class.getMethod("getBytebufManager");
+            return (BytebufAllocator) method.invoke(null);
+        } catch (NoSuchMethodException e) {
+            throw new UnsupportedOperationException(
+                    "Leaves Bytebuf API not installed: Bukkit.getBytebufManager() not found. " +
+                    "Ensure the Leaves patches are applied at build time.", e);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException("Failed to invoke Bukkit.getBytebufManager()", e);
+        }
+    }
+
     static Bytebuf buf(int size) {
-        return Bukkit.getBytebufManager().newBytebuf(size);
+        return getManager().newBytebuf(size);
     }
 
     static Bytebuf buf() {
@@ -18,7 +36,7 @@ public interface Bytebuf {
     }
 
     static Bytebuf of(byte[] bytes) {
-        return Bukkit.getBytebufManager().toBytebuf(bytes);
+        return getManager().toBytebuf(bytes);
     }
 
     byte[] toArray();

@@ -24,12 +24,28 @@ import jdk.incubator.vector.VectorSpecies;
 import org.bukkit.map.MapPalette;
 
 import java.awt.*;
+import java.lang.reflect.Field;
 
 @Deprecated
 public class VectorMapPalette {
 
     private static final VectorSpecies<Integer> I_SPEC = IntVector.SPECIES_PREFERRED;
     private static final VectorSpecies<Float> F_SPEC = FloatVector.SPECIES_PREFERRED;
+
+    /**
+     * 通过反射获取 MapPalette.colors（包私有字段）。
+     */
+    private static final Color[] PALETTE_COLORS;
+    static {
+        try {
+            Field colorsField = MapPalette.class.getDeclaredField("colors");
+            colorsField.setAccessible(true);
+            //noinspection unchecked
+            PALETTE_COLORS = (Color[]) colorsField.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
 
     @Deprecated
     public static void matchColorVectorized(int[] in, byte[] out) {
@@ -58,12 +74,12 @@ public class VectorMapPalette {
             modificationMask = modificationMask.and(alphas.lt(128).not());
             FloatVector bestDistances = FloatVector.broadcast(F_SPEC, Float.MAX_VALUE);
 
-            for (int c = 4; c < MapPalette.colors.length; c++) {
+            for (int c = 4; c < PALETTE_COLORS.length; c++) {
                 // We're using 32-bit floats here because it's 2x faster and nobody will know the difference.
                 // For correctness, the original algorithm uses 64-bit floats instead. Completely unnecessary.
-                FloatVector compReds = FloatVector.broadcast(F_SPEC, MapPalette.colors[c].getRed());
-                FloatVector compGreens = FloatVector.broadcast(F_SPEC, MapPalette.colors[c].getGreen());
-                FloatVector compBlues = FloatVector.broadcast(F_SPEC, MapPalette.colors[c].getBlue());
+                FloatVector compReds = FloatVector.broadcast(F_SPEC, PALETTE_COLORS[c].getRed());
+                FloatVector compGreens = FloatVector.broadcast(F_SPEC, PALETTE_COLORS[c].getGreen());
+                FloatVector compBlues = FloatVector.broadcast(F_SPEC, PALETTE_COLORS[c].getBlue());
 
                 FloatVector rMean = reds.add(compReds).div(2.0f);
                 FloatVector rDiff = reds.sub(compReds);
