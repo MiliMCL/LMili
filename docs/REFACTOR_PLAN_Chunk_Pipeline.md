@@ -1,18 +1,17 @@
 # Chunk 处理管线统一方案
 
 ## 现状
-`fun.bm.mili.chunk` 包包含 8 个类，职责分散在静态方法中：
+`fun.bm.mili.chunk` 包包含 5 个类（旧工具类已删除）：
 
 | 类 | 职责 | 问题 |
 |---|---|---|
 | MiliChunkSystem | 主入口 + 所有逻辑 | 静态上帝类 |
 | AsyncChunkProcessor | 异步操作队列 | 被 MiliChunkSystem 直接调用 |
 | ChunkHotness | 热度评分 | 数据类 |
-| ChunkHotnessUpdater | 热度更新 | 静态工具类 |
 | ChunkKey | 区块键 | 数据类 |
-| ChunkLifecycleManager | 生命周期管理 | 静态工具类 |
-| ChunkViewDistanceOptimizer | 视距优化 | 静态工具类 |
 | WorldChunkData | 世界区块数据 | 被多个类直接操作 |
+
+~~ChunkHotnessUpdater~~, ~~ChunkLifecycleManager~~, ~~ChunkViewDistanceOptimizer~~ 已删除（逻辑迁移到 ChunkPipeline 阶段）。
 
 ## 重构目标
 1. 建立清晰的 chunk 生命周期管线
@@ -61,9 +60,9 @@ public interface ChunkPhase {
 ## 实施步骤
 
 1. 创建 `ChunkPhase` 接口
-2. 将 `ChunkHotnessUpdater` → `HotnessUpdatePhase`
-3. 将 `ChunkViewDistanceOptimizer` → `ViewDistancePhase`
-4. 将 `ChunkLifecycleManager` → `LifecyclePhase`
+2. ~~将 `ChunkHotnessUpdater` → `HotnessUpdatePhase`~~ ✅ 已删除旧类
+3. ~~将 `ChunkViewDistanceOptimizer` → `ViewDistancePhase`~~ ✅ 已删除旧类
+4. ~~将 `ChunkLifecycleManager` → `LifecyclePhase`~~ ✅ 已删除旧类
 5. 创建 `ChunkPipeline` 实现类
 6. 精简 `MiliChunkSystem` 为薄入口
 7. 更新 `MiliOptimizations` 引用

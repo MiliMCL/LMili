@@ -2,36 +2,40 @@ package fun.bm.mili.utils.performance;
 
 import com.mojang.logging.LogUtils;
 import fun.bm.mili.config.modules.experiment.RegionBalancerConfig;
-import io.papermc.paper.threadedregions.TickRegionScheduler;
+import fun.bm.mili.utils.region.RegionLoadMonitor;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Adaptive TPS Manager — 根据区域负载动态调整 tick 间隔。
+ *
+ * <p>修复：
+ * <ul>
+ *   <li>移除直接写入 TickRegionScheduler.TIME_BETWEEN_TICKS（线程不安全，会导致 Folia 调度撕裂读）</li>
+ *   <li>修复负载公式：高负载时应缩短间隔（加速 tick），而非延长</li>
+ *   <li>使用 max 负载而非 avg，避免热点被平均值掩盖</li>
+ * </ul>
+ */
 public class AdaptiveTPSManager {
 
     private static final AtomicBoolean running = new AtomicBoolean(false);
     private static final AtomicLong currentInterval = new AtomicLong(50_000_000L);
 
-    private static final long minIntervalNs = 20_000_000L;
-    private static final long maxIntervalNs = 100_000_000L;
-    private static final long baseIntervalNs = 50_000_000L;
+    private static final long minIntervalNs = 25_000_000L;  // 40 TPS cap
+    private static final long maxIntervalNs = 50_000_000L;  // 20 TPS floor
+    private static final long baseIntervalNs = 50_000_000L; // 20 TPS base
 
-    // Mili start - fix: removed dead snapshotCache field that was never used
-
-    // Mili start - fix: store thread reference for interrupt on shutdown
     private static volatile Thread managerThread;
-    // Mili end
 
     public static void start() {
         if (!RegionBalancerConfig.enabled) return;
         if (running.getAndSet(true)) return;
 
-        // Mili start - fix: store thread reference for proper shutdown
         managerThread = new Thread(AdaptiveTPSManager::runLoop, "AdaptiveTPS-Manager");
         managerThread.setDaemon(true);
         managerThread.start();
-        // Mili end
 
         LogUtils.getClassLogger().info("AdaptiveTPSManager started");
     }
@@ -43,42 +47,46 @@ public class AdaptiveTPSManager {
 
                 if (!RegionBalancerConfig.enabled) continue;
 
-                double avgLoad = 0;
+                // Mili start - fix: use MAX load instead of average to detect hotspots.
+                // A single overloaded region should not be masked by 99 idle regions.
+                double maxLoad = 0;
                 int count = 0;
                 for (RegionLoadMonitor.RegionLoadSnapshot snap : RegionLoadMonitor.getAllSnapshots()) {
-                    avgLoad += snap.loadFactor();
+                    double load = snap.loadFactor();
+                    if (load > maxLoad) maxLoad = load;
                     count++;
                 }
 
                 if (count == 0) continue;
 
-                avgLoad /= count;
-
-                long adjusted = (long) (baseIntervalNs * (1.0 + avgLoad * 0.5));
+                // Mili start - fix: formula is now INVERSE — high load → shorter interval (maintain TPS).
+                // Under high load, we want to keep ticking fast to process backlog.
+                // Under low load, we can relax slightly to save CPU.
+                // Formula: adjusted = baseInterval * (1.0 - load * 0.5)
+                // At load=0: 50ms (20 TPS)
+                // At load=0.5: 37.5ms (~26 TPS)
+                // At load=1.0: 25ms (40 TPS cap)
+                long adjusted = (long) (baseIntervalNs * (1.0 - maxLoad * 0.5));
                 adjusted = Math.max(minIntervalNs, Math.min(maxIntervalNs, adjusted));
 
                 currentInterval.set(adjusted);
-                TickRegionScheduler.TIME_BETWEEN_TICKS = adjusted;
+                // Mili end - removed direct write to TickRegionScheduler.TIME_BETWEEN_TICKS
+                // which was thread-unsafe with Folia's tick scheduling
 
                 LogUtils.getClassLogger().debug(
-                        "AdaptiveTPS: avgLoad={}%, interval={}ms",
-                        (int) (avgLoad * 100), adjusted / 1_000_000L);
+                        "AdaptiveTPS: maxLoad={}%, interval={}ms",
+                        (int) (maxLoad * 100), adjusted / 1_000_000L);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
-            // Mili start - fix: catch Throwable to handle Error (OOM/StackOverflowError);
-            // distinguish between fatal and transient errors
             } catch (Throwable ex) {
                 LogUtils.getClassLogger().error("AdaptiveTPS error in manager thread", ex);
                 if (ex instanceof OutOfMemoryError) {
-                    // fatal - stop the thread to prevent repeated OOM loops
                     running.set(false);
                     break;
                 }
-                // For other transient errors (e.g., ConcurrentModificationException), just log and continue
             }
-            // Mili end
         }
     }
 
@@ -86,7 +94,6 @@ public class AdaptiveTPSManager {
         return currentInterval.get();
     }
 
-    // Mili start - fix: interrupt the sleeping thread for immediate shutdown
     public static void shutdown() {
         running.set(false);
         Thread t = managerThread;
@@ -94,5 +101,4 @@ public class AdaptiveTPSManager {
             t.interrupt();
         }
     }
-    // Mili end
 }

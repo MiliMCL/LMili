@@ -6,6 +6,7 @@ import org.bukkit.World;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -49,6 +50,8 @@ public final class ChunkPipeline {
     /**
      * 执行一次管线 tick —— 对每个世界依次执行所有阶段。
      */
+    private int tickCounter = 0;
+
     public void tick() {
         for (var entry : worldData.entrySet()) {
             World world = entry.getKey();
@@ -61,6 +64,16 @@ public final class ChunkPipeline {
                 LOGGER.warn("[ChunkPipeline] Phase execution failed for world {}", world.getName(), throwable);
             }
         }
+
+        // Mili start - fix: periodically clean up stale hotness entries to prevent memory leak.
+        // Run every 6000 ticks (~5 minutes at 20 TPS) to avoid overhead.
+        if (++tickCounter >= 6000) {
+            tickCounter = 0;
+            for (WorldChunkData data : worldData.values()) {
+                data.cleanupStaleEntries();
+            }
+        }
+        // Mili end
     }
 
     /**
@@ -68,6 +81,13 @@ public final class ChunkPipeline {
      */
     public WorldChunkData getWorldData(World world) {
         return worldData.get(world);
+    }
+
+    /**
+     * 获取所有世界区块数据的集合（只读访问）。
+     */
+    public Collection<WorldChunkData> getWorldDataValues() {
+        return worldData.values();
     }
 
     /**

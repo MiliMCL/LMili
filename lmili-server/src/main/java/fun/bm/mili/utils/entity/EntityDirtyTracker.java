@@ -34,13 +34,14 @@ public class EntityDirtyTracker {
         // Mili end
 
         int id = entity.getId();
-        EntityState state = states.computeIfAbsent(id, k -> {
-            // Mili start - fix: hard cap to prevent OOM under extreme conditions
-            if (states.size() >= MAX_STATES_SIZE) {
-                return new EntityState(); // Don't store if over limit
-            }
-            return new EntityState();
-        });
+        // Mili start - fix: check size BEFORE computeIfAbsent to actually enforce the cap.
+        // The previous implementation always returned a new EntityState regardless of cap,
+        // so the entry was always inserted. Now we skip tracking when over limit.
+        if (states.size() >= MAX_STATES_SIZE) {
+            return false; // over cap, don't track this entity
+        }
+        EntityState state = states.computeIfAbsent(id, k -> new EntityState());
+        // Mili end
         totalChecks.incrementAndGet();
 
         double x = entity.getX();

@@ -2,6 +2,9 @@ package fun.bm.mili.utils.performance;
 
 import com.mojang.logging.LogUtils;
 import fun.bm.mili.chunk.MiliChunkSystem;
+import fun.bm.mili.utils.misc.CrossRegionHelper;
+import fun.bm.mili.utils.region.RegionBalancer;
+import fun.bm.mili.utils.region.SmartRegionManager;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

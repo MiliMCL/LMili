@@ -3,7 +3,7 @@ package fun.bm.mili.lmili.functions.bars;
 import com.google.common.collect.Maps;
 import com.mojang.logging.LogUtils;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
-import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import fun.bm.mili.lmili.utils.NullPlugin;
 import net.kyori.adventure.bossbar.BossBar;
 import org.bukkit.Bukkit;
@@ -21,7 +21,11 @@ public abstract class AbstractGlobalServerBar {
     protected static final NullPlugin NULL_PLUGIN = new NullPlugin();
 
     protected final Map<UUID, BossBar> uuid2Bossbars = Maps.newConcurrentMap();
-    protected final Map<UUID, ScheduledTask> scheduledTasks = new Object2ObjectLinkedOpenHashMap<>();
+    // Mili start - fix: use ConcurrentHashMap instead of non-thread-safe Object2ObjectLinkedOpenHashMap
+    // The scheduler callback (update/cleanUp) runs on the global region thread, and cancelBarUpdateTask
+    // can be called from any thread. ConcurrentHashMap is required for thread safety.
+    protected final Map<UUID, ScheduledTask> scheduledTasks = new ConcurrentHashMap<>();
+    // Mili end
 
     protected ScheduledTask scannerTask = null;
     protected boolean disabled = true;

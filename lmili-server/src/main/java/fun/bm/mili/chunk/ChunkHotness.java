@@ -94,14 +94,22 @@ public final class ChunkHotness {
     }
 
     public double getRecentAverageAccessMs() {
-        int count = Math.min(accessCount.get(), HISTORY_SIZE);
+        // Mili start - fix: read from correct ring buffer positions instead of always from index 0.
+        // Once accessCount exceeds HISTORY_SIZE, the ring wraps around and index 0 contains old data.
+        int total = accessCount.get();
+        int count = Math.min(total, HISTORY_SIZE);
         if (count == 0) return 0.0;
 
         long sum = 0;
+        // The most recent entry is at (total - 1) % HISTORY_SIZE
+        // Read backwards from there for 'count' entries
+        int head = (total - 1) % HISTORY_SIZE;
         for (int i = 0; i < count; i++) {
-            sum += accessHistory.get(i);
+            int pos = (head - i + HISTORY_SIZE) % HISTORY_SIZE;
+            sum += accessHistory.get(pos);
         }
         return (sum / 1_000_000.0) / count;
+        // Mili end
     }
 
     public double getNearestPlayerDistance() {

@@ -90,13 +90,30 @@ public final class SchedulerWorker implements Runnable {
 
     @Override
     public void run() {
+        int idleSpins = 0;
         while (running.get() && !Thread.currentThread().isInterrupted()) {
             RegionTask task = coordinator.poll(workerId);
             if (task == null) {
-                Thread.onSpinWait();
+                // Mili start - fix: add progressive backoff instead of busy-spinning.
+                // Short idle: spin wait. Medium idle: yield. Long idle: sleep briefly.
+                idleSpins++;
+                if (idleSpins < 100) {
+                    Thread.onSpinWait();
+                } else if (idleSpins < 1000) {
+                    Thread.yield();
+                } else {
+                    try {
+                        Thread.sleep(1); // 1ms sleep to avoid CPU waste during idle periods
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
                 continue;
+                // Mili end
             }
 
+            idleSpins = 0; // reset on successful poll
             try {
                 task.execute();
                 callback.onComplete(task, null);

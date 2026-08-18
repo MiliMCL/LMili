@@ -88,12 +88,26 @@ public final class SmartRegionManager {
         LogUtils.getLogger().info("[Mili] SmartRegionManager shutdown");
     }
 
+    // Mili start - fix: track last cleanup time for stale profile eviction
+    private static final AtomicLong lastProfileCleanupNanos = new AtomicLong(System.nanoTime());
+    private static final long PROFILE_CLEANUP_INTERVAL_NS = 120_000_000_000L; // 2 minutes
+    private static final long PROFILE_STALE_THRESHOLD_NS = 300_000_000_000L;  // 5 minutes
+    // Mili end
+
     private static void analyzeRegions() {
         try {
+            // Mili start - collect current region keys for stale profile cleanup
+            java.util.Set<Integer> currentRegionKeys = new java.util.HashSet<>();
+            // Mili end
+
             for (java.util.Map.Entry<Integer, RegionLoadMonitor.RegionLoadSnapshot> entry
                     : RegionLoadMonitor.getAllSnapshotMap().entrySet()) {
                 Integer regionKey = entry.getKey();
                 RegionLoadMonitor.RegionLoadSnapshot snapshot = entry.getValue();
+
+                // Mili start - track active keys
+                currentRegionKeys.add(regionKey);
+                // Mili end
 
                 RegionProfile profile = regionProfiles.computeIfAbsent(
                         regionKey, k -> new RegionProfile(k)
@@ -106,9 +120,41 @@ public final class SmartRegionManager {
                     scheduleMigration(regionKey, profile);
                 }
             }
+
+            // Mili start - fix: periodically remove profiles for regions that no longer exist
+            // in the snapshot map. Without this, profiles accumulate forever for destroyed regions.
+            maybeCleanupStaleProfiles(currentRegionKeys);
+            // Mili end
         } catch (Throwable e) {
             // Mili start - fix: catch Throwable to prevent scheduler thread death on Error
             LogUtils.getLogger().error("[Mili] Region analysis error", e);
+        }
+    }
+
+    /**
+     * Remove profiles for regions that no longer appear in the snapshot map.
+     * Uses a two-phase approach: first mark stale profiles, then remove after a grace period.
+     */
+    private static void maybeCleanupStaleProfiles(java.util.Set<Integer> currentRegionKeys) {
+        long now = System.nanoTime();
+        long last = lastProfileCleanupNanos.get();
+        if (now - last < PROFILE_CLEANUP_INTERVAL_NS) return;
+        if (!lastProfileCleanupNanos.compareAndSet(last, now)) return;
+
+        int removed = 0;
+        java.util.Iterator<Map.Entry<Integer, RegionProfile>> it = regionProfiles.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<Integer, RegionProfile> entry = it.next();
+            Integer key = entry.getKey();
+            // Remove if region no longer exists in the snapshot map
+            if (!currentRegionKeys.contains(key)) {
+                it.remove();
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            LogUtils.getLogger().debug("[SmartRegionManager] Cleaned up {} stale region profiles, remaining: {}",
+                    removed, regionProfiles.size());
         }
     }
 

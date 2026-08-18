@@ -163,7 +163,7 @@ public final class RegionBalancer {
         dispatcher.start();
 
         // Mili start - Adaptive TPS
-        fun.bm.mili.utils.AdaptiveTPSManager.start();
+        fun.bm.mili.utils.performance.AdaptiveTPSManager.start();
         // Mili end - Adaptive TPS
 
         com.mojang.logging.LogUtils.getClassLogger().info(
@@ -211,6 +211,12 @@ public final class RegionBalancer {
             try {
                 // Mili start - fix: periodic cleanup of lastTickTime map
                 maybeCleanupLastTickTime();
+                // Mili end
+
+                // Mili start - fix: independent cleanup of stale task records.
+                // Previously only called from markTaskState() which depends on task completion events.
+                // If no tasks complete (e.g., all stuck in queue), records accumulate indefinitely.
+                maybeCleanupStaleTaskRecords();
                 // Mili end
 
                 RegionTask task = taskQueue.poll(100, TimeUnit.MILLISECONDS);
@@ -550,8 +556,12 @@ public final class RegionBalancer {
                 Thread.currentThread().interrupt();
             }
         }
-        // Mili start - shutdown task UUID registry
+        // Mili start - shutdown task UUID registry and clear all maps
         RegionTaskIdRegistry.shutdown();
+        taskRecords.clear();
+        pendingTasks.clear();
+        lastTickTime.clear();
+        taskQueue.clear();
         // Mili end
     }
 }

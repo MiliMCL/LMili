@@ -13,10 +13,39 @@ public class ChunkDeltaCompressor {
     private static final AtomicLong bytesSaved = new AtomicLong();
     private static final AtomicLong totalBytes = new AtomicLong();
 
-    // Mili start - fix: ThreadLocal Deflater to avoid native memory allocation per call
-    private static final ThreadLocal<Deflater> DEFLATER_CACHE = ThreadLocal.withInitial(
-            () -> new Deflater(fun.bm.mili.config.modules.optimizations.ChunkDeltaCompressionConfig.compressionLevel)
-    );
+    // Mili start - fix: use Deflater pool instead of ThreadLocal to prevent native memory leak.
+    // ThreadLocal Deflaters never call end(), leaking native memory (16-64KB per thread).
+    // A bounded pool releases Deflaters on shutdown.
+    private static final java.util.concurrent.ConcurrentLinkedQueue<Deflater> DEFLATER_POOL =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private static final int MAX_POOL_SIZE = Runtime.getRuntime().availableProcessors() * 2;
+
+    private static Deflater acquireDeflater() {
+        Deflater d = DEFLATER_POOL.poll();
+        if (d == null) {
+            d = new Deflater(fun.bm.mili.config.modules.optimizations.ChunkDeltaCompressionConfig.compressionLevel);
+        } else {
+            d.reset();
+        }
+        return d;
+    }
+
+    private static void releaseDeflater(Deflater d) {
+        if (DEFLATER_POOL.size() < MAX_POOL_SIZE) {
+            DEFLATER_POOL.offer(d);
+        } else {
+            d.end(); // pool full, release native memory
+        }
+    }
+
+    /** Call on server shutdown to release all native memory */
+    public static void shutdown() {
+        Deflater d;
+        while ((d = DEFLATER_POOL.poll()) != null) {
+            d.end();
+        }
+        snapshots.clear();
+    }
     // Mili end
 
     public static void setEnabled(boolean v) { enabled = v; }
@@ -28,9 +57,9 @@ public class ChunkDeltaCompressor {
         byte[] previous = snapshots.get(chunkKey);
         if (previous == null) {
             evictIfFull();
-            // Mili start - fix: store reference directly; clone only when we need to mutate
-            // The snapshot is treated as immutable after storage, so no clone needed
-            snapshots.put(chunkKey, currentState);
+            // Mili start - fix: clone before storing to prevent mutation corruption.
+            // The caller may reuse the byte array, which would corrupt the snapshot.
+            snapshots.put(chunkKey, currentState.clone());
             totalBytes.addAndGet(currentState.length);
             return currentState;
         }
@@ -52,11 +81,10 @@ public class ChunkDeltaCompressor {
         totalBytes.addAndGet(currentState.length);
 
         if (diffCount < currentState.length / 4) {
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            // Mili start - fix: reuse ThreadLocal Deflater instead of creating new one each call
-            Deflater deflater = DEFLATER_CACHE.get();
-            deflater.reset(); // reset for reuse
+            // Mili start - fix: use pooled Deflater instead of ThreadLocal to prevent native memory leak
+            Deflater deflater = acquireDeflater();
             try {
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
                 deflater.setInput(currentState);
                 deflater.finish();
                 byte[] buffer = new byte[1024];
@@ -70,17 +98,19 @@ public class ChunkDeltaCompressor {
                     totalCompressions.incrementAndGet();
                     bytesSaved.addAndGet(currentState.length - compressed.length);
                     evictIfFull();
-                    snapshots.put(chunkKey, currentState);
+                    snapshots.put(chunkKey, currentState.clone());
                     return compressed;
                 }
             } catch (Throwable ignored) {
                 // Compression failed, fall through to store uncompressed
+            } finally {
+                releaseDeflater(deflater);
             }
             // Mili end
         }
 
         evictIfFull();
-        snapshots.put(chunkKey, currentState);
+        snapshots.put(chunkKey, currentState.clone());
         return currentState;
     }
 

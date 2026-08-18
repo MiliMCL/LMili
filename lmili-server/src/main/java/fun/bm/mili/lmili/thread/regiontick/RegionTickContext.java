@@ -104,13 +104,18 @@ public final class RegionTickContext {
      * @return true 如果成功进入 TICKING 状态，false 如果已有 tick 在执行
      */
     public boolean tryBeginTick(final int parties) {
+        // Mili start - fix: create barrier BEFORE CAS to prevent TOCTOU race where
+        // a worker sees TICKING state but reads old/null barrier.
+        // The volatile write to tickBarrier happens-before any worker reads it.
+        Phaser newBarrier = new Phaser(parties);
+        this.tickBarrier = newBarrier;
+        this.tickStartNanos = System.nanoTime();
+        this.currentTick.incrementAndGet();
         if (!tickState.compareAndSet(RegionTickState.IDLE, RegionTickState.TICKING)) {
             return false; // 当前 Region 已经有 Tick 在执行
         }
-        this.tickBarrier = new Phaser(parties);
-        this.tickStartNanos = System.nanoTime();
-        this.currentTick.incrementAndGet();
         return true;
+        // Mili end
     }
 
     /**

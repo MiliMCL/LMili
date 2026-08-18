@@ -61,6 +61,11 @@ public final class MiliThreadFactory implements ThreadFactory {
                 }
             }
         }
+        // Mili start - fix: actually apply the uncaught exception handler to created threads
+        if (uncaughtExceptionHandler != null) {
+            thread.setUncaughtExceptionHandler(uncaughtExceptionHandler);
+        }
+        // Mili end
         return thread;
     }
 

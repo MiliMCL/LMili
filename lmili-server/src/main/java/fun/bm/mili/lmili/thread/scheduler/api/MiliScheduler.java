@@ -26,10 +26,6 @@ import java.util.concurrent.TimeUnit;
  *
  * <h3>线程安全</h3>
  * <p>本接口的所有实现必须是线程安全的。多个线程可以同时提交任务。
- *
- * <h3>与旧 API 的兼容</h3>
- * <p>旧版 {@code fun.bm.mili.lmili.thread.regiontick.api.MiliScheduler} 通过适配器
- * 委托到此接口，确保现有代码无需修改即可工作。
  */
 public interface MiliScheduler {
 

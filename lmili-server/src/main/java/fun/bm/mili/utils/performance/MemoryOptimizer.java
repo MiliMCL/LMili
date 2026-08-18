@@ -117,44 +117,26 @@ public final class MemoryOptimizer {
 
     // Mili start - fix: performMemoryCleanup 实际触发 GC 而非仅 sleep 等待
     // 旧实现仅 sleep(100/150ms) 后测量释放量，但从未主动触发 GC，
-    // 导致清理计数不反映真实的 GC 活动，具有误导性。
-    // 新实现：显式调用 System.gc()（作为建议），然后测量回收效果。
+    // Mili start - fix: removed System.gc() calls that cause Stop-The-World pauses (50-500ms).
+    // JVM's own GC handles memory management better than explicit System.gc() calls.
+    // Instead, just log warnings and let the JVM's GC handle it naturally.
     private static void performMemoryCleanup(long currentUsed, boolean aggressive) {
-        final long before = getUsedMemory();
-
-        if (aggressive) {
-            // 激进模式：建议 Full GC（通常比 System.gc() 更彻底）
-            System.gc();
-            // 给 GC 时间完成工作（不阻塞主线程）
-            try {
-                TimeUnit.MILLISECONDS.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        } else {
-            // 普通模式：建议 GC
-            System.gc();
-        }
-
-        // 等待 GC 完成并测量实际的内存回收效果
-        final long after = getUsedMemory();
-        final long freed = before - after;
-
-        if (freed > 0) {
-            totalFreedBytes.add(freed);
-            gcCount.increment();
-        }
+        long usedMB = currentUsed / (1024 * 1024);
+        long maxMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
 
         if (aggressive) {
             LogUtils.getLogger().warn(
-                    "[Mili] High memory pressure detected: {} MB freed (aggressive GC)",
-                    freed / (1024 * 1024)
+                    "[Mili] CRITICAL memory pressure: {}/{} MB ({}%). " +
+                    "Consider increasing -Xmx or reducing loaded chunks.",
+                    usedMB, maxMB, (int) ((double) currentUsed / Runtime.getRuntime().maxMemory() * 100)
             );
-        } else if (freed > 0) {
+        } else {
             LogUtils.getLogger().debug(
-                    "[Mili] Memory cleanup: {} MB freed", freed / (1024 * 1024)
+                    "[Mili] High memory usage: {}/{} MB. JVM GC will handle automatically.",
+                    usedMB, maxMB
             );
         }
+        gcCount.increment();
     }
     // Mili end
 

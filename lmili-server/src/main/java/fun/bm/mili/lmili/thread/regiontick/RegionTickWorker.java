@@ -15,8 +15,10 @@ public final class RegionTickWorker implements Runnable {
     private final BlockingQueue<RegionTickSlice> taskQueue = new LinkedBlockingQueue<>();
     private final AtomicReference<RegionTickContext> currentContext = new AtomicReference<>();
     private final AtomicBoolean running = new AtomicBoolean(true);
-    private long slicesExecuted;
-    private long chunksTicked;
+    // Mili start - fix: use volatile for cross-thread visibility (written on worker thread, read from any thread)
+    private volatile long slicesExecuted;
+    private volatile long chunksTicked;
+    // Mili end
 
     public RegionTickWorker(final String name) { this.name = name; }
 

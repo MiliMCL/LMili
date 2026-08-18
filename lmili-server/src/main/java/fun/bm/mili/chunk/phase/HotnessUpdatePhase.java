@@ -1,7 +1,7 @@
 package fun.bm.mili.chunk.phase;
 
 import fun.bm.mili.chunk.ChunkHotness;
-import fun.bm.mili.chunk.ChunkSystemConfig;
+import fun.bm.mili.config.modules.optimizations.ChunkSystemConfig;
 import fun.bm.mili.chunk.WorldChunkData;
 import org.bukkit.Chunk;
 import org.bukkit.Location;

@@ -135,10 +135,14 @@ public final class SystemGraph {
      * @return 系统句柄，如果不存在返回 null
      */
     public @Nullable SystemHandle getHandle(final @NotNull String name) {
-        Integer id = nameToId.get(name);
-        if (id == null) return null;
-        RegisteredSystem sys = systems.get(id);
-        return new SystemHandle(id, sys.profile.name());
+        // Mili start - fix: synchronize to prevent data race with concurrent register()
+        synchronized (this) {
+            Integer id = nameToId.get(name);
+            if (id == null) return null;
+            RegisteredSystem sys = systems.get(id);
+            return new SystemHandle(id, sys.profile.name());
+        }
+        // Mili end
     }
 
     /**

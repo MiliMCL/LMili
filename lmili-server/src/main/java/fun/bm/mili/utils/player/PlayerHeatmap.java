@@ -94,16 +94,17 @@ public class PlayerHeatmap {
 
     private static class WorldHeatmapData {
         private final ConcurrentHashMap<Long, Integer> heatMap = new ConcurrentHashMap<>();
-        private final CopyOnWriteArrayList<String> trackedPlayers = new CopyOnWriteArrayList<>();
-        private final ConcurrentHashMap<String, Long> lastSeenPositions = new ConcurrentHashMap<>();
-        // Mili start - fix: track last seen timestamps for proper cleanup
-        private final ConcurrentHashMap<String, Long> lastSeenTime = new ConcurrentHashMap<>();
+        // Mili start - fix: replace CopyOnWriteArrayList with ConcurrentHashMap for O(1) contains + bounded growth
+        // CopyOnWriteArrayList.contains() is O(n) and the list never cleaned up
+        private final ConcurrentHashMap<String, Long> trackedPlayers = new ConcurrentHashMap<>();
         // Mili end
+        private final ConcurrentHashMap<String, Long> lastSeenPositions = new ConcurrentHashMap<>();
         private final AtomicLong totalRecords = new AtomicLong();
 
         void recordPlayers(World world) {
             int cellSize = fun.bm.mili.config.modules.function.PlayerHeatmapConfig.cellSizeBlocks >> 4;
             if (cellSize < 1) cellSize = 1;
+            long now = System.currentTimeMillis();
 
             for (Player player : world.getPlayers()) {
                 String uuid = player.getUniqueId().toString();
@@ -116,15 +117,12 @@ public class PlayerHeatmap {
                 heatMap.merge(key, 1, Integer::sum);
                 totalRecords.incrementAndGet();
 
-                if (!trackedPlayers.contains(uuid)) {
-                    trackedPlayers.add(uuid);
-                }
+                // Mili start - fix: use ConcurrentHashMap.put for O(1) tracking with timestamp
+                trackedPlayers.put(uuid, now);
+                // Mili end
 
                 long newKey = pack(chunkX, chunkZ);
                 lastSeenPositions.put(uuid, newKey);
-                // Mili start - fix: store timestamp for proper cleanup
-                lastSeenTime.put(uuid, System.currentTimeMillis());
-                // Mili end
             }
         }
 
@@ -140,11 +138,14 @@ public class PlayerHeatmap {
             return Collections.unmodifiableMap(heatMap);
         }
 
-        // Mili start - fix: cleanup based on timestamps instead of packed coordinates
+        // Mili start - fix: cleanup stale player entries and old heatmap data
         void cleanup(long cutoffMs) {
-            lastSeenTime.entrySet().removeIf(e -> e.getValue() < cutoffMs);
-            lastSeenPositions.keySet().retainAll(lastSeenTime.keySet());
-            heatMap.clear();
+            // Remove players not seen since cutoff
+            trackedPlayers.entrySet().removeIf(e -> e.getValue() < cutoffMs);
+            lastSeenPositions.keySet().retainAll(trackedPlayers.keySet());
+            // Remove heatmap entries with low visit counts (likely stale)
+            // Don't clear everything — only remove entries that haven't been visited recently
+            heatMap.entrySet().removeIf(e -> e.getValue() <= 1);
             totalRecords.set(0);
         }
         // Mili end

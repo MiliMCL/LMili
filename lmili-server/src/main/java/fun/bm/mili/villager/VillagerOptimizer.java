@@ -1,6 +1,8 @@
 package fun.bm.mili.villager;
 
 import fun.bm.mili.config.modules.optimizations.VillagerOptimizerConfig;
+import org.bukkit.Bukkit;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Villager;
 import org.bukkit.event.Listener;

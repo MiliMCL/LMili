@@ -30,8 +30,10 @@ public class NetworkOptimizer {
 
     private static final ConcurrentHashMap<java.util.UUID, Long> lastEntityTrackSend = new ConcurrentHashMap<>();
 
-    // Per-player packet counter for the current tick, reset every tick
-    private static final ConcurrentHashMap<java.util.UUID, AtomicInteger> playerPacketCounts = new ConcurrentHashMap<>();
+    // Per-player packet counter for the current tick, reset every tick via swap
+    // Mili start - fix: non-final so it can be swapped atomically instead of cleared
+    private static volatile ConcurrentHashMap<java.util.UUID, AtomicInteger> playerPacketCounts = new ConcurrentHashMap<>();
+    // Mili end
     // Mili start - fix: use AtomicLong for thread-safe tick comparison
     private static final AtomicLong currentTick = new AtomicLong(-1);
     // Mili end
@@ -95,13 +97,19 @@ public class NetworkOptimizer {
      */
     public static void onServerTick(long serverTick) {
         if (!NetworkOptimizerConfig.enabled) return;
-        // Mili start - fix: use AtomicLong for thread-safe tick comparison
-        if (!currentTick.compareAndSet(-1, serverTick) && currentTick.get() == serverTick) return;
-        currentTick.set(serverTick);
+        // Mili start - fix: use CAS to atomically check and update tick, preventing race condition
+        // where two threads both pass the deduplication check
+        long prev = currentTick.getAndSet(serverTick);
+        if (prev == serverTick) return; // already processed this tick
         // Mili end
 
-        // Reset per-player packet counts
-        playerPacketCounts.clear();
+        // Mili start - fix: use swap-and-expire pattern instead of clear() to avoid losing
+        // in-flight data from concurrent Folia region threads
+        ConcurrentHashMap<java.util.UUID, AtomicInteger> oldCounts = playerPacketCounts;
+        playerPacketCounts = new ConcurrentHashMap<>();
+        // oldCounts is now isolated — any concurrent readers/writers on the old map
+        // will complete their operations safely, and the old map will be GC'd
+        // Mili end
 
         // Update adaptive compression level every 20 ticks (1 second)
         if (serverTick % 20 == 0) {

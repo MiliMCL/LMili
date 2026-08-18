@@ -25,9 +25,10 @@ final class AsyncChunkProcessor {
 
         while (processed < ChunkSystemConfig.maxAsyncOpsPerCycle && System.nanoTime() < deadline) {
             AsyncChunkOperation op = queue.poll();
-            // Mili start - fix: decrement counter on dequeue
+            // Mili start - fix: decrement counter on dequeue, but guard against going negative
+            // (can happen if clear() resets counter to 0 between poll() and decrementAndGet())
             if (op == null) break;
-            queueSize.decrementAndGet();
+            queueSize.updateAndGet(current -> Math.max(0, current - 1));
             // Mili end
 
             try {
@@ -43,14 +44,19 @@ final class AsyncChunkProcessor {
     }
 
     boolean enqueue(AsyncChunkOperation operation) {
-            // Mili start - fix: use AtomicInteger counter instead of O(n) queue.size()
-            if (queueSize.get() < ChunkSystemConfig.maxAsyncQueueSize) {
-            // Mili end
-                queue.add(operation);
-                queueSize.incrementAndGet();
-                return true;
+        // Mili start - fix: use CAS loop to atomically reserve a slot, preventing TOCTOU race
+        // where two threads both pass the size check and both add, exceeding the limit.
+        long current;
+        do {
+            current = queueSize.get();
+            if (current >= ChunkSystemConfig.maxAsyncQueueSize) {
+                return false;
             }
-        return false;
+        } while (!queueSize.compareAndSet(current, current + 1));
+        // Slot reserved atomically — safe to add
+        queue.add(operation);
+        return true;
+        // Mili end
     }
 
     int queueSize() {
@@ -64,9 +70,12 @@ final class AsyncChunkProcessor {
     }
 
     void clear() {
-        queue.clear();
-        // Mili start - fix: reset counter on clear
+        // Mili start - fix: reset counter BEFORE clearing queue to prevent race where
+        // enqueue() increments counter after clear sets it to 0, causing desync.
+        // Setting to 0 first means any concurrent enqueue() will see 0 < max and proceed,
+        // but the CAS in enqueue() will correctly increment from 0.
         queueSize.set(0);
+        queue.clear();
         // Mili end
     }
 

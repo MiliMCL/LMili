@@ -1,6 +1,7 @@
 package fun.bm.mili.utils.misc;
 
 import fun.bm.mili.config.modules.experiment.CrossRegionHelperConfig;
+import fun.bm.mili.utils.region.RegionTaskIdRegistry;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;

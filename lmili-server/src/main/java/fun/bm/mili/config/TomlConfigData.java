@@ -9,7 +9,8 @@ import java.io.File;
  * Pure Java TOML config storage backed by night-config.
  * Replaces the former Rust (JNI) backed implementation while keeping the same API surface.
  */
-public class TomlConfigData {
+// Mili start - fix: implement AutoCloseable to prevent file handle leaks on config reload
+public class TomlConfigData implements AutoCloseable {
 
     private final CommentedFileConfig backing;
 
@@ -72,4 +73,11 @@ public class TomlConfigData {
         Object value = backing.get(key);
         return value instanceof CommentedConfig ? value : null;
     }
+
+    // Mili start - fix: close the backing CommentedFileConfig to release file handles
+    @Override
+    public void close() {
+        backing.close();
+    }
+    // Mili end
 }

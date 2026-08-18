@@ -6,7 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-final class WorldChunkData {
+public final class WorldChunkData {
 
     private final World world;
     private final ConcurrentHashMap<Long, ChunkHotness> hotnessMap = new ConcurrentHashMap<>();

@@ -90,7 +90,7 @@ fun.bm.mili
 
 ## 5. 待清理事项
 
-- [ ] 删除旧工具类 (`ChunkHotnessUpdater`, `ChunkLifecycleManager`, `ChunkViewDistanceOptimizer`)
-- [ ] 移除旧 `lmili/thread/regiontick/api` 包残留
+- [x] 删除旧工具类 (`ChunkHotnessUpdater`, `ChunkLifecycleManager`, `ChunkViewDistanceOptimizer`)
+- [x] 移除旧 `lmili/thread/regiontick/api` 包残留
 - [ ] 统一 scheduler 模块和 regiontick 模块的职责边界
 - [ ] 补充单元测试覆盖核心模块

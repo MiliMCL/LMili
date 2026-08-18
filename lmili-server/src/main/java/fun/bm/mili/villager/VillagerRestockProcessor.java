@@ -1,8 +1,10 @@
 package fun.bm.mili.villager;
 
 import fun.bm.mili.config.modules.optimizations.VillagerOptimizerConfig;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.entity.Villager;
+import org.bukkit.inventory.MerchantRecipe;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
@@ -74,7 +76,7 @@ public final class VillagerRestockProcessor {
     }
 
     private boolean needsToRestock(Villager villager) {
-        for (Villager.Recipe recipe : villager.getRecipes()) {
+        for (MerchantRecipe recipe : villager.getRecipes()) {
             if (recipe.getUses() > 0) {
                 return true;
             }

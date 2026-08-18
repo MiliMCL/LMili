@@ -252,13 +252,14 @@ public final class WorkStealingCoordinator {
 
         totalStealAttempts.increment();
 
-        // 随机起始位置
+        // Mili start - fix: use toArray() instead of new ArrayList() to reduce allocation
+        // on every steal attempt (hot path)
         int startIdx = ThreadLocalRandom.current().nextInt(size);
-        List<Long> regionIds = new ArrayList<>(regionQueues.keySet());
+        Long[] regionIds = regionQueues.keySet().toArray(new Long[0]);
 
-        for (int i = 0; i < size; i++) {
-            int idx = (startIdx + i) % size;
-            long regionId = regionIds.get(idx);
+        for (int i = 0; i < regionIds.length; i++) {
+            int idx = (startIdx + i) % regionIds.length;
+            long regionId = regionIds[idx];
             RegionQueue queue = regionQueues.get(regionId);
 
             if (queue != null && queue.isActive()) {
@@ -271,6 +272,7 @@ public final class WorkStealingCoordinator {
                 }
             }
         }
+        // Mili end
 
         failedSteals.increment();
         return null;
