@@ -355,16 +355,18 @@ public final class MiliTickRegionScheduler {
             // Global tick (regionData == null) 不需要设置 region 上下文
             if (regionData != null) {
                 final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = regionData.region;
-                if (region != null && region.regioniser != null && region.regioniser.world != null) {
-                    // 获取并设置 RegionizedWorldData
+                if (region != null) {
+                    // 先设置 region（不带 worldData），这样 RegionizedData.get() 能找到 region
+                    thread.setTickingRegion(region, null);
+                    // 然后获取 worldData（RegionizedData.get() 现在能工作了）
                     final io.papermc.paper.threadedregions.RegionizedWorldData worldData =
                             region.regioniser.world.worldRegionData.get();
                     if (worldData != null) {
-                        thread.setTickingRegion(region, worldData);
-                    } else {
-                        LOGGER.debug("[MiliTickRegionScheduler] WorldData is null for region #{}, proceeding without context",
-                                regionData.id);
+                        // 更新 thread 的 worldData 引用
+                        thread.currentTickingWorldRegionizedData = worldData;
                     }
+                    LOGGER.debug("[MiliTickRegionScheduler] Set region context for region #{}: worldData={}",
+                            regionData.id, worldData != null ? "valid" : "null");
                 }
             }
 
