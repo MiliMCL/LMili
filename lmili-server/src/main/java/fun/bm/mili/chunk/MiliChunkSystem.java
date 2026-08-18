@@ -1,28 +1,35 @@
 package fun.bm.mili.chunk;
 
 import com.mojang.logging.LogUtils;
+import fun.bm.mili.chunk.phase.HotnessUpdatePhase;
+import fun.bm.mili.chunk.phase.LifecyclePhase;
+import fun.bm.mili.chunk.phase.ViewDistancePhase;
 import fun.bm.mili.config.modules.optimizations.ChunkSystemConfig;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Mili 区块系统 —— 管理 chunk 生命周期、热度追踪、异步操作。
+ *
+ * <p>内部委托给 {@link ChunkPipeline} 执行阶段逻辑，保持静态入口向后兼容。
+ */
 public final class MiliChunkSystem {
 
     private MiliChunkSystem() {}
 
-    // Mili start - fix: use AtomicBoolean for thread-safe init/shutdown
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
-    // Mili end
     private static BukkitTask mainThreadTask;
     private static ScheduledExecutorService asyncExecutor;
 
-    private static final ConcurrentHashMap<World, WorldChunkData> worldData = new ConcurrentHashMap<>();
+    private static ChunkPipeline pipeline;
     private static final AsyncChunkProcessor asyncProcessor = new AsyncChunkProcessor();
 
     private static final AtomicLong totalChunkLoads = new AtomicLong(0);
@@ -31,15 +38,20 @@ public final class MiliChunkSystem {
     private static final AtomicLong cacheMisses = new AtomicLong(0);
 
     public static void init(org.bukkit.plugin.Plugin plugin) {
-        // Mili start - fix: CAS-based init to prevent double initialization race
         if (!ChunkSystemConfig.enabled) return;
         if (!initialized.compareAndSet(false, true)) return;
-        // Mili end
 
         if (plugin == null) {
             initialized.set(false);
             throw new IllegalArgumentException("Mili plugin instance is required for MiliChunkSystem");
         }
+
+        // 创建管线
+        pipeline = new ChunkPipeline(List.of(
+                new HotnessUpdatePhase(),
+                new ViewDistancePhase(),
+                new LifecyclePhase(totalChunkUnloads)
+        ));
 
         asyncExecutor = Executors.newScheduledThreadPool(
                 ChunkSystemConfig.asyncThreads,
@@ -76,9 +88,7 @@ public final class MiliChunkSystem {
     }
 
     public static void shutdown() {
-        // Mili start - fix: CAS-based shutdown to prevent double shutdown race
         if (!initialized.compareAndSet(true, false)) return;
-        // Mili end
 
         if (mainThreadTask != null) {
             mainThreadTask.cancel();
@@ -98,7 +108,10 @@ public final class MiliChunkSystem {
             asyncExecutor = null;
         }
 
-        worldData.clear();
+        if (pipeline != null) {
+            pipeline.clear();
+            pipeline = null;
+        }
         asyncProcessor.clear();
 
         LogUtils.getLogger().info("[Mili] MiliChunkSystem shutdown complete");
@@ -108,16 +121,10 @@ public final class MiliChunkSystem {
         long startNanos = System.nanoTime();
 
         try {
-            for (Map.Entry<World, WorldChunkData> entry : worldData.entrySet()) {
-                World world = entry.getKey();
-                WorldChunkData data = entry.getValue();
-
-                ChunkHotnessUpdater.update(world, data);
-                ChunkLifecycleManager.manage(world, data, totalChunkUnloads);
-                ChunkViewDistanceOptimizer.optimize(world, data);
+            if (pipeline != null) {
+                pipeline.tick();
             }
         } catch (Throwable e) {
-            // Mili start - fix: catch Throwable (not just Exception) to prevent main thread task cancellation on Error
             LogUtils.getLogger().error("[Mili] Chunk system tick error", e);
         }
 
@@ -130,11 +137,15 @@ public final class MiliChunkSystem {
     }
 
     public static void registerWorld(World world) {
-        worldData.computeIfAbsent(world, w -> new WorldChunkData(w));
+        if (pipeline != null) {
+            pipeline.registerWorld(world);
+        }
     }
 
     public static void unregisterWorld(World world) {
-        worldData.remove(world);
+        if (pipeline != null) {
+            pipeline.unregisterWorld(world);
+        }
     }
 
     public static void queueAsyncOperation(AsyncChunkProcessor.AsyncChunkOperation operation) {
@@ -144,7 +155,8 @@ public final class MiliChunkSystem {
     }
 
     public static ChunkHotness getChunkHotness(World world, int chunkX, int chunkZ) {
-        WorldChunkData data = worldData.get(world);
+        if (pipeline == null) return null;
+        WorldChunkData data = pipeline.getWorldData(world);
         if (data == null) return null;
         return data.getHotness(chunkX, chunkZ);
     }
@@ -161,13 +173,15 @@ public final class MiliChunkSystem {
         stats.put("cache_hits", cacheHits.get());
         stats.put("cache_misses", cacheMisses.get());
         stats.put("async_queue_size", asyncProcessor.queueSize());
-        stats.put("registered_worlds", worldData.size());
+        stats.put("registered_worlds", pipeline != null ? pipeline.getWorldCount() : 0);
 
         long totalHotChunks = 0;
         long activeChunks = 0;
-        for (WorldChunkData data : worldData.values()) {
-            totalHotChunks += data.getTotalHotChunks();
-            activeChunks += data.getActiveChunks();
+        if (pipeline != null) {
+            for (WorldChunkData data : pipeline.worldData.values()) {
+                totalHotChunks += data.getTotalHotChunks();
+                activeChunks += data.getActiveChunks();
+            }
         }
         stats.put("hot_chunks", totalHotChunks);
         stats.put("active_chunks", activeChunks);
