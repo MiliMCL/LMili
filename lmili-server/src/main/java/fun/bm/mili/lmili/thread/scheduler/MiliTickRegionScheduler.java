@@ -257,12 +257,21 @@ public final class MiliTickRegionScheduler {
     /**
      * Region Tick Worker —— 每个 worker 维护一个本地任务队列，从其他 worker 窃取任务。
      *
-     * <p>这是替代 Folia 的 {@code TickThreadRunner} + {@code Scheduler} 的核心组件。</p>
+     * <p>这是替代 Folia 的 {@code TickThreadRunner} + {@code Scheduler} 的核心组件。
+     * 使用 PriorityBlockingQueue 确保 global tick（region==null）优先于 region tick。</p>
      */
     private final class TickRegionWorker implements Runnable {
         private final int workerId;
         private volatile MiliTickThread thread; // 在 run() 开始时设置
-        private final ConcurrentLinkedQueue<TickRegionScheduler.RegionScheduleHandle> taskQueue = new ConcurrentLinkedQueue<>();
+        // Global tick（region==null）优先级最高，确保玩家登录等关键任务不被 region tick 饥饿
+        private final PriorityBlockingQueue<TickRegionScheduler.RegionScheduleHandle> taskQueue =
+                new PriorityBlockingQueue<>(16, (a, b) -> {
+                    final boolean aGlobal = (a.region == null);
+                    final boolean bGlobal = (b.region == null);
+                    if (aGlobal && !bGlobal) return -1;
+                    if (!aGlobal && bGlobal) return 1;
+                    return 0;
+                });
         private final AtomicBoolean running = new AtomicBoolean(true);
         private volatile boolean idle = true;
 
@@ -321,7 +330,7 @@ public final class MiliTickRegionScheduler {
                     continue;
                 }
 
-                // 执行 region tick
+                // 执行 tick（PriorityBlockingQueue 已确保 global tick 优先）
                 executeRegionTick(currentThread, handle);
             }
 
