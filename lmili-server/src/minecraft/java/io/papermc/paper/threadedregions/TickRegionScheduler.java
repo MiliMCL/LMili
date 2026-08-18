@@ -259,7 +259,11 @@ public class TickRegionScheduler {
         }
         // Mili start - support MiliTickThread for new scheduler
         if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread miliThread) {
-            return miliThread.currentTickingWorldRegionizedData;
+            final RegionizedWorldData data = miliThread.currentTickingWorldRegionizedData;
+            if (data == null) {
+                LOGGER.warn("[TickRegionScheduler] MiliTickThread.currentTickingWorldRegionizedData is null for thread: {}", currThread.getName());
+            }
+            return data;
         }
         // fallback for virtual threads in RegionTickPool
         final io.papermc.paper.threadedregions.RegionizedWorldData miliFallback = fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent();

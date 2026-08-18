@@ -351,14 +351,55 @@ public final class MiliTickRegionScheduler {
                                         final TickRegionScheduler.RegionScheduleHandle handle) {
             // 设置 region 上下文
             final TickRegions.TickRegionData regionData = handle.region;
-            if (regionData != null) {
-                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = regionData.region;
-                thread.setTickingRegion(region, region.regioniser.world.worldRegionData.get());
+            if (regionData == null) {
+                LOGGER.warn("[MiliTickRegionScheduler] Region data is null for handle, skipping tick");
+                return;
+            }
+
+            final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = regionData.region;
+            if (region == null) {
+                LOGGER.warn("[MiliTickRegionScheduler] Region is null for region #{}, skipping tick",
+                        regionData.id);
+                return;
+            }
+
+            if (region.regioniser == null || region.regioniser.world == null) {
+                LOGGER.warn("[MiliTickRegionScheduler] Regioniser or world is null for region #{}, skipping tick",
+                        regionData.id);
+                return;
+            }
+
+            // 获取 RegionizedWorldData
+            final io.papermc.paper.threadedregions.RegionizedWorldData worldData =
+                    region.regioniser.world.worldRegionData.get();
+            if (worldData == null) {
+                LOGGER.warn("[MiliTickRegionScheduler] WorldData is null for region #{} in world '{}', skipping tick",
+                        regionData.id, region.regioniser.world.getWorld().getName());
+                return;
+            }
+
+            // 设置线程的 region 上下文
+            thread.setTickingRegion(region, worldData);
+            LOGGER.info("[MiliTickRegionScheduler] executeRegionTick: Set context for region #{}: world={}, thread={}, worldData={}",
+                    regionData.id, region.regioniser.world.getWorld().getName(), thread.getName(),
+                    worldData != null ? "valid" : "null");
+
+            // 验证上下文设置
+            final Thread currentThread = Thread.currentThread();
+            if (currentThread instanceof MiliTickThread miliThread) {
+                LOGGER.info("[MiliTickRegionScheduler] Current thread is MiliTickThread, context: region={}, worldData={}",
+                        miliThread.currentTickingRegion != null ? "set" : "null",
+                        miliThread.currentTickingWorldRegionizedData != null ? "set" : "null");
+            } else {
+                LOGGER.error("[MiliTickRegionScheduler] Current thread is NOT MiliTickThread: {}", currentThread.getClass().getName());
             }
 
             try {
                 // 执行 tick
                 final boolean reschedule = handle.runTick();
+
+                LOGGER.info("[MiliTickRegionScheduler] runTick completed for region #{}, reschedule={}",
+                        regionData.id, reschedule);
 
                 // 如果需要继续调度，重新提交到 worker 队列
                 // Mili 的 work-stealing 机制会自动处理负载均衡，不需要延迟调度
@@ -367,6 +408,7 @@ public final class MiliTickRegionScheduler {
                 }
             } catch (Throwable thr) {
                 // Region 失败处理
+                LOGGER.error("[MiliTickRegionScheduler] Exception during runTick for region #{}", regionData.id, thr);
                 handleRegionFailure(handle, thr);
             } finally {
                 // 清除 region 上下文
