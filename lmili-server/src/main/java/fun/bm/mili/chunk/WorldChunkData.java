@@ -18,11 +18,12 @@ public final class WorldChunkData {
     private static final long VD_COOLDOWN_NS = 30_000_000_000L;
     private static final long STALE_MAX_AGE_NS = 300_000_000_000L;
 
-    WorldChunkData(World world) {
+    // Mili start - fix: constructor and methods are now public for cross-package access from chunk.phase
+    public WorldChunkData(World world) {
         this.world = world;
     }
 
-    ChunkHotness getOrCreateHotness(int chunkX, int chunkZ) {
+    public ChunkHotness getOrCreateHotness(int chunkX, int chunkZ) {
         long key = ChunkKey.pack(chunkX, chunkZ);
         return hotnessMap.computeIfAbsent(key, k -> {
             totalHotChunks.incrementAndGet();
@@ -30,21 +31,21 @@ public final class WorldChunkData {
         });
     }
 
-    ChunkHotness getHotness(int chunkX, int chunkZ) {
+    public ChunkHotness getHotness(int chunkX, int chunkZ) {
         return hotnessMap.get(ChunkKey.pack(chunkX, chunkZ));
     }
 
-    void removeHotness(int chunkX, int chunkZ) {
+    public void removeHotness(int chunkX, int chunkZ) {
         if (hotnessMap.remove(ChunkKey.pack(chunkX, chunkZ)) != null) {
             totalHotChunks.decrementAndGet();
         }
     }
 
-    int getTotalHotChunks() {
+    public int getTotalHotChunks() {
         return totalHotChunks.get();
     }
 
-    int getActiveChunks() {
+    public int getActiveChunks() {
         int count = 0;
         for (ChunkHotness hotness : hotnessMap.values()) {
             if (hotness.isActive()) count++;
@@ -53,7 +54,7 @@ public final class WorldChunkData {
         return count;
     }
 
-    boolean canAdjustViewDistance() {
+    public boolean canAdjustViewDistance() {
         long now = System.nanoTime();
         long current = lastViewDistanceAdjustment.get();
         while (now - current >= VD_COOLDOWN_NS) {
@@ -65,19 +66,19 @@ public final class WorldChunkData {
         return false;
     }
 
-    void recordViewDistanceAdjustment() {
+    public void recordViewDistanceAdjustment() {
         viewDistanceAdjustmentCount.incrementAndGet();
     }
 
-    int getViewDistanceAdjustmentCount() {
+    public int getViewDistanceAdjustmentCount() {
         return viewDistanceAdjustmentCount.get();
     }
 
-    int getTrackedChunkCount() {
+    public int getTrackedChunkCount() {
         return hotnessMap.size();
     }
 
-    void cleanupStaleEntries() {
+    public void cleanupStaleEntries() {
         long now = System.nanoTime();
         hotnessMap.entrySet().removeIf(entry -> {
             ChunkHotness hotness = entry.getValue();
@@ -89,7 +90,8 @@ public final class WorldChunkData {
         });
     }
 
-    World getWorld() {
+    public World getWorld() {
         return world;
     }
+    // Mili end
 }
