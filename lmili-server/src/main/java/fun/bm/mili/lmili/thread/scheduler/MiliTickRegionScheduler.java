@@ -345,33 +345,14 @@ public final class MiliTickRegionScheduler {
         /**
          * 执行 region tick —— 这是核心执行路径。
          *
-         * <p>设置线程的 region 上下文，调用 handle.runTick()，然后清理上下文。
-         * 对于 global tick（region == null），跳过 region 上下文设置直接执行。</p>
+         * <p>runTick() 内部通过 TickRegionScheduler.setTickingRegion() 设置线程的 region 上下文，
+         * 无需在此手动设置。setTickingRegion() 已为 MiliTickThread 正确设置
+         * currentTickingRegion 和 currentTickingWorldRegionizedData。</p>
          */
         private void executeRegionTick(final MiliTickThread thread,
                                         final TickRegionScheduler.RegionScheduleHandle handle) {
-            final TickRegions.TickRegionData regionData = handle.region;
-
-            // Global tick (regionData == null) 不需要设置 region 上下文
-            if (regionData != null) {
-                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = regionData.region;
-                if (region != null) {
-                    // 先设置 region（不带 worldData），这样 RegionizedData.get() 能找到 region
-                    thread.setTickingRegion(region, null);
-                    // 然后获取 worldData（RegionizedData.get() 现在能工作了）
-                    final io.papermc.paper.threadedregions.RegionizedWorldData worldData =
-                            region.regioniser.world.worldRegionData.get();
-                    if (worldData != null) {
-                        // 更新 thread 的 worldData 引用
-                        thread.currentTickingWorldRegionizedData = worldData;
-                    }
-                    LOGGER.debug("[MiliTickRegionScheduler] Set region context for region #{}: worldData={}",
-                            regionData.id, worldData != null ? "valid" : "null");
-                }
-            }
-
             try {
-                // 执行 tick
+                // 执行 tick — runTick() 内部会调用 setTickingRegion() 设置上下文
                 final boolean reschedule = handle.runTick();
 
                 // 如果需要继续调度，重新提交到 worker 队列
@@ -380,12 +361,10 @@ public final class MiliTickRegionScheduler {
                 }
             } catch (Throwable thr) {
                 // Region 失败处理
+                final TickRegions.TickRegionData regionData = handle.region;
                 final String regionInfo = regionData != null ? "#" + regionData.id : "global";
                 LOGGER.error("[MiliTickRegionScheduler] Exception during tick for region {}", regionInfo, thr);
                 handleRegionFailure(handle, thr);
-            } finally {
-                // 清除 region 上下文
-                thread.clearTickingRegion();
             }
         }
 

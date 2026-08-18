@@ -183,8 +183,13 @@ public class TickRegionScheduler {
         final Thread currThread = Thread.currentThread();
         // Mili start - support MiliTickThread
         if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread miliThread) {
-            // MiliTickThread 的 region 上下文由 MiliTickRegionScheduler 管理
-            // 这里不需要重复设置，直接返回
+            // 与 TickThreadRunner 相同的逻辑：设置 region 和 worldData
+            miliThread.currentTickingRegion = region;
+            if (region != null) {
+                miliThread.currentTickingWorldRegionizedData = region.regioniser.world.worldRegionData.get();
+            } else {
+                miliThread.currentTickingWorldRegionizedData = null;
+            }
             return;
         }
         // Mili end
@@ -259,11 +264,7 @@ public class TickRegionScheduler {
         }
         // Mili start - support MiliTickThread for new scheduler
         if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread miliThread) {
-            final RegionizedWorldData data = miliThread.currentTickingWorldRegionizedData;
-            if (data == null) {
-                LOGGER.warn("[TickRegionScheduler] MiliTickThread.currentTickingWorldRegionizedData is null for thread: {}", currThread.getName());
-            }
-            return data;
+            return miliThread.currentTickingWorldRegionizedData;
         }
         // fallback for virtual threads in RegionTickPool
         final io.papermc.paper.threadedregions.RegionizedWorldData miliFallback = fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent();
