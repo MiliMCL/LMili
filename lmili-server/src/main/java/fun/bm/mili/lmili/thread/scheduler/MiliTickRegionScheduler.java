@@ -345,70 +345,41 @@ public final class MiliTickRegionScheduler {
         /**
          * 执行 region tick —— 这是核心执行路径。
          *
-         * <p>设置线程的 region 上下文，调用 handle.runTick()，然后清理上下文。</p>
+         * <p>设置线程的 region 上下文，调用 handle.runTick()，然后清理上下文。
+         * 对于 global tick（region == null），跳过 region 上下文设置直接执行。</p>
          */
         private void executeRegionTick(final MiliTickThread thread,
                                         final TickRegionScheduler.RegionScheduleHandle handle) {
-            // 设置 region 上下文
             final TickRegions.TickRegionData regionData = handle.region;
-            if (regionData == null) {
-                LOGGER.warn("[MiliTickRegionScheduler] Region data is null for handle, skipping tick");
-                return;
-            }
 
-            final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = regionData.region;
-            if (region == null) {
-                LOGGER.warn("[MiliTickRegionScheduler] Region is null for region #{}, skipping tick",
-                        regionData.id);
-                return;
-            }
-
-            if (region.regioniser == null || region.regioniser.world == null) {
-                LOGGER.warn("[MiliTickRegionScheduler] Regioniser or world is null for region #{}, skipping tick",
-                        regionData.id);
-                return;
-            }
-
-            // 获取 RegionizedWorldData
-            final io.papermc.paper.threadedregions.RegionizedWorldData worldData =
-                    region.regioniser.world.worldRegionData.get();
-            if (worldData == null) {
-                LOGGER.warn("[MiliTickRegionScheduler] WorldData is null for region #{} in world '{}', skipping tick",
-                        regionData.id, region.regioniser.world.getWorld().getName());
-                return;
-            }
-
-            // 设置线程的 region 上下文
-            thread.setTickingRegion(region, worldData);
-            LOGGER.info("[MiliTickRegionScheduler] executeRegionTick: Set context for region #{}: world={}, thread={}, worldData={}",
-                    regionData.id, region.regioniser.world.getWorld().getName(), thread.getName(),
-                    worldData != null ? "valid" : "null");
-
-            // 验证上下文设置
-            final Thread currentThread = Thread.currentThread();
-            if (currentThread instanceof MiliTickThread miliThread) {
-                LOGGER.info("[MiliTickRegionScheduler] Current thread is MiliTickThread, context: region={}, worldData={}",
-                        miliThread.currentTickingRegion != null ? "set" : "null",
-                        miliThread.currentTickingWorldRegionizedData != null ? "set" : "null");
-            } else {
-                LOGGER.error("[MiliTickRegionScheduler] Current thread is NOT MiliTickThread: {}", currentThread.getClass().getName());
+            // Global tick (regionData == null) 不需要设置 region 上下文
+            if (regionData != null) {
+                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = regionData.region;
+                if (region != null && region.regioniser != null && region.regioniser.world != null) {
+                    // 获取并设置 RegionizedWorldData
+                    final io.papermc.paper.threadedregions.RegionizedWorldData worldData =
+                            region.regioniser.world.worldRegionData.get();
+                    if (worldData != null) {
+                        thread.setTickingRegion(region, worldData);
+                    } else {
+                        LOGGER.debug("[MiliTickRegionScheduler] WorldData is null for region #{}, proceeding without context",
+                                regionData.id);
+                    }
+                }
             }
 
             try {
                 // 执行 tick
                 final boolean reschedule = handle.runTick();
 
-                LOGGER.info("[MiliTickRegionScheduler] runTick completed for region #{}, reschedule={}",
-                        regionData.id, reschedule);
-
                 // 如果需要继续调度，重新提交到 worker 队列
-                // Mili 的 work-stealing 机制会自动处理负载均衡，不需要延迟调度
                 if (reschedule && !halted.get() && !handle.isMarkedAsNonSchedulable()) {
                     submitRegion(handle);
                 }
             } catch (Throwable thr) {
                 // Region 失败处理
-                LOGGER.error("[MiliTickRegionScheduler] Exception during runTick for region #{}", regionData.id, thr);
+                final String regionInfo = regionData != null ? "#" + regionData.id : "global";
+                LOGGER.error("[MiliTickRegionScheduler] Exception during tick for region {}", regionInfo, thr);
                 handleRegionFailure(handle, thr);
             } finally {
                 // 清除 region 上下文
