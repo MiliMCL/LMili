@@ -1,9 +1,7 @@
 package fun.bm.mili.lmili.thread.scheduler;
 
-import ca.spottedleaf.common.util.TimeUtil;
 import com.mojang.logging.LogUtils;
 import fun.bm.mili.lmili.thread.scheduler.api.MiliScheduler;
-import fun.bm.mili.lmili.thread.scheduler.api.RegionTask;
 import io.papermc.paper.threadedregions.*;
 import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
@@ -155,37 +153,14 @@ public final class MiliTickRegionScheduler {
     public void scheduleRegion(final TickRegionScheduler.RegionScheduleHandle handle) {
         if (halted.get()) return;
 
-        // 计算延迟：如果 scheduledStart 已过期，立即执行；否则延迟执行
-        final long scheduledStart = handle.getScheduledStart();
-        final long now = System.nanoTime();
-        final long delayNanos = scheduledStart == TimeUtil.DEADLINE_NOT_SET ? 0 : Math.max(0, scheduledStart - now);
-
-        if (delayNanos <= 0) {
-            // 立即提交到 worker 队列
-            for (TickRegionWorker worker : workers) {
-                if (worker.submitRegion(handle)) {
-                    return;
-                }
+        // 立即提交到 worker 队列（不使用延迟调度，简化实现）
+        for (TickRegionWorker worker : workers) {
+            if (worker.submitRegion(handle)) {
+                return;
             }
-            // 如果所有 worker 都满了，强制提交到第一个
-            workers[0].forceSubmitRegion(handle);
-        } else {
-            // 延迟提交
-            scheduler.scheduleDelayed(
-                    RegionTask.builder(handle.region != null ? handle.region.id : 0L)
-                            .task(() -> {
-                                if (!halted.get() && !handle.isMarkedAsNonSchedulable()) {
-                                    for (TickRegionWorker worker : workers) {
-                                        if (worker.submitRegion(handle)) return;
-                                    }
-                                    workers[0].forceSubmitRegion(handle);
-                                }
-                            })
-                            .name("region-schedule-delay")
-                            .build(),
-                    delayNanos, TimeUnit.NANOSECONDS
-            );
         }
+        // 如果所有 worker 都满了，强制提交到第一个
+        workers[0].forceSubmitRegion(handle);
     }
 
     /**
@@ -385,31 +360,10 @@ public final class MiliTickRegionScheduler {
                 // 执行 tick
                 final boolean reschedule = handle.runTick();
 
-                // 如果需要继续调度，重新提交
+                // 如果需要继续调度，重新提交到 worker 队列
+                // Mili 的 work-stealing 机制会自动处理负载均衡，不需要延迟调度
                 if (reschedule && !halted.get() && !handle.isMarkedAsNonSchedulable()) {
-                    // 计算下次 tick 的延迟
-                    final long nextStart = handle.getScheduledStart();
-                    final long now = System.nanoTime();
-                    final long delayNanos = Math.max(0, nextStart - now);
-
-                    if (delayNanos <= 0) {
-                        // 立即重新提交
-                        submitRegion(handle);
-                    } else {
-                        // 延迟重新提交
-                        final long regionId = regionData != null ? regionData.id : 0L;
-                        scheduler.scheduleDelayed(
-                                RegionTask.builder(regionId)
-                                        .task(() -> {
-                                            if (!halted.get() && !handle.isMarkedAsNonSchedulable()) {
-                                                submitRegion(handle);
-                                            }
-                                        })
-                                        .name("region-reschedule-" + regionId)
-                                        .build(),
-                                delayNanos, TimeUnit.NANOSECONDS
-                        );
-                    }
+                    submitRegion(handle);
                 }
             } catch (Throwable thr) {
                 // Region 失败处理

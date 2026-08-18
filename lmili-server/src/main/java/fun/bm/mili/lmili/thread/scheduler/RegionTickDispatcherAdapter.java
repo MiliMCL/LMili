@@ -5,7 +5,6 @@ import fun.bm.mili.lmili.thread.regiontick.RegionTickContext;
 import fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher;
 import fun.bm.mili.lmili.thread.regiontick.RegionTickExecutor;
 import fun.bm.mili.lmili.thread.regiontick.RegionTickSlice;
-import fun.bm.mili.lmili.thread.regiontick.RegionTickWorker;
 import fun.bm.mili.lmili.thread.scheduler.api.MiliScheduler;
 import fun.bm.mili.lmili.thread.scheduler.api.RegionTask;
 import fun.bm.mili.lmili.thread.scheduler.api.TaskHandle;
@@ -14,7 +13,6 @@ import org.slf4j.Logger;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * RegionTickDispatcher 适配器 —— 将现有 RegionTickDispatcher 桥接到新调度系统。
@@ -119,17 +117,23 @@ public final class RegionTickDispatcherAdapter {
      * 单 slice 同步 tick（新路径）。
      */
     private void dispatchSingleSliceNew(@NotNull RegionTickContext context, long[] chunkArray) {
-        context.beginTick(1);
+        if (!context.tryBeginTick(1)) {
+            LOGGER.debug("[RegionTickDispatcherAdapter] Region #{} single-slice tick skipped — already ticking",
+                    context.regionId);
+            return;
+        }
         try {
             RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
             if (executor != null) {
                 executor.executeSlice(null, new RegionTickSlice(context, chunkArray, 0), context);
             }
+            context.arriveSlice();
         } catch (Throwable throwable) {
             LOGGER.error("[RegionTickDispatcherAdapter] Single-slice tick failed for region #{}",
                     context.regionId, throwable);
-        } finally {
             context.arriveSlice();
+            throw throwable;
+        } finally {
             context.endTick();
         }
     }
