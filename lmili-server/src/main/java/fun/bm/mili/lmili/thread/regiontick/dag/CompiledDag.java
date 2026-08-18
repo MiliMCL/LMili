@@ -101,6 +101,18 @@ public final class CompiledDag {
     }
 
     /**
+     * 获取指定节点的初始依赖数（执行前的入度）。
+     *
+     * <p>与 {@link #inDegree(int)} 等价，用于 {@code DagExecutionState} 初始化。
+     *
+     * @param nodeId 节点 ID
+     * @return 初始依赖数
+     */
+    public int initialDependencyCount(final int nodeId) {
+        return inDegrees[nodeId];
+    }
+
+    /**
      * 获取指定节点的执行函数。
      *
      * @param nodeId 节点 ID

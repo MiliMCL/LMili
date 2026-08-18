@@ -174,6 +174,7 @@ public final class RegionTickDispatcher {
      * <p>根据区域 chunk 数量决定执行策略：
      * <ul>
      *   <li>global region (id==0) 或空 chunk：跳过</li>
+     *   <li>前一 tick 仍在执行：跳过本次 tick（防止 tick 重叠）</li>
      *   <li>chunk 数低于 parallelismThreshold：单线程同步执行（无调度开销）</li>
      *   <li>virtual 模式：多 virtual thread 并行执行 slices</li>
      *   <li>platform 模式：分发给 worker 队列执行</li>
@@ -183,6 +184,13 @@ public final class RegionTickDispatcher {
         if (this.shutdown.get()) return;
 
         if (context.regionId == 0L) return;
+
+        // 防止 tick 重叠：Tick N 未完成时，同 Region 不能进入 Tick N+1
+        if (context.isTicking()) {
+            LOGGER.debug("[RegionTickPool] Region #{} tick skipped — previous tick still in-flight (state={})",
+                    context.regionId, context.getTickState());
+            return;
+        }
 
         var chunks = context.getOwnedChunks();
         int chunkCount = chunks.size();
@@ -201,6 +209,8 @@ public final class RegionTickDispatcher {
         } catch (Throwable throwable) {
             totalTickErrors.increment();
             LOGGER.error("[RegionTickPool] dispatchTick failed for region #{}", context.regionId, throwable);
+            // 确保 tick 状态恢复
+            context.finishTick();
         } finally {
             long elapsed = System.nanoTime() - startNanos;
             totalTicksDispatched.increment();
@@ -228,7 +238,11 @@ public final class RegionTickDispatcher {
      * 单 slice 同步 tick —— 小 region 专用。
      */
     private void dispatchSingleSlice(@NotNull final RegionTickContext context, final long[] chunkArray) {
-        context.beginTick(1);
+        if (!context.tryBeginTick(1)) {
+            LOGGER.debug("[RegionTickPool] Region #{} single-slice tick skipped — already ticking",
+                    context.regionId);
+            return;
+        }
         RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
         if (executor != null) {
             try {
@@ -256,33 +270,15 @@ public final class RegionTickDispatcher {
     private void dispatchParallelVirtual(@NotNull final RegionTickContext context, final long[] chunkArray) {
         final long regionId = context.regionId;
 
-        // 检查前一 tick 是否仍在运行 —— 如果仍在运行则执行增量 tick（部分 chunk）
-        CompletableFuture<Void> previous = pendingChunkFutures.get(regionId);
-        boolean incrementalTick = false;
-        if (previous != null && !previous.isDone()) {
-            LOGGER.warn("[RegionTickPool] Previous chunk tick still in-flight for region #{} — performing incremental tick ({} chunks)",
-                    regionId, chunkArray.length);
-            incrementalTick = true;
-        }
-
         int total = chunkArray.length;
-
-        // Mili start - 增量 tick 模式下：只 tick 一半的 chunk（每隔一个取一个），
-        // 确保即使前一 tick 超时，也能持续处理部分 chunk 而非完全跳过
-        long[] effectiveChunkArray = chunkArray;
-        if (incrementalTick) {
-            // 每隔一个 chunk 取一个，确保每次增量 tick 处理不同的子集
-            int halfCount = (total + 1) / 2;
-            long[] halfArray = new long[halfCount];
-            for (int i = 0; i < halfCount; i++) {
-                halfArray[i] = chunkArray[i * 2];
-            }
-            effectiveChunkArray = halfArray;
-            total = halfCount;
-        }
-        // Mili end
-
         int sliceCount = Math.max(1, (total + sliceSize - 1) / sliceSize);
+
+        // 防止 tick 重叠：使用 CAS 状态机，Tick N 未完成时不能进入 Tick N+1
+        if (!context.tryBeginTick(sliceCount)) {
+            LOGGER.debug("[RegionTickPool] Region #{} virtual tick skipped — already ticking (state={})",
+                    regionId, context.getTickState());
+            return;
+        }
 
         // Mili start: 捕获当前 region 的 RegionizedWorldData，传递给每个虚拟线程
         io.papermc.paper.threadedregions.RegionizedWorldData currentRegionData = null;
@@ -297,10 +293,18 @@ public final class RegionTickDispatcher {
         final io.papermc.paper.threadedregions.RegionizedWorldData regionData = currentRegionData;
 
         if (regionData == null) {
-            // 无法获取 region data 时回退到单线程执行
+            // 无法获取 region data 时回退到单线程执行（已处于 TICKING 状态，直接执行）
             LOGGER.warn("[RegionTickPool] No region data for virtual dispatch in region #{} — falling back to single-slice",
                     regionId);
-            dispatchSingleSlice(context, effectiveChunkArray);
+            RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
+            if (executor != null) {
+                try {
+                    executor.executeSlice(null, new RegionTickSlice(context, chunkArray, 0), context);
+                } catch (Throwable throwable) {
+                    LOGGER.error("[RegionTickPool] Fallback single-slice tick failed for region #{}", regionId, throwable);
+                }
+            }
+            context.endTick();
             return;
         }
         // Mili end
@@ -328,7 +332,7 @@ public final class RegionTickDispatcher {
             for (int i = 0; i < sliceCount; i++) {
                 int from = i * sliceSize;
                 int to = Math.min(from + sliceSize, total);
-                long[] sliceArray = java.util.Arrays.copyOfRange(effectiveChunkArray, from, to);
+                long[] sliceArray = java.util.Arrays.copyOfRange(chunkArray, from, to);
                 RegionTickSlice slice = new RegionTickSlice(context, sliceArray, i);
                 final int sliceIndex = i;
 
@@ -375,6 +379,8 @@ public final class RegionTickDispatcher {
                                         asyncCatcherBaseline.get();
                             }
                         }
+                        // 完成 tick，回到 IDLE 状态
+                        context.endTick();
                         return null;
                     });
         } catch (Exception e) {
@@ -385,6 +391,8 @@ public final class RegionTickDispatcher {
                             asyncCatcherBaseline.get();
                 }
             }
+            // 异常时也要恢复 tick 状态
+            context.endTick();
             throw e;
         }
     }
@@ -401,13 +409,12 @@ public final class RegionTickDispatcher {
         if (workers == null || workers.length == 0) return;
 
         RegionTickSlice[] slices = RegionTickSlice.fromChunkArray(context, chunkArray, sliceSize);
-        // Mili start - beginTick 的 parties 应为 slice 数 + 1（region tick 线程本身）。
-        // 原代码传入 slices.length，但 workers 会对每个 slice 调用一次 arriveSlice()
-        // （共 slices.length 次），加上 awaitTickCompletion() 中主线程的 arrive()，
-        // 总到达数 = slices.length + 1。若只注册 slices.length 个参与方，
-        // 相位会在最后一个 slice 尚未完成时提前推进，导致 dispatchParallelPlatform 提前返回、
-        // 与下一 tick 产生竞态。改为 slices.length + 1 与文档契约一致。
-        context.beginTick(slices.length + 1);
+        // 防止 tick 重叠：使用 CAS 状态机
+        if (!context.tryBeginTick(slices.length + 1)) {
+            LOGGER.debug("[RegionTickPool] Region #{} platform tick skipped — already ticking",
+                    context.regionId);
+            return;
+        }
 
         // 贪心负载均衡分发给 workers
         int actualWorkers = Math.min(slices.length, workers.length);

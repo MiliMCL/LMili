@@ -1,13 +1,17 @@
 package fun.bm.mili.lmili.thread.regiontick.executor;
 
 import fun.bm.mili.lmili.thread.regiontick.dag.CompiledDag;
+import fun.bm.mili.lmili.thread.regiontick.dag.DagExecutionState;
+import fun.bm.mili.lmili.thread.scheduler.tick.TickContext;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -52,6 +56,7 @@ public final class DagExecutionEngine {
      *   <li>忽略返回值（fire-and-forget）</li>
      *   <li>{@link TaskHandle#await()} 等待所有节点完成</li>
      *   <li>{@link TaskHandle#thenRun(Runnable)} 注册完成回调</li>
+     *   <li>{@link TaskHandle#completion()} 获取 CompletionStage 用于非阻塞观察</li>
  * </ul>
      *
      * @param dag      编译后的 DAG（不可变）
@@ -64,30 +69,73 @@ public final class DagExecutionEngine {
             final @NotNull Executor executor,
             final long tick
     ) {
+        return execute(dag, executor, tick, null);
+    }
+
+    /**
+     * 执行编译后的 DAG，并连接到 {@link TickContext} 的 barrier。
+     *
+     * <p>当所有 DAG 节点完成后，会自动完成 tick barrier：
+     * <pre>
+     * DAG
+     *  ├── Node A
+     *  ├── Node B
+     *  └── Node C
+     *        ↓
+     *  all complete
+     *        ↓
+     *  TaskHandle.complete()
+     *        ↓
+     *  TickBarrier.complete()
+     * </pre>
+     *
+     * @param dag      编译后的 DAG（不可变）
+     * @param executor 用于执行节点的线程池
+     * @param tick     当前 tick 数（传递给执行上下文）
+     * @param tickCtx  tick 上下文（可为 null，如果不连接 barrier）
+     * @return TaskHandle 用于追踪完成状态
+     */
+    public @NotNull TaskHandle execute(
+            final @NotNull CompiledDag dag,
+            final @NotNull Executor executor,
+            final long tick,
+            final @Nullable TickContext tickCtx
+    ) {
         int nodeCount = dag.nodeCount();
         if (nodeCount == 0) {
+            if (tickCtx != null) {
+                tickCtx.complete();
+            }
             return TaskHandle.completed();
         }
 
         // 创建追踪句柄
         TaskHandle handle = new TaskHandle(nodeCount);
 
-        // 复制入度数组（执行时修改）
-        int[] remainingInDegrees = dag.copyInDegrees();
+        // 使用 DagExecutionState 替代 int[]，保证原子递减
+        DagExecutionState state = new DagExecutionState(dag);
 
-        // 初始就绪节点
-        IntList readyNodes = findReadyNodes(dag, remainingInDegrees);
+        // 注册到 tick barrier（如果提供了 tick context）
+        if (tickCtx != null) {
+            tickCtx.register();
+        }
+
+        // 初始就绪节点（入度为 0）
+        IntList readyNodes = findReadyNodes(dag, state);
 
         if (readyNodes.isEmpty()) {
-            // 所有节点都已就绪（不应该发生，因为 DAG 保证无环且至少有一个入度为0的节点）
             LOGGER.warn("DAG has {} nodes but no ready nodes (possible cycle)", nodeCount);
             handle.fail(new IllegalStateException("DAG has no ready nodes"));
+            if (tickCtx != null) {
+                tickCtx.reportFailure(new IllegalStateException("DAG has no ready nodes"));
+                tickCtx.complete();
+            }
             return handle;
         }
 
         // 提交所有就绪节点
         for (int nodeId : readyNodes) {
-            submitNode(dag, executor, handle, remainingInDegrees, nodeId, tick);
+            submitNode(dag, executor, handle, state, nodeId, tick, tickCtx);
         }
 
         return handle;
@@ -98,7 +146,7 @@ public final class DagExecutionEngine {
      *
      * <p>节点执行完成后，会自动：
      * <ol>
-     *   <li>递减所有后继节点的入度</li>
+     *   <li>递减所有后继节点的入度（原子操作）</li>
      *   <li>将新就绪的节点提交执行</li>
      *   <li>标记当前节点完成</li>
      * </ol>
@@ -107,16 +155,17 @@ public final class DagExecutionEngine {
             final CompiledDag dag,
             final Executor executor,
             final TaskHandle handle,
-            final int[] remainingInDegrees,
+            final DagExecutionState state,
             final int nodeId,
-            final long tick
+            final long tick,
+            final @Nullable TickContext tickCtx
     ) {
-        if (handle.isCancelled()) {
+        if (handle.isCancelled() || state.isCancelled()) {
             return; // 已取消，不再提交新节点
         }
 
         executor.execute(() -> {
-            if (handle.isCancelled()) {
+            if (handle.isCancelled() || state.isCancelled()) {
                 return; // 执行前再次检查取消状态
             }
 
@@ -128,33 +177,43 @@ public final class DagExecutionEngine {
                 dag.executor(nodeId).execute(ctx);
             } catch (Throwable t) {
                 LOGGER.error("Error executing DAG node {}", nodeId, t);
+                state.markFailed();
                 handle.fail(t);
+                if (tickCtx != null) {
+                    tickCtx.reportFailure(t);
+                }
                 return;
             }
 
-            // 节点完成，处理后继
+            // 节点完成，原子递减后继节点入度
             IntList successors = dag.successors(nodeId);
             for (int i = 0; i < successors.size(); i++) {
                 int succId = successors.getInt(i);
-                // 原子递减入度，确保线程安全
-                if (--remainingInDegrees[succId] == 0) {
+                // 原子递减入度 —— 多个 predecessor 可能同时完成
+                // 只有最后一个将入度降为 0 的线程才会提交该后继节点
+                if (state.decrementDependency(succId)) {
                     // 入度降为 0，提交执行
-                    submitNode(dag, executor, handle, remainingInDegrees, succId, tick);
+                    submitNode(dag, executor, handle, state, succId, tick, tickCtx);
                 }
             }
 
             // 标记完成
             handle.signalNodeComplete(nodeId);
+
+            // 所有节点完成时，完成 tick barrier
+            if (state.nodeCompleted() && tickCtx != null) {
+                tickCtx.complete();
+            }
         });
     }
 
     /**
      * 查找所有入度为 0 的节点。
      */
-    private @NotNull IntList findReadyNodes(final CompiledDag dag, final int[] inDegrees) {
+    private @NotNull IntList findReadyNodes(final CompiledDag dag, final DagExecutionState state) {
         IntList ready = new IntArrayList();
         for (int i = 0; i < dag.nodeCount(); i++) {
-            if (inDegrees[i] == 0) {
+            if (state.remainingDependencies(i) == 0) {
                 ready.add(i);
             }
         }
@@ -235,7 +294,19 @@ public final class DagExecutionEngine {
          */
         static TaskHandle completed() {
             TaskHandle handle = new TaskHandle(0);
+            // 空 DAG：allDone 已经完成（allOf 无参数）
             return handle;
+        }
+
+        /**
+         * 获取完成阶段 —— 非阻塞观察 DAG 完成状态。
+         *
+         * <p>DAG 完成必须可观察，不能 fire-and-forget。
+         *
+         * @return 完成阶段，在所有节点完成时完成
+         */
+        public @NotNull CompletionStage<Void> completion() {
+            return allDone;
         }
 
         /**
@@ -265,6 +336,16 @@ public final class DagExecutionEngine {
             // 取消所有未完成节点的 Future
             for (CompletableFuture<Void> future : nodeFutures) {
                 future.completeExceptionally(throwable);
+            }
+        }
+
+        /**
+         * 取消执行 —— 标记为已取消，阻止后续节点提交。
+         */
+        public void cancel() {
+            this.failure = new java.util.concurrent.CancellationException("DAG execution cancelled");
+            for (CompletableFuture<Void> future : nodeFutures) {
+                future.cancel(false);
             }
         }
 

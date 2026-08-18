@@ -3,6 +3,7 @@ package fun.bm.mili.lmili.thread.scheduler;
 import com.mojang.logging.LogUtils;
 import fun.bm.mili.lmili.thread.scheduler.api.*;
 import fun.bm.mili.lmili.thread.scheduler.execute.BlockingTaskIsolation;
+import fun.bm.mili.lmili.thread.scheduler.execute.SchedulerWorker;
 import fun.bm.mili.lmili.thread.scheduler.execute.VirtualThreadPool;
 import fun.bm.mili.lmili.thread.scheduler.execute.WorkStealingCoordinator;
 import fun.bm.mili.lmili.thread.scheduler.internal.DefaultBatchHandle;
@@ -69,6 +70,10 @@ public final class MiliSchedulerImpl implements MiliScheduler {
     // ---- 配置 ----
     private final MiliSchedulerConfig config;
 
+    // ---- Worker 线程（Phase B：Coordinator 成为唯一执行入口）----
+    private final Thread[] workerThreads;
+    private final SchedulerWorker[] workers;
+
     // ---- 状态 ----
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
     private final AtomicReference<ScheduledExecutorService> delayedScheduler = new AtomicReference<>();
@@ -97,6 +102,19 @@ public final class MiliSchedulerImpl implements MiliScheduler {
 
         LOGGER.info("[MiliScheduler] Initialized (pool={}, carrierThreads={}, maxBlocking={})",
                 config.poolName, config.carrierThreads, config.maxBlockingTasks);
+
+        // Phase B: 启动 SchedulerWorker 线程 —— 从 WorkStealingCoordinator 获取任务并执行
+        int workerCount = config.carrierThreads;
+        this.workers = new SchedulerWorker[workerCount];
+        this.workerThreads = new Thread[workerCount];
+        for (int i = 0; i < workerCount; i++) {
+            this.workers[i] = new SchedulerWorker(i, this.workStealingCoordinator);
+            this.workerThreads[i] = Thread.ofPlatform()
+                    .name(config.threadNamePrefix + "-Worker-" + i)
+                    .daemon(true)
+                    .start(this.workers[i]);
+        }
+        LOGGER.info("[MiliScheduler] Started {} scheduler workers", workerCount);
     }
 
     // ---- MiliScheduler 接口实现 ----
@@ -197,6 +215,19 @@ public final class MiliSchedulerImpl implements MiliScheduler {
             scheduler.shutdown();
         }
 
+        // Phase B: 停止 SchedulerWorker 线程
+        for (SchedulerWorker worker : workers) {
+            worker.shutdown();
+        }
+        // 等待 worker 线程退出
+        for (Thread thread : workerThreads) {
+            try {
+                thread.join(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
         // 停止 work-stealing coordinator
         workStealingCoordinator.shutdown();
 
@@ -222,13 +253,29 @@ public final class MiliSchedulerImpl implements MiliScheduler {
 
     /**
      * 提交区域任务到 work-stealing 队列。
+     *
+     * <p>Phase B 修复：所有实际执行任务必须经过 Coordinator。
+     * 不再同时提交到 VirtualThreadPool（旁路执行），而是只提交到 WorkStealingCoordinator，
+     * 由 SchedulerWorker 从 Coordinator 获取任务并执行。
      */
     private void submitRegionTask(@NotNull RegionTask task, @NotNull DefaultTaskHandle handle) {
-        // 包装任务以追踪完成状态
+        // 包装任务以追踪完成状态 —— 任务完成时通过 handle 报告
         RegionTask wrappedTask = new RegionTask() {
             @Override
             public void execute() throws Exception {
-                task.execute();
+                long startNanos = System.nanoTime();
+                try {
+                    task.execute();
+                    metrics.recordCompletion(System.nanoTime() - startNanos);
+                    metrics.recordRegionCompletion(task.regionId());
+                    handle.complete();
+                } catch (Throwable t) {
+                    metrics.recordFailure();
+                    handle.completeExceptionally(t);
+                    diagnostics.recordException("task_execution", t,
+                            java.util.Map.of("task", task.name(), "region", task.regionId()));
+                    throw t;
+                }
             }
 
             @Override
@@ -258,26 +305,8 @@ public final class MiliSchedulerImpl implements MiliScheduler {
             }
         };
 
-        // 提交到 work-stealing coordinator
+        // 只提交到 work-stealing coordinator —— 唯一执行入口
         workStealingCoordinator.submit(wrappedTask);
-
-        // 提交到 virtual thread pool 执行
-        virtualThreadPool.submit(() -> {
-            try {
-                // 从 coordinator 获取任务并执行
-                // 注意：这里简化处理，直接执行已包装的任务
-                long startNanos = System.nanoTime();
-                wrappedTask.execute();
-                metrics.recordCompletion(System.nanoTime() - startNanos);
-                metrics.recordRegionCompletion(task.regionId());
-                handle.complete();
-            } catch (Throwable t) {
-                metrics.recordFailure();
-                handle.completeExceptionally(t);
-                diagnostics.recordException("task_execution", t,
-                        java.util.Map.of("task", task.name(), "region", task.regionId()));
-            }
-        });
     }
 
     /**

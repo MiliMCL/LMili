@@ -25,6 +25,28 @@ public final class RegionTickContext {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    /**
+     * Region tick 状态 —— 防止 tick 重叠。
+     *
+     * <pre>
+     * IDLE
+     *  ↓
+     * TICKING
+     *  ↓
+     * DRAINING
+     *  ↓
+     * IDLE
+     * </pre>
+     */
+    public enum RegionTickState {
+        /** 空闲，可以开始新 tick */
+        IDLE,
+        /** 正在 tick */
+        TICKING,
+        /** 正在排空，等待完成 */
+        DRAINING
+    }
+
     public final long regionId;
     public final io.papermc.paper.threadedregions.ThreadedRegionizer
             .ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
@@ -34,6 +56,12 @@ public final class RegionTickContext {
     private volatile Phaser tickBarrier;
     private volatile long tickStartNanos;
     private volatile long lastTickDurationNanos;
+
+    /**
+     * Region tick 状态 —— 防止 tick 重叠。
+     * Tick N 未完成时，同一 Region 不能进入 Tick N+1。
+     */
+    private final AtomicReference<RegionTickState> tickState = new AtomicReference<>(RegionTickState.IDLE);
 
     // 统计计数器（外部可读）
     private final LongAdder totalTicksCompleted = new LongAdder();
@@ -65,6 +93,52 @@ public final class RegionTickContext {
         this.tickBarrier = new Phaser(parties);
         this.tickStartNanos = System.nanoTime();
         this.currentTick.incrementAndGet();
+    }
+
+    /**
+     * 尝试开始 tick —— 使用 CAS 防止 tick 重叠。
+     *
+     * <p>Tick N 未完成时，同一 Region 不能进入 Tick N+1。
+     *
+     * @param parties 需要到达的参与方数
+     * @return true 如果成功进入 TICKING 状态，false 如果已有 tick 在执行
+     */
+    public boolean tryBeginTick(final int parties) {
+        if (!tickState.compareAndSet(RegionTickState.IDLE, RegionTickState.TICKING)) {
+            return false; // 当前 Region 已经有 Tick 在执行
+        }
+        this.tickBarrier = new Phaser(parties);
+        this.tickStartNanos = System.nanoTime();
+        this.currentTick.incrementAndGet();
+        return true;
+    }
+
+    /**
+     * 标记 tick 进入排空阶段。
+     */
+    public void beginDraining() {
+        tickState.set(RegionTickState.DRAINING);
+    }
+
+    /**
+     * 完成 tick —— 回到 IDLE 状态。
+     */
+    public void finishTick() {
+        tickState.set(RegionTickState.IDLE);
+    }
+
+    /**
+     * 检查当前是否正在 tick。
+     */
+    public boolean isTicking() {
+        return tickState.get() != RegionTickState.IDLE;
+    }
+
+    /**
+     * 获取当前 region tick 状态。
+     */
+    public RegionTickState getTickState() {
+        return tickState.get();
     }
 
     /**
@@ -106,6 +180,9 @@ public final class RegionTickContext {
         this.totalTicksCompleted.increment();
         this.totalTickTimeNanos.add(elapsed);
         this.maxTickDurationNanos.accumulateAndGet(elapsed, Math::max);
+
+        // 回到 IDLE 状态，允许下一 tick
+        finishTick();
 
         if (elapsed / 1_000_000 > SLOW_TICK_WARNING_MS) {
             LOGGER.warn("[RegionTickContext] Slow tick in region #{}: {}ms (chunks={})",

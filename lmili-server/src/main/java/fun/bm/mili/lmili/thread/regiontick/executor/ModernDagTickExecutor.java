@@ -6,15 +6,19 @@ import fun.bm.mili.lmili.thread.regiontick.RegionTickSlice;
 import fun.bm.mili.lmili.thread.regiontick.RegionTickWorker;
 import fun.bm.mili.lmili.thread.regiontick.dag.CompiledDag;
 import fun.bm.mili.lmili.thread.regiontick.dag.SystemGraph;
+import fun.bm.mili.lmili.thread.scheduler.tick.TickContext;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 
 /**
@@ -157,20 +161,57 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
             final @NotNull RegionTickSlice slice,
             final @NotNull RegionTickContext context
     ) {
+        executeSliceAsync(worker, slice, context, null);
+    }
+
+    /**
+     * 异步执行 slice 并返回完成阶段。
+     *
+     * <p>这是 Phase A 的核心修复：DAG 完成必须可观察，不能 fire-and-forget。
+     * 调用者通过返回的 {@link CompletionStage} 观察 DAG 完成状态。
+     *
+     * <p>当提供 {@link TickContext} 时，DAG 完成会自动连接到 tick barrier：
+     * <pre>
+     * DAG execute()
+     *     ↓
+     * TaskHandle
+     *     ↓
+     * completion
+     *     ↓
+     * TickBarrier.complete()
+     * </pre>
+     *
+     * @param worker  执行 worker
+     * @param slice   tick 切片
+     * @param context region tick 上下文
+     * @param tickCtx tick 上下文（可为 null）
+     * @return 完成阶段，在 DAG 所有节点完成时完成
+     */
+    public @NotNull CompletionStage<Void> executeSliceAsync(
+            final @NotNull RegionTickWorker worker,
+            final @NotNull RegionTickSlice slice,
+            final @NotNull RegionTickContext context,
+            final @Nullable TickContext tickCtx
+    ) {
         if (systemGraph.systemCount() == 0) {
             fallbackExecutor.executeSlice(worker, slice, context);
-            return;
+            return CompletableFuture.completedFuture(null);
         }
 
         // 获取编译后的 DAG（带缓存）
         CompiledDag dag = getOrCompileDag();
+        if (dag == null) {
+            fallbackExecutor.executeSlice(worker, slice, context);
+            return CompletableFuture.completedFuture(null);
+        }
 
-        // 使用新引擎执行
+        // 使用新引擎执行，连接 tick barrier
         DagExecutionEngine engine = new DagExecutionEngine();
-        DagExecutionEngine.TaskHandle handle = engine.execute(dag, nodeExecutor, context.getCurrentTick());
+        DagExecutionEngine.TaskHandle handle = engine.execute(
+                dag, nodeExecutor, context.getCurrentTick(), tickCtx);
 
-        // 注意：这里不等待完成（非阻塞），如果需要等待可以调用 handle.await()
-        // 在 Folia 的 region tick 模型中，通常不需要等待，因为 scheduler 会管理执行时间
+        // 返回完成阶段 —— DAG 完成必须可观察
+        return handle.completion();
     }
 
     /**
