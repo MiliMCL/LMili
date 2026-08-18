@@ -19,7 +19,7 @@ package org.leavesmc.leaves.replay;
 
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import com.mojang.authlib.GameProfile;
-import fun.bm.mili.utils.RandomProfilePool;
+import fun.bm.mili.utils.player.RandomProfilePool;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;

@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.portal;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;

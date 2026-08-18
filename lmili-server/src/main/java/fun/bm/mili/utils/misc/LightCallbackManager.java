@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.misc;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;

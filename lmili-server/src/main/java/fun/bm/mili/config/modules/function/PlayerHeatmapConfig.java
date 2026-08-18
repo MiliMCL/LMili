@@ -2,7 +2,7 @@ package fun.bm.mili.config.modules.function;
 
 import fun.bm.mili.config.TomlConfigData;
 import fun.bm.mili.command.HeatmapCommand;
-import fun.bm.mili.utils.PlayerHeatmap;
+import fun.bm.mili.utils.player.PlayerHeatmap;
 import fun.bm.mili.lmili.config.IConfigModule;
 import fun.bm.mili.lmili.config.flags.ConfigClassInfo;
 import fun.bm.mili.lmili.config.flags.ConfigInfo;

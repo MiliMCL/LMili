@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.region;
 
 import fun.bm.mili.config.modules.optimizations.DynamicViewDistanceConfig;
 import org.bukkit.Bukkit;

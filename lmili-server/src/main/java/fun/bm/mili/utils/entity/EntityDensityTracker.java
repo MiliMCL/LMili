@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.entity;
 
 import org.bukkit.Bukkit;
 import org.bukkit.World;

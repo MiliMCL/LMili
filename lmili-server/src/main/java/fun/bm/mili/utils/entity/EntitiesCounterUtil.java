@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.entity;
 
 import ca.spottedleaf.moonrise.common.list.ReferenceList;
 import ca.spottedleaf.moonrise.common.misc.PositionCountingAreaMap;

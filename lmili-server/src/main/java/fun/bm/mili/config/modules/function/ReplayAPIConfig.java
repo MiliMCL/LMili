@@ -1,7 +1,7 @@
 package fun.bm.mili.config.modules.function;
 
 import fun.bm.mili.config.TomlConfigData;
-import fun.bm.mili.utils.RandomProfilePool;
+import fun.bm.mili.utils.player.RandomProfilePool;
 import fun.bm.mili.lmili.config.IConfigModule;
 import fun.bm.mili.lmili.config.flags.ConfigClassInfo;
 import fun.bm.mili.lmili.config.flags.ConfigInfo;

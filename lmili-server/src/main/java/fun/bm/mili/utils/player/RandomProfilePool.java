@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.player;
 
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;

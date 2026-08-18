@@ -820,7 +820,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
             io.papermc.paper.threadedregions.RegionizedWorldData data = this.getCurrentWorldData();
             if (data != null && data.underGlobalEntitiesCounter) {
-                fun.bm.mili.utils.EntitiesCounterUtil.tick(this, data.uniqueId, (ca.spottedleaf.moonrise.common.list.ReferenceList<Entity>) data.getLoadedEntities(), data.spawnChunkTracker);
+                fun.bm.mili.utils.entity.EntitiesCounterUtil.tick(this, data.uniqueId, (ca.spottedleaf.moonrise.common.list.ReferenceList<Entity>) data.getLoadedEntities(), data.spawnChunkTracker);
             }
         }
         // Mili end - Global Entities Counter
@@ -828,7 +828,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         if (fun.bm.mili.config.modules.experiment.CrossRegionHelperConfig.enabled) {
             io.papermc.paper.threadedregions.RegionizedWorldData data = this.getCurrentWorldData();
             if (data != null) {
-                fun.bm.mili.utils.CrossRegionHelper.onRegionTick(this, data);
+                fun.bm.mili.utils.misc.CrossRegionHelper.onRegionTick(this, data);
             }
         }
         // Mili end - Cross Region Helper

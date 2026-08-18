@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.performance;
 
 import org.bukkit.scheduler.BukkitRunnable;
 

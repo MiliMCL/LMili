@@ -72,7 +72,7 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
         this.keepAlive = cookie.keepAlive();
         // Paper end
         this.lastKeepAliveResponse = this.keepAlive.lastKeepAliveTx; // Mili - async keepalive
-        fun.bm.mili.utils.AsyncKeepaliveManager.register(this); // Mili - async keepalive
+        fun.bm.mili.utils.network.AsyncKeepaliveManager.register(this); // Mili - async keepalive
     }
 
     // Paper start - configuration phase API
@@ -90,7 +90,7 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
 
     @Override
     public void onDisconnect(final DisconnectionDetails details) {
-        fun.bm.mili.utils.AsyncKeepaliveManager.unregister(this); // Mili - async keepalive, 避免 ACTIVE_LISTENERS 内存泄漏
+        fun.bm.mili.utils.network.AsyncKeepaliveManager.unregister(this); // Mili - async keepalive, 避免 ACTIVE_LISTENERS 内存泄漏
         if (this.isSingleplayerOwner()) {
             LOGGER.info("Stopping singleplayer server as player logged out");
             this.server.halt(false);

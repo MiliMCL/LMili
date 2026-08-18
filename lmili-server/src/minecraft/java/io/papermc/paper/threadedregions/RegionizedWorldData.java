@@ -511,7 +511,7 @@ public final class RegionizedWorldData {
 
         // Mili start - Global Entities Counter
         if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
-            uniqueId = fun.bm.mili.utils.EntitiesCounterUtil.generateUniqueId();
+            uniqueId = fun.bm.mili.utils.entity.EntitiesCounterUtil.generateUniqueId();
             underGlobalEntitiesCounter = true;
         }
         // Mili end - Global Entities Counter

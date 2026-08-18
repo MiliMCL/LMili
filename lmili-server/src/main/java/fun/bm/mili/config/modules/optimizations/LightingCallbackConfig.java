@@ -1,7 +1,7 @@
 package fun.bm.mili.config.modules.optimizations;
 
 import fun.bm.mili.config.TomlConfigData;
-import fun.bm.mili.utils.LightCallbackManager;
+import fun.bm.mili.utils.misc.LightCallbackManager;
 import fun.bm.mili.lmili.config.IConfigModule;
 import fun.bm.mili.lmili.config.flags.ConfigClassInfo;
 import fun.bm.mili.lmili.config.flags.ConfigInfo;

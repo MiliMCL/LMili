@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.portal;
 
 import fun.bm.mili.config.modules.optimizations.CrossDimensionTeleportQueueConfig;
 import net.minecraft.server.MinecraftServer;

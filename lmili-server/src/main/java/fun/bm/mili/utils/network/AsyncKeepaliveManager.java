@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.network;
 
 import fun.bm.mili.config.modules.function.AsyncKeepaliveConfig;
 import net.minecraft.network.Connection;

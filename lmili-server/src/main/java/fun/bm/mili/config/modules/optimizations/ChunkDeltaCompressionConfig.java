@@ -1,7 +1,7 @@
 package fun.bm.mili.config.modules.optimizations;
 
 import fun.bm.mili.config.TomlConfigData;
-import fun.bm.mili.utils.ChunkDeltaCompressor;
+import fun.bm.mili.utils.chunk.ChunkDeltaCompressor;
 import fun.bm.mili.lmili.config.IConfigModule;
 import fun.bm.mili.lmili.config.flags.ConfigClassInfo;
 import fun.bm.mili.lmili.config.flags.ConfigInfo;

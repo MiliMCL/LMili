@@ -1,7 +1,7 @@
 package fun.bm.mili.villager;
 
 import fun.bm.mili.config.modules.optimizations.VillagerOptimizerConfig;
-import fun.bm.mili.utils.TPSTracker;
+import fun.bm.mili.utils.performance.TPSTracker;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.*;
 import org.bukkit.entity.Entity;

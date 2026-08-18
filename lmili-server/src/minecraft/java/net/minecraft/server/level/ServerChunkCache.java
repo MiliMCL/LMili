@@ -521,7 +521,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
             if (regionizedWorldData != null) {
                 if (regionizedWorldData.underGlobalEntitiesCounter) {
                     if (regionizedWorldData.getLocalPlayers().isEmpty()) {
-                        fun.bm.mili.utils.EntitiesCounterUtil.onWorldDataUnload(level, regionizedWorldData.uniqueId);
+                        fun.bm.mili.utils.entity.EntitiesCounterUtil.onWorldDataUnload(level, regionizedWorldData.uniqueId);
                         regionizedWorldData.underGlobalEntitiesCounter = false;
                     }
                 } else {
@@ -598,7 +598,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
         } else {
             // Mili start - Global Entities Counter
             if (fun.bm.mili.config.modules.experiment.GlobalEntitiesCounter.enabled) {
-                spawnCookie = fun.bm.mili.utils.EntitiesCounterUtil.runRemainingTasks(level, regionizedWorldData.getLoadedEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
+                spawnCookie = fun.bm.mili.utils.entity.EntitiesCounterUtil.runRemainingTasks(level, regionizedWorldData.getLoadedEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
             } else {
             spawnCookie = NaturalSpawner.createState(chunkCount, regionizedWorldData.getLoadedEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false); // Folia - region threading - note: function only cares about loaded entities, doesn't need all
             }

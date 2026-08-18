@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.chunk;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;

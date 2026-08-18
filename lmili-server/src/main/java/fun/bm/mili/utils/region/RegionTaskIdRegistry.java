@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.region;
 
 import com.mojang.logging.LogUtils;
 import org.jetbrains.annotations.NotNull;

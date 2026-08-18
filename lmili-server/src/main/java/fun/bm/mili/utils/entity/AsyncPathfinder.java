@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.entity;
 
 import fun.bm.mili.config.modules.optimizations.AsyncPathfindingConfig;
 import net.minecraft.core.BlockPos;

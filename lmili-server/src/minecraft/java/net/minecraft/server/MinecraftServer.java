@@ -1771,7 +1771,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
         // Mili start - dynamic view distance manager tick
         if (region != null && io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() % 20 == 0) {
             try {
-                fun.bm.mili.utils.DynamicViewDistanceManager.tick();
+                fun.bm.mili.utils.region.DynamicViewDistanceManager.tick();
             } catch (Exception e) {
                 LOGGER.warn("Dynamic view distance manager tick failed", e);
             }

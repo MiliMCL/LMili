@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.performance;
 
 import com.mojang.logging.LogUtils;
 import fun.bm.mili.chunk.MiliChunkSystem;

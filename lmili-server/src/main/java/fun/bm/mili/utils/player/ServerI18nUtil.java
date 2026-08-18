@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.player;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;

@@ -1,4 +1,4 @@
-package fun.bm.mili.utils;
+package fun.bm.mili.utils.misc;
 
 import fun.bm.mili.config.modules.experiment.CrossRegionHelperConfig;
 import io.papermc.paper.threadedregions.RegionizedWorldData;

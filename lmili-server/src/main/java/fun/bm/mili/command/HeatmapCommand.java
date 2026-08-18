@@ -1,7 +1,7 @@
 package fun.bm.mili.command;
 
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
-import fun.bm.mili.utils.PlayerHeatmap;
+import fun.bm.mili.utils.player.PlayerHeatmap;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
