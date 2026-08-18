@@ -14,35 +14,20 @@ import org.slf4j.Logger;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * RegionTickDispatcher 适配器 —— 将现有 RegionTickDispatcher 桥接到新调度系统。
  *
- * <p>此适配器实现了渐进式迁移策略：
- * <ul>
- *   <li>当 {@code useNewScheduler} 为 true 时，tick 任务通过新调度系统执行</li>
- *   <li>当 {@code useNewScheduler} 为 false 时，回退到原有执行路径</li>
- * </ul>
- *
- * <h3>迁移路径</h3>
- * <pre>
- * Phase 1: useNewScheduler=false → 全部走旧路径（默认，稳定）
- * Phase 2: useNewScheduler=true  → 新路径处理 chunk tick，旧路径处理 entity tick
- * Phase 3: 全部走新路径，旧代码标记为 @Deprecated
- * Phase 4: 移除旧代码
- * </pre>
+ * <p>此适配器现在始终使用新调度系统，旧版调度路径已被移除。
  *
  * <h3>使用方式</h3>
  * <pre>{@code
  * // 在 RegionTickDispatcher.init() 中
- * if (RegionTickPoolConfig.useNewScheduler) {
- *     MiliScheduler scheduler = MiliSchedulerBuilder.create("region-scheduler")
- *         .carrierThreads(Runtime.getRuntime().availableProcessors())
- *         .build();
- *     adapter = new RegionTickDispatcherAdapter(scheduler);
- * }
+ * MiliScheduler scheduler = MiliSchedulerBuilder.create("region-scheduler")
+ *     .carrierThreads(Runtime.getRuntime().availableProcessors())
+ *     .build();
+ * adapter = new RegionTickDispatcherAdapter(scheduler);
  * }</pre>
  */
 public final class RegionTickDispatcherAdapter {
@@ -52,23 +37,19 @@ public final class RegionTickDispatcherAdapter {
     /** 新调度器实例 */
     private final MiliScheduler scheduler;
 
-    /** 是否启用新调度路径 */
-    private final AtomicBoolean useNewScheduler;
-
-    /** 旧版 dispatcher 引用（用于回退） */
+    /** 旧版 dispatcher 引用（用于 entity tick） */
     private final RegionTickDispatcher legacyDispatcher;
 
     /**
      * 创建适配器。
      *
      * @param scheduler 新调度器实例
-     * @param legacyDispatcher 旧版 dispatcher（用于回退和 entity tick）
+     * @param legacyDispatcher 旧版 dispatcher（用于 entity tick）
      */
     public RegionTickDispatcherAdapter(@NotNull MiliScheduler scheduler,
                                         @NotNull RegionTickDispatcher legacyDispatcher) {
         this.scheduler = scheduler;
         this.legacyDispatcher = legacyDispatcher;
-        this.useNewScheduler = new AtomicBoolean(false); // 默认关闭，灰度启用
 
         LOGGER.info("[RegionTickDispatcherAdapter] Created (new scheduler: {})",
                 scheduler.getClass().getSimpleName());
@@ -95,30 +76,7 @@ public final class RegionTickDispatcherAdapter {
     }
 
     /**
-     * 启用/禁用新调度路径。
-     *
-     * <p>此方法支持运行时切换，无需重启服务器。
-     *
-     * @param useNew 是否使用新路径
-     */
-    public void setUseNewScheduler(boolean useNew) {
-        boolean old = this.useNewScheduler.getAndSet(useNew);
-        if (old != useNew) {
-            LOGGER.info("[RegionTickDispatcherAdapter] New scheduler path: {} → {}",
-                    old ? "enabled" : "disabled",
-                    useNew ? "enabled" : "disabled");
-        }
-    }
-
-    /**
-     * 检查是否使用新调度路径。
-     */
-    public boolean isUsingNewScheduler() {
-        return useNewScheduler.get();
-    }
-
-    /**
-     * 分派 region tick —— 根据配置选择新旧路径。
+     * 分派 region tick —— 始终使用新调度路径。
      *
      * <p>这是适配器的主入口，替代 {@link RegionTickDispatcher#dispatchTick(RegionTickContext, long)}。
      *
@@ -126,12 +84,7 @@ public final class RegionTickDispatcherAdapter {
      * @param tickCount 当前 tick 数
      */
     public void dispatchTick(@NotNull RegionTickContext context, long tickCount) {
-        if (useNewScheduler.get()) {
-            dispatchTickNew(context, tickCount);
-        } else {
-            // 回退到旧路径
-            legacyDispatcher.dispatchTick(context, tickCount);
-        }
+        dispatchTickNew(context, tickCount);
     }
 
     /**
@@ -256,7 +209,7 @@ public final class RegionTickDispatcherAdapter {
      */
     public java.util.Map<String, Object> getStats() {
         java.util.Map<String, Object> stats = new java.util.LinkedHashMap<>();
-        stats.put("useNewScheduler", useNewScheduler.get());
+        stats.put("schedulerType", "MiliScheduler");
         stats.put("legacyDispatcher", legacyDispatcher.getStats());
         if (scheduler instanceof MiliSchedulerImpl) {
             MiliSchedulerImpl impl = (MiliSchedulerImpl) scheduler;

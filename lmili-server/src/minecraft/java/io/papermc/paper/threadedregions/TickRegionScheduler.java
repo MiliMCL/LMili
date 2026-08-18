@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
-public final class TickRegionScheduler {
+public class TickRegionScheduler {
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final ThreadMXBean THREAD_MX_BEAN = ManagementFactory.getThreadMXBean();
@@ -49,6 +49,10 @@ public final class TickRegionScheduler {
     }
     // Folia end - watchdog
 
+    // Mili start - support new scheduler
+    private final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler;
+    // Mili end
+
     private final Scheduler scheduler;
 
     public static enum SchedulerType {
@@ -56,7 +60,18 @@ public final class TickRegionScheduler {
         WORK_STEALING;
     }
 
+    /**
+     * Mili 构造器 —— 使用新的 MiliTickRegionScheduler 替代 Folia 的 Scheduler。
+     *
+     * @param miliScheduler Mili 调度器实例
+     */
+    protected TickRegionScheduler(final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler) {
+        this.miliScheduler = miliScheduler;
+        this.scheduler = null; // 不使用 Folia 的 Scheduler
+    }
+
     public TickRegionScheduler(final SchedulerType schedulerType, final int initialThreads) {
+        this.miliScheduler = null; // 使用 Folia 的 Scheduler
         final ThreadFactory threadFactory = new ThreadFactory() {
             private final AtomicInteger idGenerator = new AtomicInteger();
             // on Linux, thread affinity is copied from the parent thread - but we do not want that, so we need
@@ -110,12 +125,24 @@ public final class TickRegionScheduler {
     }
 
     public void start() {
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            this.miliScheduler.start();
+            return;
+        }
+        // Mili end
         if (this.scheduler instanceof EDFSchedulerThreadPool edfSchedulerThreadPool) {
             edfSchedulerThreadPool.start();
         }
     }
 
     public void setThreads(final int threads) {
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            this.miliScheduler.setThreads(threads);
+            return;
+        }
+        // Mili end
         if (this.scheduler instanceof StealingScheduledThreadPool stealingScheduledThreadPool) {
             final Int2IntLinkedOpenHashMap threadAllocation;
             final long stealThresholdNS = TimeUnit.MILLISECONDS.toNanos(3L);
@@ -144,11 +171,23 @@ public final class TickRegionScheduler {
     }
 
     public int getTotalThreadCount() {
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            return this.miliScheduler.getTotalThreadCount();
+        }
+        // Mili end
         return this.scheduler.getAliveThreads().length;
     }
 
     private static void setTickingRegion(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
         final Thread currThread = Thread.currentThread();
+        // Mili start - support MiliTickThread
+        if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread miliThread) {
+            // MiliTickThread 的 region 上下文由 MiliTickRegionScheduler 管理
+            // 这里不需要重复设置，直接返回
+            return;
+        }
+        // Mili end
         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
             throw new IllegalStateException("Must be tick thread runner");
         }
@@ -173,6 +212,12 @@ public final class TickRegionScheduler {
 
     private static void setTickTask(final SchedulableTick task) {
         final Thread currThread = Thread.currentThread();
+        // Mili start - support MiliTickThread
+        if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread) {
+            // MiliTickThread 不需要设置 tickTask
+            return;
+        }
+        // Mili end
         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
             throw new IllegalStateException("Must be tick thread runner");
         }
@@ -191,10 +236,15 @@ public final class TickRegionScheduler {
      */
     public static ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> getCurrentRegion() {
         final Thread currThread = Thread.currentThread();
-        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
-            return RegionShutdownThread.getRegion();
+        if (currThread instanceof TickThreadRunner tickThreadRunner) {
+            return tickThreadRunner.currentTickingRegion;
         }
-        return tickThreadRunner.currentTickingRegion;
+        // Mili start - support MiliTickThread for new scheduler
+        if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread miliThread) {
+            return miliThread.currentTickingRegion;
+        }
+        // Mili end
+        return RegionShutdownThread.getRegion();
     }
 
     /**
@@ -204,16 +254,20 @@ public final class TickRegionScheduler {
      */
     public static RegionizedWorldData getCurrentRegionizedWorldData() {
         final Thread currThread = Thread.currentThread();
-        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
-            // Mili start - fallback for virtual threads in RegionTickPool
-            final io.papermc.paper.threadedregions.RegionizedWorldData miliFallback = fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent();
-            if (miliFallback != null) {
-                return miliFallback;
-            }
-            // Mili end
-            return RegionShutdownThread.getWorldData();
+        if (currThread instanceof TickThreadRunner tickThreadRunner) {
+            return tickThreadRunner.currentTickingWorldRegionizedData;
         }
-        return tickThreadRunner.currentTickingWorldRegionizedData;
+        // Mili start - support MiliTickThread for new scheduler
+        if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread miliThread) {
+            return miliThread.currentTickingWorldRegionizedData;
+        }
+        // fallback for virtual threads in RegionTickPool
+        final io.papermc.paper.threadedregions.RegionizedWorldData miliFallback = fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent();
+        if (miliFallback != null) {
+            return miliFallback;
+        }
+        // Mili end
+        return RegionShutdownThread.getWorldData();
     }
 
     /**
@@ -244,6 +298,13 @@ public final class TickRegionScheduler {
      * @throws IllegalStateException If the region is already scheduled or is ticking
      */
     public void scheduleRegion(final RegionScheduleHandle region) {
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            region.scheduler = this;
+            this.miliScheduler.scheduleRegion(region);
+            return;
+        }
+        // Mili end
         region.scheduler = this;
         this.scheduler.schedule(region);
     }
@@ -253,12 +314,27 @@ public final class TickRegionScheduler {
      * execution, then it will be cancelled after.
      */
     public void descheduleRegion(final RegionScheduleHandle region) {
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            this.miliScheduler.descheduleRegion(region);
+            return;
+        }
+        // Mili end
         // To avoid acquiring any of the locks the scheduler may be using, we
         // simply cancel the next action.
         region.markNonSchedulable();
     }
 
     public boolean halt(final boolean sync, final long maxWaitNS) {
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            this.miliScheduler.halt();
+            if (!sync) {
+                return this.miliScheduler.isHalted();
+            }
+            return this.miliScheduler.join(maxWaitNS == 0L ? 0L : TimeUnit.NANOSECONDS.toMillis(maxWaitNS));
+        }
+        // Mili end
         this.scheduler.halt();
         if (!sync) {
             return this.scheduler.getAliveThreads().length == 0;
@@ -268,6 +344,12 @@ public final class TickRegionScheduler {
     }
 
     void dumpAliveThreadTraces(final String reason) {
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            this.miliScheduler.dumpAliveThreadTraces(reason);
+            return;
+        }
+        // Mili end
         for (final Thread thread : this.scheduler.getAliveThreads()) {
             if (thread.isAlive()) {
                 TraceUtil.dumpTraceForThread(thread, reason);
@@ -276,6 +358,12 @@ public final class TickRegionScheduler {
     }
 
     public void setHasTasks(final RegionScheduleHandle region) {
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            this.miliScheduler.setHasTasks(region);
+            return;
+        }
+        // Mili end
         this.scheduler.notifyTasks(region);
     }
 
@@ -284,7 +372,13 @@ public final class TickRegionScheduler {
 
         // prevent further ticks from occurring
         // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
-        this.scheduler.halt();
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            this.miliScheduler.halt();
+        } else {
+            this.scheduler.halt();
+        }
+        // Mili end
 
         MinecraftServer.getServer().stopServer();
     }
@@ -294,7 +388,13 @@ public final class TickRegionScheduler {
 
         // prevent further ticks from occurring
         // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
-        this.scheduler.halt();
+        // Mili start - delegate to new scheduler
+        if (this.miliScheduler != null) {
+            this.miliScheduler.halt();
+        } else {
+            this.scheduler.halt();
+        }
+        // Mili end
 
         final ChunkPos center = handle.region == null ? null : handle.region.region.getCenterChunk();
         final ServerLevel world = handle.region == null ? null : handle.region.world;

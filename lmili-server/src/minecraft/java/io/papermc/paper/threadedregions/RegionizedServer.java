@@ -133,9 +133,22 @@ public final class RegionizedServer {
         return region.getData().getCurrentTick();
     }
 
+    // Mili start - support new scheduler for global tick thread check
+    private static final ThreadLocal<Boolean> GLOBAL_TICK_ACTIVE = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
     public static boolean isGlobalTickThread() {
-        return INSTANCE.tickHandle == TickRegionScheduler.getCurrentTickingTask();
+        // Check Folia's mechanism first
+        if (INSTANCE.tickHandle == TickRegionScheduler.getCurrentTickingTask()) {
+            return true;
+        }
+        // Check Mili's mechanism
+        return GLOBAL_TICK_ACTIVE.get();
     }
+
+    static void setGlobalTickActive(final boolean active) {
+        GLOBAL_TICK_ACTIVE.set(active);
+    }
+    // Mili end
 
     public static void ensureGlobalTickThread(final String reason) {
         if (!isGlobalTickThread()) {
@@ -181,14 +194,23 @@ public final class RegionizedServer {
 
         @Override
         protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
-            // Mili start - diagnostic: log global-region (id==0) tick invocations so we can tell
-            // whether the global tick thread is being starved when the dispatcher is enabled.
-            if (tickCount % 100L == 0L) {
-                LOGGER.info("[MILI-DIAG] GlobalTickTickHandle: tick #{} on {}", tickCount, Thread.currentThread().getName());
+            // Mili start - set global tick active flag for new scheduler
+            setGlobalTickActive(true);
+            try {
+                // Mili end
+                // Mili start - diagnostic: log global-region (id==0) tick invocations so we can tell
+                // whether the global tick thread is being starved when the dispatcher is enabled.
+                if (tickCount % 100L == 0L) {
+                    LOGGER.info("[MILI-DIAG] GlobalTickTickHandle: tick #{} on {}", tickCount, Thread.currentThread().getName());
+                }
+                // Mili end
+                this.drainTasks();
+                this.server.globalTick(tickCount);
+            // Mili start - set global tick active flag for new scheduler
+            } finally {
+                setGlobalTickActive(false);
             }
             // Mili end
-            this.drainTasks();
-            this.server.globalTick(tickCount);
         }
 
         private void drainTasks() {

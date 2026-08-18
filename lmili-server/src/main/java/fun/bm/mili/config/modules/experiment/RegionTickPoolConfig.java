@@ -11,11 +11,11 @@ public class RegionTickPoolConfig implements IConfigModule {
 
     @HotReloadUnsupported
     @ConfigInfo(name = "enabled", comments = """
-            启用 RegionTickPool —— Mili 独立并行 tick 框架。
-            将每个 region 的 tick 工作拆分给一批 worker 线程共同执行，
-            替代 Folia 原有的一对一线程模型。
+            启用 RegionTickPool —— Mili 独立并行 chunk tick 框架。
+            将每个 region 的 chunk tick 工作拆分给一批 worker 线程共同执行，
+            替代 Folia 原有的串行 chunk tick 模型。
             启用后 RegionBalancer 将自动禁用。
-            注意：这是实验性功能，请在充分测试后用于生产环境""")
+            注意：需要充分测试后才建议用于生产环境""")
     public static boolean enabled = false;
 
     @HotReloadUnsupported
@@ -64,14 +64,16 @@ public class RegionTickPoolConfig implements IConfigModule {
             默认 4000ms。""")
     public static long virtualThreadTimeoutMs = 4000;
 
-    @HotReloadUnsupported
-    @ConfigInfo(name = "use-new-scheduler", comments = """
-            启用新调度系统（重构版）。
-            启用后将使用 MiliScheduler + WorkStealingCoordinator 新架构替代原有调度逻辑。
-            新架构优势：非阻塞 DAG 执行、work-stealing 负载均衡、阻塞操作隔离。
-            此为灰度开关，启用前请充分测试。
-            默认 false（使用旧版稳定实现）。""")
-    public static boolean useNewScheduler = false;
+    // Mili start - new scheduler is now always active, flag removed
+    // @HotReloadUnsupported
+    // @ConfigInfo(name = "use-new-scheduler", comments = """
+    //         启用新调度系统（重构版）。
+    //         启用后将使用 MiliScheduler + WorkStealingCoordinator 新架构替代原有调度逻辑。
+    //         新架构优势：非阻塞 DAG 执行、work-stealing 负载均衡、阻塞操作隔离。
+    //         此为灰度开关，启用前请充分测试。
+    //         默认 false（使用旧版稳定实现）。""")
+    // public static boolean useNewScheduler = false;
+    // Mili end - new scheduler is now always active
 
     public static int getWorkerCount() {
         int cores = Runtime.getRuntime().availableProcessors();

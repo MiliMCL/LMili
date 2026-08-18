@@ -70,8 +70,12 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
         gridExponent = Math.max(0, gridExponent);
         gridExponent = Math.min(31, gridExponent);
         regionShift = gridExponent;
-        scheduler = new TickRegionScheduler(config.scheduler, tickThreads);
-        LOGGER.info("Initialised " + config.scheduler + " Folia scheduler with initial " + tickThreads + " target thread(s)");
+        // Mili start - use new MiliTickRegionScheduler instead of Folia's scheduler
+        final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler =
+                new fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler(tickThreads);
+        scheduler = new TickRegionScheduler(miliScheduler);
+        LOGGER.info("Initialised MiliTickRegionScheduler with " + tickThreads + " worker thread(s)");
+        // Mili end
     }
 
     public static void start() {
@@ -81,7 +85,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
         started = true;
         scheduler.setThreads(getTickThreads(GlobalConfiguration.get().threadedRegions));
         scheduler.start();
-        // Mili start - init RegionTickPool after Folia scheduler is started
+        // Mili start - init RegionTickPool after scheduler is started
         try {
             fun.bm.mili.lmili.thread.regiontick.RegionTickBootstrap.init();
         } catch (Throwable throwable) {

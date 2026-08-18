@@ -8,43 +8,37 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
 import java.util.Objects;
-import java.util.concurrent.Phaser;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Region tick 上下文 —— 管理单个 region 的 tick 状态、统计和屏障同步。
+ * Region tick 上下文 —— 管理单个 region 的 tick 状态、统计和同步。
  *
- * <p>线程安全：本类的状态由 region tick 线程拥有，部分统计字段使用原子类型供外部读取。
+ * <p>线程安全：使用 CAS 状态机防止 tick 重叠。
+ *
+ * <h3>状态机</h3>
+ * <pre>
+ * IDLE ──(tryBeginTick)──▶ TICKING ──(allSlicesDone/endTick)──▶ IDLE
+ *                              │
+ *                              └──(timeout/error)──▶ IDLE (强制恢复)
+ * </pre>
  */
 public final class RegionTickContext {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
-     * Region tick 状态 —— 防止 tick 重叠。
-     *
-     * <pre>
-     * IDLE
-     *  ↓
-     * TICKING
-     *  ↓
-     * DRAINING
-     *  ↓
-     * IDLE
-     * </pre>
+     * Region tick 状态。
      */
     public enum RegionTickState {
         /** 空闲，可以开始新 tick */
         IDLE,
-        /** 正在 tick */
-        TICKING,
-        /** 正在排空，等待完成 */
-        DRAINING
+        /** 正在 tick，slice 正在执行 */
+        TICKING
     }
 
     public final long regionId;
@@ -52,25 +46,26 @@ public final class RegionTickContext {
             .ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
 
     private final AtomicReference<LongList> ownedChunks = new AtomicReference<>(new LongArrayList());
-    private final AtomicInteger workerCount = new AtomicInteger(0);
-    private volatile Phaser tickBarrier;
+    private final AtomicInteger expectedSlices = new AtomicInteger(0);
+    private final AtomicInteger completedSlices = new AtomicInteger(0);
+    private volatile CountDownLatch tickLatch;
     private volatile long tickStartNanos;
     private volatile long lastTickDurationNanos;
 
     /**
-     * Region tick 状态 —— 防止 tick 重叠。
-     * Tick N 未完成时，同一 Region 不能进入 Tick N+1。
+     * Region tick 状态 —— 使用 CAS 防止 tick 重叠。
      */
     private final AtomicReference<RegionTickState> tickState = new AtomicReference<>(RegionTickState.IDLE);
 
-    // 统计计数器（外部可读）
+    // 统计计数器
     private final LongAdder totalTicksCompleted = new LongAdder();
     private final LongAdder totalTickTimeNanos = new LongAdder();
     private final AtomicLong maxTickDurationNanos = new AtomicLong(0);
     private final AtomicLong currentTick = new AtomicLong(0);
+    private final LongAdder totalSkippedTicks = new LongAdder();
 
-    // Phaser 超时配置
-    private static final long AWAIT_TIMEOUT_SECONDS = 30;
+    // 超时配置
+    private static final long AWAIT_TIMEOUT_MS = 4000; // 4秒，留1秒给 watchdog
     private static final long SLOW_TICK_WARNING_MS = 50;
 
     public RegionTickContext(
@@ -85,58 +80,84 @@ public final class RegionTickContext {
     public LongList getOwnedChunks() { return this.ownedChunks.get(); }
 
     /**
-     * 开始 tick —— 初始化指定参与方数量的 barrier。
-     *
-     * @param parties 需要到达的参与方数（= slice 数 + 1（region tick 线程本身））
-     */
-    public void beginTick(final int parties) {
-        this.tickBarrier = new Phaser(parties);
-        this.tickStartNanos = System.nanoTime();
-        this.currentTick.incrementAndGet();
-    }
-
-    /**
      * 尝试开始 tick —— 使用 CAS 防止 tick 重叠。
      *
-     * <p>Tick N 未完成时，同一 Region 不能进入 Tick N+1。
+     * <p>如果前一个 tick 仍在执行，记录跳过并返回 false。</p>
      *
-     * @param parties 需要到达的参与方数
-     * @return true 如果成功进入 TICKING 状态，false 如果已有 tick 在执行
+     * @param sliceCount 本次 tick 的 slice 数量
+     * @return true 如果成功进入 TICKING 状态
      */
-    public boolean tryBeginTick(final int parties) {
-        // Mili start - fix: create barrier BEFORE CAS to prevent TOCTOU race where
-        // a worker sees TICKING state but reads old/null barrier.
-        // The volatile write to tickBarrier happens-before any worker reads it.
-        Phaser newBarrier = new Phaser(parties);
-        this.tickBarrier = newBarrier;
+    public boolean tryBeginTick(final int sliceCount) {
+        // 先尝试 CAS 状态转换
+        if (!tickState.compareAndSet(RegionTickState.IDLE, RegionTickState.TICKING)) {
+            totalSkippedTicks.increment();
+            LOGGER.debug("[RegionTickContext] Region #{} tick skipped — already ticking", regionId);
+            return false;
+        }
+
+        // CAS 成功，初始化 tick 状态
+        this.expectedSlices.set(sliceCount);
+        this.completedSlices.set(0);
+        this.tickLatch = new CountDownLatch(sliceCount);
         this.tickStartNanos = System.nanoTime();
         this.currentTick.incrementAndGet();
-        if (!tickState.compareAndSet(RegionTickState.IDLE, RegionTickState.TICKING)) {
-            return false; // 当前 Region 已经有 Tick 在执行
-        }
+
         return true;
-        // Mili end
     }
 
     /**
-     * 标记 tick 进入排空阶段。
+     * 标记一个 slice 完成。
      */
-    public void beginDraining() {
-        tickState.set(RegionTickState.DRAINING);
+    public void arriveSlice() {
+        completedSlices.incrementAndGet();
+        CountDownLatch latch = this.tickLatch;
+        if (latch != null) {
+            latch.countDown();
+        }
     }
 
     /**
-     * 完成 tick —— 回到 IDLE 状态。
+     * 等待所有 slice 完成。
+     *
+     * @return true 如果所有 slice 在超时前完成
      */
-    public void finishTick() {
+    public boolean awaitTickCompletion() {
+        CountDownLatch latch = this.tickLatch;
+        if (latch == null) return true;
+
+        try {
+            return latch.await(AWAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /**
+     * 结束 tick —— 记录耗时统计并回到 IDLE 状态。
+     */
+    public void endTick() {
+        long elapsed = System.nanoTime() - this.tickStartNanos;
+        this.lastTickDurationNanos = elapsed;
+        this.totalTicksCompleted.increment();
+        this.totalTickTimeNanos.add(elapsed);
+        this.maxTickDurationNanos.accumulateAndGet(elapsed, Math::max);
+
+        // 强制回到 IDLE 状态
         tickState.set(RegionTickState.IDLE);
+
+        if (elapsed / 1_000_000 > SLOW_TICK_WARNING_MS) {
+            LOGGER.warn("[RegionTickContext] Slow tick in region #{}: {}ms (chunks={}, slices={}/{})",
+                    regionId, elapsed / 1_000_000, ownedChunks.get().size(),
+                    completedSlices.get(), expectedSlices.get());
+        }
     }
 
     /**
      * 检查当前是否正在 tick。
      */
     public boolean isTicking() {
-        return tickState.get() != RegionTickState.IDLE;
+        return tickState.get() == RegionTickState.TICKING;
     }
 
     /**
@@ -147,52 +168,25 @@ public final class RegionTickContext {
     }
 
     /**
-     * 等待所有参与方完成 tick —— 使用 Phaser 中断式等待。
-     *
-     * <p>如果超时（worker 线程可能卡死/崩溃），强制终止并记录警告。
+     * 获取已完成的 slice 数量。
      */
-    public void awaitTickCompletion() {
-        Phaser barrier = this.tickBarrier;
-        if (barrier == null) return;
-        int phase = barrier.arrive();
-        try {
-            barrier.awaitAdvanceInterruptibly(phase, AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (TimeoutException e) {
-            LOGGER.error("[RegionTickContext] Region #{} tick timed out after {}s — forcing advance. " +
-                            "Registered={}, Arrived={}, Unarrived={}",
-                    regionId, AWAIT_TIMEOUT_SECONDS,
-                    barrier.getRegisteredParties(), barrier.getArrivedParties(), barrier.getUnarrivedParties());
-            barrier.forceTermination();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+    public int getCompletedSlices() {
+        return completedSlices.get();
     }
 
     /**
-     * Slice 完成通知。
+     * 获取期望的 slice 数量。
      */
-    public void arriveSlice() {
-        Phaser barrier = this.tickBarrier;
-        if (barrier != null) barrier.arrive();
+    public int getExpectedSlices() {
+        return expectedSlices.get();
     }
 
     /**
-     * 结束 tick —— 记录耗时统计。
+     * 强制重置 tick 状态 —— 仅用于错误恢复。
      */
-    public void endTick() {
-        long elapsed = System.nanoTime() - this.tickStartNanos;
-        this.lastTickDurationNanos = elapsed;
-        this.totalTicksCompleted.increment();
-        this.totalTickTimeNanos.add(elapsed);
-        this.maxTickDurationNanos.accumulateAndGet(elapsed, Math::max);
-
-        // 回到 IDLE 状态，允许下一 tick
-        finishTick();
-
-        if (elapsed / 1_000_000 > SLOW_TICK_WARNING_MS) {
-            LOGGER.warn("[RegionTickContext] Slow tick in region #{}: {}ms (chunks={})",
-                    regionId, elapsed / 1_000_000, ownedChunks.get().size());
-        }
+    public void forceReset() {
+        tickState.set(RegionTickState.IDLE);
+        LOGGER.warn("[RegionTickContext] Force reset tick state for region #{}", regionId);
     }
 
     // ---- 统计查询 ----
@@ -200,9 +194,12 @@ public final class RegionTickContext {
     public long getLastTickDurationNanos() { return this.lastTickDurationNanos; }
     public long getLastTickDurationMs() { return this.lastTickDurationNanos / 1_000_000; }
     public long getTotalTicksCompleted() { return this.totalTicksCompleted.sum(); }
+    public long getTotalSkippedTicks() { return this.totalSkippedTicks.sum(); }
     public long getTotalTickTimeNanos() { return this.totalTickTimeNanos.sum(); }
     public long getMaxTickDurationNanos() { return this.maxTickDurationNanos.get(); }
     public long getMaxTickDurationMs() { return this.maxTickDurationNanos.get() / 1_000_000; }
+    public long getCurrentTick() { return this.currentTick.get(); }
+    public void setCurrentTick(long tick) { this.currentTick.set(tick); }
 
     public long getAverageTickDurationNanos() {
         long completed = totalTicksCompleted.sum();
@@ -211,39 +208,13 @@ public final class RegionTickContext {
 
     public long getAverageTickDurationMs() { return getAverageTickDurationNanos() / 1_000_000; }
 
-    public int getWorkerCount() { return this.workerCount.get(); }
-    public void setWorkerCount(int count) { this.workerCount.set(count); }
-    public long getCurrentTick() { return this.currentTick.get(); }
-    public void setCurrentTick(long tick) { this.currentTick.set(tick); }
-
-    /**
-     * 计算期望的 worker 数 —— 基于 chunk 数和并行度阈值。
-     *
-     * @param maxWorkersPerRegion 每个 region 最大 worker 数
-     * @param parallelismThreshold 每个 worker 最少处理的 chunk 数
-     */
-    public int computeDesiredWorkers(final int maxWorkersPerRegion, final int parallelismThreshold) {
-        int chunkCount = this.ownedChunks.get().size();
-        if (chunkCount < parallelismThreshold) return 1;
-        int desired = (chunkCount + parallelismThreshold - 1) / parallelismThreshold;
-        return Math.min(desired, maxWorkersPerRegion);
-    }
-
-    /**
-     * 计算保证的最小 worker 数 —— 与期望值取较大者。
-     */
-    public int computeGuaranteedWorkers(final int maxWorkersPerRegion,
-                                         final int minWorkersPerRegion,
-                                         final int parallelismThreshold) {
-        return Math.max(computeDesiredWorkers(maxWorkersPerRegion, parallelismThreshold), minWorkersPerRegion);
-    }
-
     @Override
     public String toString() {
         return "RegionTickContext{regionId=" + regionId +
                 ", chunks=" + ownedChunks.get().size() +
-                ", workers=" + workerCount.get() +
+                ", slices=" + completedSlices.get() + "/" + expectedSlices.get() +
                 ", avg_tick_ms=" + getAverageTickDurationMs() +
-                ", max_tick_ms=" + getMaxTickDurationMs() + "}";
+                ", max_tick_ms=" + getMaxTickDurationMs() +
+                ", skipped=" + getTotalSkippedTicks() + "}";
     }
 }

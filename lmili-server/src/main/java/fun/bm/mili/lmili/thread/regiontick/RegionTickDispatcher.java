@@ -158,6 +158,7 @@ public final class RegionTickDispatcher {
         stats.put("use_virtual_threads", poolManager.isVirtualThreadMode());
         stats.put("dag_systems", dagExecutor.getSystemCount());
         stats.put("pending_chunk_ticks", chunkDispatcher.getPendingChunkTickCount());
+        stats.put("chunk_tick_timeouts", chunkDispatcher.getTotalTimeouts());
         stats.put("async_catcher_refs", asyncCatcherManager.getRefCount());
         stats.put("shutdown", this.shutdown.get());
         return stats;
