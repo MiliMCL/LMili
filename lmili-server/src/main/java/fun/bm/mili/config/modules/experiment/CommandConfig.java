@@ -38,7 +38,7 @@ public class CommandConfig implements IConfigModule {
             允许使用 waypoint 命令和定位栏。
             WARN: Still under testing""")
     @HotReloadUnsupported
-    public static boolean waypoint = false;
+    public static boolean waypointsAndWaypointCommand = false;
 
     @ConfigInfo(name = "scoreboard_command_enabled", comments = """
             允许使用 scoreboard 命令""")
