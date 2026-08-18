@@ -60,7 +60,7 @@ public final class TicketType<T> implements ca.spottedleaf.moonrise.patches.chun
     public static final TicketType PLAYER_LOADING = register("player_loading", NO_TIMEOUT, FLAG_LOADING);
     public static final TicketType PLAYER_SIMULATION = register("player_simulation", NO_TIMEOUT, FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
     public static final TicketType FORCED = register("forced", NO_TIMEOUT, FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
-    public static final TicketType PORTAL = register("portal", 300L, fun.bm.mili.lmili.config.modules.misc.SavePortalTicketsConfig.doSave ? FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE : FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
+    public static final TicketType PORTAL = register("portal", 300L, fun.bm.mili.config.modules.misc.SavePortalTicketsConfig.doSave ? FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE : FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
     public static final TicketType ENDER_PEARL = register("ender_pearl", 40L, FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
     public static final TicketType UNKNOWN = register("unknown", 1L, FLAG_CAN_EXPIRE_IF_UNLOADED | FLAG_LOADING);
     public static final TicketType PLUGIN = register("plugin", NO_TIMEOUT, FLAG_LOADING | FLAG_SIMULATION); // CraftBukkit

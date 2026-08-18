@@ -44,7 +44,7 @@ public class GeodeFeature extends Feature<GeodeConfiguration> {
         List<Pair<BlockPos, Integer>> points = Lists.newLinkedList();
         int numPoints = config.distributionPoints().sample(random);
         // Leaf start - Matter - Secure Seed
-        WorldgenRandom random1 = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+        WorldgenRandom random1 = fun.bm.mili.config.modules.function.SecureSeedConfig.enabled
                 ? new su.plo.matter.WorldgenCryptoRandom(0, 0, su.plo.matter.Globals.Salt.GEODE_FEATURE, 0)
                 : new WorldgenRandom(new LegacyRandomSource(level.getSeed()));
         // Leaf end - Matter - Secure Seed

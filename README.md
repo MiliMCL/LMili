@@ -35,6 +35,23 @@ Minecraft（原版）
 
 > LMili 现为直接基于 Folia 的服务端，包名 `fun.bm.mili.lmili`。
 
+### Mili 与 LMili 的命名关系
+
+本项目存在"Mili"与"LMili"两套命名，二者指向不同产品：
+
+| 层面 | 名称 | 说明 |
+|------|------|------|
+| 品牌 / 产品名 | Mili | 用户面对的产品简称 |
+| GitHub 仓库 | `MiliMCL/LMili` | 代码托管地址 |
+| 服务端核心 JAR | `lmili-26.2-paperclip.jar` | 可运行的服务端产物 |
+| Maven 发布坐标 | `io.github.xucy10:lmili-api:26.2-R0.1` | 插件开发引用坐标 |
+| Gradle 模块 | `lmili-api` / `lmili-server` | 见 `settings.gradle.kts` |
+| 公共 API 包 | `fun.bm.mili.api` | 插件开发 import 的包名 |
+| 内部实现包 | `fun.bm.mili.lmili.*` | 服务端核心实现（调度器、配置等） |
+| 配置文件 | `lmili_config.toml` | 服务端主配置文件 |
+
+> **历史背景**：LMili 前身包含 Luminol 品牌代码。执行 rebrand 后，底层包名从 `me.luminolmc.*` 迁移至 `fun.bm.mili.lmili.*`。
+
 ---
 
 ## 插件开发文档
@@ -45,9 +62,27 @@ Minecraft（原版）
 
 ## 核心特性
 
+### RegionTickPool — 独立 tick 调度增强
+
+LMili 最核心的架构创新。将 Folia "每区域独占一线程"的模型替换为**共享 worker 池 + 优先级调度**，显著减少大量空闲 region 时的 CPU 占用。
+
+- **Virtual Thread 后端**：基于 JDK 25 虚拟线程，以同步风格编写异步逻辑，`awaitCrossRegion` 跨区挂起不阻塞平台线程
+- **DAG 并行调度**：`DagExecutionEngine` 非阻塞回调驱动，`CompiledDag` 不可变编译后 DAG，`ConflictGraph` 稀疏冲突图替代 O(n²) 矩阵
+- **Work-Stealing 负载均衡**：`WorkStealingCoordinator` 全局工作窃取，自动平衡各 region 负载
+- **阻塞操作隔离**：`BlockingTaskIsolation` 专用平台线程池 + 信号量限流，防止 carrier pinning
+- **对象池复用**：`ExecutionContext` + `ObjectPool` ThreadLocal 池，热路径零分配
+- **渐进式迁移**：通过 `RegionTickDispatcherAdapter` 桥接新旧路径，`use-new-scheduler` 灰度开关控制
+
+执行模式根据区域 chunk 数量自动选择：
+- 小 region（chunk 数 < 阈值）：单线程同步执行（无调度开销）
+- Virtual Thread 模式：chunks 拆分为 slices，每个 slice 一个 virtual thread 并行
+- Platform Thread 模式：贪心负载均衡分发给固定 worker 队列
+
+> 启用 RegionTickPool 后会自动禁用 RegionBalancer — 两者互不共存。
+
 ### Folia 稳定性修复
 
-- **Region Balancer**：共享线程池 + 优先级队列替代 Folia 每区域独占线程，动态负载均衡
+- **Region Balancer**：共享线程池 + 优先级队列替代 Folia 每区域独占线程，动态负载均衡（RegionTickPool 的前身）
 - **Region Load Monitor**：无锁滑动窗口统计区域 tick 耗时
 - **Adaptive TPS Manager**：根据实时负载动态调整 TPS
 - **Cross-Region Helper**：类型化跨区事件队列（实体伤害、方块通知等）
@@ -63,6 +98,7 @@ Minecraft（原版）
 - 区域外寻路/拴绳/目标选择防护
 - POI 更新延迟、区块重载检测、龙部件同步等修复
 - RegionizedTaskQueue 并发引用修正
+- `RegionizedWorldData` 空连接 NPE、已移除实体仍添加效果、`/save-all` 区域安全化
 
 ### 通用性能优化
 
@@ -73,6 +109,7 @@ Minecraft（原版）
 - 区块加载查找削减、投射物区块加载削减、寻路区域限制
 - 网络与协议层优化、区块增量压缩
 - 村民 lobotomize（发呆）优化、传感器工作削减
+- 异步寻路、动态视距、实体数据脏追踪、CPU 亲和性、SIMD 优化
 
 ### API 扩展
 
@@ -80,12 +117,15 @@ Minecraft（原版）
 
 | API | 说明 |
 |------|------|
-| **Tick Regions API** | 查询/操作 tick 区域的 API（`ThreadedRegion`、`RegionStats` 等） |
+| **Mili 调度器 API** | 挂起式调度器（`Mili`、`Scheduler`、`EntityScheduler`、`EntityTaskContext`），以 virtual thread 为后端，支持 `awaitCrossRegion` 跨区挂起 |
+| **Tick Regions API** | 查询/操作 tick 区域的 API（`ThreadedRegionizer`、`ThreadedRegion`、`TickRegionData`、`RegionStats`） |
 | **ReplayMod 摄影师** | 创建 ReplayMod 摄影师实体进行录像，`Photographer` / `PhotographerManager` API |
-| **Bytebuf API** | 面向插件的自定义数据包读写 API |
-| **实体传送异步事件** | `EntityTeleportAsyncEvent`、`PreEntityPortalEvent`、`PostEntityPortalEvent` 等 |
+| **Bytebuf API** | 面向插件的自定义数据包读写 API（Netty 风格，独立于 NMS） |
+| **数据包事件** | `PacketInEvent` / `PacketOutEvent` 监听数据包收发，可取消 |
+| **实体传送异步事件** | `EntityTeleportAsyncEvent`、`PreEntityPortalEvent`、`PostEntityPortalEvent` |
+| **传送门事件** | `PortalLocateEvent`（可修改目标）、`EndPlatformCreateEvent`（可取消） |
+| **玩家事件** | `PostPlayerRespawnEvent`、`PlayerOperationLimitEvent` |
 | **Waypoint API** | 实体路径点追踪与恢复 API |
-| **ThreadedRegionizer** | 获取全局 `ThreadedRegionizer` 实例的 API |
 
 ---
 
@@ -167,21 +207,40 @@ dependencies {
 
 ```
 Mili/
-├── lmili-api/                  # Mili API 模块
-│   └── src/main/java/         #   事件 API、Photographer、Bytebuf
-├── lmili-server/               # Mili 服务端核心
-│   ├── minecraft-patches/     #   97 个特征补丁（features/）
-│   ├── paper-patches/         #   Paper API/Server 层补丁
-│   └── src/main/
-│       └── java/fun/bm/mili/  #   Java 源码
-│           ├── bridge/        #     区块-区域桥接
-│           ├── chunk/         #     区块系统
-│           ├── command/       #     命令系统
-│           ├── config/        #     配置模块（TOML，纯 Java 实现）
-│           ├── metrics/       #     bStats 统计
-│           ├── portal/        #     传送门管理
-│           ├── utils/         #     工具类（区域调度、网络优化、内存管理等）
-│           └── villager/      #     村民优化器
+├── lmili-api/                  # Mili API 模块（插件开发者编译时依赖）
+│   └── src/main/java/
+│       ├── fun/bm/mili/api/         # 公共 API（调度器、EntityTaskContext、异常）
+│       ├── fun/bm/mili/lmili/api/   # 内部 API（区域查询、实体/传送门/玩家事件）
+│       └── org/leavesmc/leaves/     # Bytebuf、Photographer、数据包事件
+├── lmili-server/               # Mili 服务端核心（可运行产物）
+│   ├── minecraft-patches/     # 补丁系统
+│   │   ├── features-original/ #   97 个原始独立补丁（参考用）
+│   │   ├── features/          #   5 个合并后补丁（构建使用）
+│   │   └── merged-v3/        #   构建实际使用的合并补丁
+│   ├── paper-patches/         # Paper API/Server 层补丁
+│   └── src/main/java/fun/bm/mili/
+│       ├── bridge/            #   区块-区域桥接（250ms 热度同步）
+│       ├── chunk/             #   区块系统（异步处理、热度追踪、视距优化）
+│       ├── command/           #   命令系统（/miperf、/portal、/heatmap）
+│       ├── config/            #   配置模块（TOML，纯 Java night-config 实现）
+│       ├── metrics/           #   bStats 统计
+│       ├── portal/            #   传送门管理（配对、原子写入、NPE 防护）
+│       ├── utils/             #   工具类（并发数据结构、网络优化、内存管理）
+│       ├── villager/          #   村民优化器（lobotomize + 智能补货）
+│       └── lmili/             #   核心实现子树
+│           ├── thread/        #     调度器核心（39 个文件）
+│           │   ├── regiontick/  #   RegionTick 调度实现
+│           │   │   ├── dag/       #   DAG 依赖图（SystemGraph、ConflictGraph、CompiledDag）
+│           │   │   ├── executor/  #   执行器（DagExecutionEngine、ModernDagTickExecutor）
+│           │   │   └── suspend/   #   虚拟线程工厂
+│           │   └── scheduler/   #   新调度系统（MiliScheduler、WorkStealing、VirtualThread）
+│           │       ├── api/      #   公共接口（MiliScheduler、TaskHandle、EntityScheduler）
+│           │       ├── execute/  #   执行组件（VirtualThreadPool、RegionQueue、BlockingTaskIsolation）
+│           │       └── internal/ #   内部实现（ObjectPool、PerformanceMetrics、ExecutionContext）
+│           ├── config/        #     ConfigManager + 50+ 配置模块
+│           ├── functions/     #     状态栏功能（TPS/Region/Memory Bar）
+│           ├── commands/      #     /lmiconfig、/lmibar 命令
+│           └── data/          #     区块存储格式（Linear V2）
 ├── folia-server/              # Folia 子模块（上游，不直接修改）
 ├── paper-server/              # Paper 服务器（补丁应用目标）
 ├── paper-api/                 # Paper API（补丁应用目标）
@@ -190,11 +249,28 @@ Mili/
 └── gradle.properties          # 版本与上游 ref 配置
 ```
 
+### 调度器架构
+
+```
+RegionTickBootstrap.init()
+    ├── RegionTickDispatcher.init()         ← 初始化旧版 dispatcher
+    ├── MiliSchedulerBuilder.create()       ← 创建新调度器
+    │       .build() → MiliSchedulerImpl
+    └── Mili.registerScheduler(adapter)    ← 注册公共 API
+
+线程模型：
+RegionTickDispatcher
+    └── MiliScheduler.submit(RegionTask)
+            └── WorkStealingCoordinator.submit(task)
+                    └── RegionQueue ──(work-stealing)──▶ VirtualThreadPool (virtual threads)
+                                                                    └── Carrier Threads → CPU Cores
+```
+
 ---
 
 ## 配置系统
 
-Mili 提供 TOML 配置文件（纯 Java 解析实现）：
+Mili 提供 TOML 配置文件（纯 Java night-config 解析实现）：
 
 | 文件 | 包路径 | 说明 |
 |------|--------|------|
@@ -204,17 +280,36 @@ Mili 提供 TOML 配置文件（纯 Java 解析实现）：
 
 | 类别 | 说明 | 代表模块 |
 |------|------|----------|
-| `function` | 游戏机制与实用功能 | `LanguageConfig`、`TpsBarConfig`、`RegionBarConfig` |
-| `experiment` | 实验性性能/并发功能 | `RegionBalancerConfig`、`CrossDimensionTeleportQueueConfig` |
-| `optimizations` | 性能优化 | `NetworkOptimizerConfig`、`MmapRegionStorageConfig`、`VillagerOptimizerConfig` |
-| `fixes` | 崩溃/行为修复 | `PortalLinkFixConfig`、`CollisionBehaviorConfig` |
-| `misc` | 杂项 | `AutoUpdateConfig`、`BStatsConfig`、`ServerModNameConfig` |
+| `function` | 游戏机制与实用功能 | `LanguageConfig`、`TpsBarConfig`、`RegionBarConfig`、`MembarConfig`、`ReplayAPIConfig`、`BytebufProtocolConfig`、`VillagerTradeConfig`、`TechnicalSurvivalModeConfig`、`RedStoneConfig`、`PlayerHeatmapConfig`、`PerformanceMonitorConfig`、`ContainerExpansionConfig`、`AsyncKeepaliveConfig`、`SecureSeedConfig`、`RegionFormatConfig`、`PortalRateLimiterConfig`、`TripwireBehaviorConfig` |
+| `experiment` | 实验性性能/并发功能 | **`RegionTickPoolConfig`**（核心调度增强）、`RegionBalancerConfig`、`CrossRegionHelperConfig`、`GlobalEntitiesCounter`、`EntityDamageSourceTraceConfig`、`DisableEntityCatchConfig`、`DisableAsyncCatcherConfig` |
+| `optimizations` | 性能优化 | `NetworkOptimizerConfig`、`ChunkSystemConfig`、`VillagerOptimizerConfig`、`AsyncPathfindingConfig`、`DynamicViewDistanceConfig`、`EntityDirtyTrackingConfig`、`EntityDensityHeatmapConfig`、`ChunkDeltaCompressionConfig`、`CrossDimensionTeleportQueueConfig`、`CpuAffinityConfig`、`SIMDConfig`、`LeavesSleepingBlockEntityConfig`、`ProjectileChunkReduceConfig`、`PetalReduceSensorWorkConfig`、`OptimizedDragonRespawnConfig`、`LobotomizeVillageConfig`、`KaiijuEntityLimiterConfig`、`GaleVariableEntityWakeupConfig`、`EntityGoalSelectorInactiveTickConfig`、`AsyncProtocolChangeConfig` |
+| `fixes` | 崩溃/行为修复 | `CollisionBehaviorConfig`、`PortalLinkFixConfig`、`VanillaRandomSourceConfig`、`UnsafeTeleportationConfig`、`PreventIncorrectTeleportAsyncConfig`、`PathfindingFixesConfig`、`POIRangeFixes`、`LongCommandSupportConfig`、`ItemMultitaskConfig`、`ForceCleanupEntityBrainMemoryConfig`、`FoliaEntityMovingFixConfig` |
+| `misc` | 杂项 | `AutoUpdateConfig`、`BStatsConfig`、`ServerModNameConfig`、`FoliaWatchdogConfig`、`UsernameCheckConfig`、`SentryConfig`、`SavePortalTicketsConfig`、`PublickeyVerifyConfig`、`PaperPacketLimiterConfig`、`InorderChatConfig`、`DisableWarningConfig`、`OldMCConfig`、`LeavesPacketEventConfig`、`DisableCheckConfig` |
+| `unsupported` | 不支持的配置 | `DisableCheckForFoliaSupported` |
 
 ---
 
-## 补丁工作流
+## 补丁系统
 
-LMili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理 feature 补丁：
+LMili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理多层 fork：
+
+| 目录 | 数量 | 说明 |
+|------|------|------|
+| `minecraft-patches/features-original/` | 97 | 原始独立补丁（参考用） |
+| `minecraft-patches/features/` | 5 | 合并后补丁（构建实际使用） |
+| `minecraft-patches/merged-v3/` | 5 | 构建使用的合并补丁 |
+
+**5 个合并补丁按功能域分类：**
+
+| 补丁文件 | 功能域 |
+|---------|--------|
+| `01-rebrand-consolidated.patch` | 品牌重命名（Luminol → Mili） |
+| `02-config-system-consolidated.patch` | 配置系统 |
+| `03-entity-optimizations-consolidated.patch` | 实体优化 |
+| `04-chunk-region-consolidated.patch` | 区块与区域 |
+| `06-misc-consolidated.patch` | 杂项 |
+
+### 补丁工作流
 
 1. 在 `lmili-server/src/minecraft/java/` 中修改代码
 2. 提交变更：`git commit -m "描述"`
@@ -223,7 +318,7 @@ LMili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理 feat
 
 修改 `lmili-server/src/minecraft/java/` 下的生成文件会被 `applyAllPatches` 覆盖，必须通过 `minecraft-patches/features/` 下的补丁文件修改。
 
-详细流程见 [贡献指南](docs/CONTRIBUTING.md)。
+详细流程见 [贡献指南](docs/CONTRIBUTING.md) 和 [补丁维护指南](docs/PATCH_MAINTENANCE_GUIDE.md)。
 
 ---
 

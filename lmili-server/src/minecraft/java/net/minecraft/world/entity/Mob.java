@@ -221,7 +221,7 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
     public void inactiveTick() {
         super.inactiveTick();
         if (!this.aware) return; // Paper - Do not tick AI for inactive unaware mobs
-        boolean isThrottled = fun.bm.mili.lmili.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig.enabled && _pufferfish_inactiveTickDisableCounter++ % 20 != 0; // Pufferfish - throttle inactive goal selector ticking
+        boolean isThrottled = fun.bm.mili.config.modules.optimizations.EntityGoalSelectorInactiveTickConfig.enabled && _pufferfish_inactiveTickDisableCounter++ % 20 != 0; // Pufferfish - throttle inactive goal selector ticking
         if (this.goalSelector.inactiveTick() && !isThrottled) { // Pufferfish
             this.goalSelector.tick();
         }
@@ -883,7 +883,7 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
         int idBasedTickCount = this.tickCount + this.getId(); // Lmili - Petal - Move up
         ProfilerFiller profiler = Profiler.get();
         profiler.push("sensing");
-        if (idBasedTickCount % fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !fun.bm.mili.lmili.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Lmili - Petal - Reduce sensor work
+        if (idBasedTickCount % fun.bm.mili.config.modules.optimizations.PetalReduceSensorWorkConfig.delayTicks == 0 || !fun.bm.mili.config.modules.optimizations.PetalReduceSensorWorkConfig.enabled) this.sensing.tick(); // Lmili - Petal - Reduce sensor work
         profiler.pop();
         //int idBasedTickCount = this.tickCount + this.getId(); // Lmili - Petal - Move up
         if (idBasedTickCount % 2 != 0 && this.tickCount > 1) {

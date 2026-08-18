@@ -95,7 +95,7 @@ public class Slime extends AbstractCubeMob implements Enemy {
 
             ChunkPos chunkPos = ChunkPos.containing(pos);
             // Leaf start - Matter - Secure Seed
-            boolean isSlimeChunk = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+            boolean isSlimeChunk = fun.bm.mili.config.modules.function.SecureSeedConfig.enabled
                     ? level.getChunk(chunkPos.x(), chunkPos.z()).isSlimeChunk()
                     : WorldgenRandom.seedSlimeChunk(chunkPos.x(), chunkPos.z(), worldGenLevel.getSeed(), level.getMinecraftWorld().spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
             boolean slimeChunk = level.getMinecraftWorld().paperConfig().entities.spawning.allChunksAreSlimeChunks || isSlimeChunk;

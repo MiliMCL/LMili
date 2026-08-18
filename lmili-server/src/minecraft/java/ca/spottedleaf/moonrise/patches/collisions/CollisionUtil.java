@@ -2098,7 +2098,7 @@ public final class CollisionUtil {
     // Leaves start - Configurable collision behavior
     private static boolean shouldSkip(AABB aabb, VoxelShape blockCollision, AABB singleAABB) {
         boolean isBlockShape = blockCollision == Shapes.block();
-        return switch (fun.bm.mili.lmili.config.modules.fixes.CollisionBehaviorConfig.behaviorMode) {
+        return switch (fun.bm.mili.config.modules.fixes.CollisionBehaviorConfig.behaviorMode) {
             case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.VANILLA -> !voxelShapeIntersectVanilla(aabb, singleAABB);
             case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.PAPER -> !voxelShapeIntersect(aabb, singleAABB);
             default -> isBlockShape && !voxelShapeIntersectVanilla(aabb, singleAABB) || !isBlockShape && !voxelShapeIntersect(aabb, singleAABB);

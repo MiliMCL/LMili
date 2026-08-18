@@ -202,7 +202,7 @@ public class TripWireHookBlock extends Block {
                     BlockState wireData = wireStates[i];
                     if (wireData != null) {
                         // Lmili start - tripwire and tripwireHook dupe
-                        if (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
+                        if (fun.bm.mili.config.modules.function.TripwireBehaviorConfig.enabled) {
                             level.setBlock(testPos, wireData.trySetValue(ATTACHED, attached), 3);
                             level.getBlockState(testPos);
                         } else {

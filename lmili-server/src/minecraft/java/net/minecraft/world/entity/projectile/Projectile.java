@@ -77,8 +77,8 @@ public abstract class Projectile extends Entity implements TraceableEntity {
         if (previousX != newX || previousZ != newZ) {
             boolean isLoaded = ((net.minecraft.server.level.ServerChunkCache) this.level().getChunkSource()).getChunkAtIfLoadedImmediately(newX, newZ) != null;
             if (!isLoaded) {
-                if (currRegionData.pufferfish$loadedThisTick > fun.bm.mili.lmili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerTick) {
-                    if (++this.loadedLifetime > fun.bm.mili.lmili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile) {
+                if (currRegionData.pufferfish$loadedThisTick > fun.bm.mili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerTick) {
+                    if (++this.loadedLifetime > fun.bm.mili.config.modules.optimizations.ProjectileChunkReduceConfig.maxProjectileLoadsPerProjectile) {
                         this.discard();
                     }
                     return;

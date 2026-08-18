@@ -202,7 +202,7 @@ public class Commands {
         ClearInventoryCommands.register(this.dispatcher, context);
         //CloneCommands.register(this.dispatcher, context); // Folia - region threading - TODO
         DamageCommand.register(this.dispatcher, context);
-        if(fun.bm.mili.lmili.config.modules.experiment.CommandConfig.data) { // Lmili - Config for data command
+        if(fun.bm.mili.config.modules.experiment.CommandConfig.data) { // Lmili - Config for data command
         DataCommands.register(this.dispatcher); // Folia - region threading - TODO // Lmili - Config for data command
         } // Lmili - Config for data command
         DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO // Lmili - Add back read-only datapack command
@@ -263,7 +263,7 @@ public class Commands {
         TimeCommand.register(this.dispatcher, context);
         TitleCommand.register(this.dispatcher, context);
         //TriggerCommand.register(this.dispatcher); // Folia - region threading - TODO later
-        if (fun.bm.mili.lmili.config.modules.experiment.CommandConfig.waypointsAndWaypointCommand) WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later // Lmili - Restore waypoints
+        if (fun.bm.mili.config.modules.experiment.CommandConfig.waypointsAndWaypointCommand) WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later // Lmili - Restore waypoints
         WeatherCommand.register(this.dispatcher);
         WorldBorderCommand.register(this.dispatcher);
         if (JvmProfiler.INSTANCE.isAvailable()) {

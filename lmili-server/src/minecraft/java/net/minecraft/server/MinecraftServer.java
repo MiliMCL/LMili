@@ -2139,7 +2139,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
     }
 
     public String getServerModName() {
-        return fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.fakeVanilla ? "vanilla" : fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.serverModName; // Paper // Lmili - Add config for this
+        return fun.bm.mili.config.modules.misc.ServerModNameConfig.fakeVanilla ? "vanilla" : fun.bm.mili.config.modules.misc.ServerModNameConfig.serverModName; // Paper // Lmili - Add config for this
     }
 
     public ServerClockManager clockManager() {

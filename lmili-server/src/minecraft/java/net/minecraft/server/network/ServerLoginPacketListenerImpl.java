@@ -167,7 +167,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
     public void handleHello(final ServerboundHelloPacket packet) {
         Validate.validState(this.state == ServerLoginPacketListenerImpl.State.HELLO, "Unexpected hello packet");
         // Paper start - Validate usernames
-        if (fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled // Lmili - Add config for username check
+        if (fun.bm.mili.config.modules.misc.UsernameCheckConfig.enabled // Lmili - Add config for username check
             && io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
             && io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.performUsernameValidation
             && !this.iKnowThisMayNotBeTheBestIdeaButPleaseDisableUsernameValidation) {
@@ -449,7 +449,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
 
         Runnable afterSwitch = () -> io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(configPacketListener::startConfiguration); // push back to main thread
 
-        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
+        if (!fun.bm.mili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
             this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
             this.connection.setupInboundProtocol(ConfigurationProtocols.SERVERBOUND, configPacketListener);
             afterSwitch.run();

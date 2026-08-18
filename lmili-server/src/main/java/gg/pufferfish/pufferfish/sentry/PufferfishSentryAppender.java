@@ -25,7 +25,7 @@ import io.sentry.SentryEvent;
 import io.sentry.SentryLevel;
 import io.sentry.protocol.Message;
 import io.sentry.protocol.User;
-import fun.bm.mili.lmili.config.modules.misc.SentryConfig;
+import fun.bm.mili.config.modules.misc.SentryConfig;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Marker;

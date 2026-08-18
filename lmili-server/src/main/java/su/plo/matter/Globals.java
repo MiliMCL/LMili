@@ -1,7 +1,7 @@
 package su.plo.matter;
 
 import com.google.common.collect.Iterables;
-import fun.bm.mili.lmili.config.modules.function.SecureSeedConfig;
+import fun.bm.mili.config.modules.function.SecureSeedConfig;
 import net.minecraft.server.level.ServerLevel;
 
 import java.math.BigInteger;

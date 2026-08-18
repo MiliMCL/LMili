@@ -31,7 +31,7 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
         // Lmili start - tripwire behavior modifier
         java.util.List<BlockPos> blockList1 = new java.util.ArrayList<>();
         java.util.List<BlockPos> blockList2 = new java.util.ArrayList<>();
-        boolean flag21 = fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.behaviorMode == fun.bm.mili.lmili.enums.EnumTripwireBehavior.VANILLA21;
+        boolean flag21 = fun.bm.mili.config.modules.function.TripwireBehaviorConfig.behaviorMode == fun.bm.mili.lmili.enums.EnumTripwireBehavior.VANILLA21;
         for (int dz = -2; dz <= 2; dz++) {
             for (int dx = -2; dx <= 2; dx++) {
                 for (int dy = -1; dy < 3; dy++) {
@@ -40,8 +40,8 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
                     if (!blockList.getBlockState(blockPos).is(block)) { // CraftBukkit
                         if (dropResources) {
                             boolean flag = false;
-                            if (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
-                                switch (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.behaviorMode) {
+                            if (fun.bm.mili.config.modules.function.TripwireBehaviorConfig.enabled) {
+                                switch (fun.bm.mili.config.modules.function.TripwireBehaviorConfig.behaviorMode) {
                                     case fun.bm.mili.lmili.enums.EnumTripwireBehavior.VANILLA20: {
                                         flag = true;
                                     }
@@ -79,7 +79,7 @@ public class EndPlatformFeature extends Feature<NoneFeatureConfiguration> {
             if (portalEvent.isCancelled()) return;
         }
 
-        if (flag21 || !fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
+        if (flag21 || !fun.bm.mili.config.modules.function.TripwireBehaviorConfig.enabled) {
             if (dropResources) {
                 blockList.placeBlocks(state -> newLevel.destroyBlock(state.getPosition(), true, null));
             } else {

@@ -3,7 +3,7 @@ package fun.bm.mili.lmili.utils;
 import com.google.gson.*;
 import com.mojang.logging.LogUtils;
 import io.papermc.paper.ServerBuildInfo;
-import fun.bm.mili.lmili.config.modules.misc.AutoUpdateConfig;
+import fun.bm.mili.config.modules.misc.AutoUpdateConfig;
 import net.minecraft.util.Util;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;

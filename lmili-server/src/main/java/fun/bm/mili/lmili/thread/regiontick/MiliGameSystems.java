@@ -7,7 +7,7 @@ import org.jetbrains.annotations.NotNull;
 /**
  * Mili 并行 tick 系统的 Profile 定义。
  *
- * <p>每个系统声明其读写资源类型，供 {@code DagBasedTickExecutor} 构建 DAG 冲突图。
+ * <p>每个系统声明其读写资源类型，供 {@code ModernDagTickExecutor} 构建 DAG 冲突图。
  * 两个系统只要资源类型有交集且空间 Scope 有重叠，就存在冲突，必须串行执行；
  * 不同 chunk 上的同类型系统因 Scope 不重叠可并行执行。
  *

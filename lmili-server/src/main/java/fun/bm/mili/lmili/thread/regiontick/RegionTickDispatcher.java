@@ -4,10 +4,9 @@ import com.mojang.logging.LogUtils;
 import fun.bm.mili.config.modules.experiment.RegionTickPoolConfig;
 import fun.bm.mili.lmili.thread.regiontick.dag.Scope;
 import fun.bm.mili.lmili.thread.regiontick.dag.SystemProfile;
-import fun.bm.mili.lmili.thread.regiontick.executor.DagBasedTickExecutor;
 import fun.bm.mili.lmili.thread.regiontick.executor.FoliaTickExecutor;
+import fun.bm.mili.lmili.thread.regiontick.executor.ModernDagTickExecutor;
 import fun.bm.mili.lmili.thread.regiontick.suspend.MiliThreadFactory;
-import fun.bm.mili.lmili.thread.regiontick.suspend.VirtualThreadScheduler;
 import io.papermc.paper.threadedregions.TickRegions;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -56,7 +55,7 @@ public final class RegionTickDispatcher {
     private final int parallelismThreshold;
     private final int sliceSize;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
-    private final DagBasedTickExecutor dagExecutor = new DagBasedTickExecutor();
+    private final ModernDagTickExecutor dagExecutor;
     private final LongAdder totalTicksDispatched = new LongAdder();
     private final LongAdder totalTickErrors = new LongAdder();
     private final AtomicLong maxTickDurationNanos = new AtomicLong(0);
@@ -102,6 +101,9 @@ public final class RegionTickDispatcher {
                 this.workerPool.submit(worker);
             }
         }
+
+        // 初始化现代 DAG 执行器
+        this.dagExecutor = new ModernDagTickExecutor(this.workerPool);
 
         // 选择 executor
         RegionTickExecutor foliaExec = new FoliaTickExecutor();
@@ -317,8 +319,8 @@ public final class RegionTickDispatcher {
         // 使用同步块确保计数检查和状态修改的原子性
         synchronized (this) {
             if (asyncCatcherRefCount.incrementAndGet() == 1) {
-                asyncCatcherBaseline.set(fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled);
-                fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = true;
+                asyncCatcherBaseline.set(fun.bm.mili.config.modules.experiment.DisableAsyncCatcherConfig.enabled);
+                fun.bm.mili.config.modules.experiment.DisableAsyncCatcherConfig.enabled = true;
             }
         }
 
@@ -369,7 +371,7 @@ public final class RegionTickDispatcher {
                         // 使用同步块确保计数检查和状态恢复的原子性
                         synchronized (this) {
                             if (asyncCatcherRefCount.decrementAndGet() == 0) {
-                                fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
+                                fun.bm.mili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
                                         asyncCatcherBaseline.get();
                             }
                         }
@@ -379,7 +381,7 @@ public final class RegionTickDispatcher {
             // 异常时恢复 async catcher（未派发成功也要归还计数）
             synchronized (this) {
                 if (asyncCatcherRefCount.decrementAndGet() == 0) {
-                    fun.bm.mili.lmili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
+                    fun.bm.mili.config.modules.experiment.DisableAsyncCatcherConfig.enabled =
                             asyncCatcherBaseline.get();
                 }
             }
@@ -496,20 +498,10 @@ public final class RegionTickDispatcher {
                                    @NotNull final SystemProfile profile,
                                    @NotNull final Scope scope,
                                    @NotNull final java.util.function.BiConsumer<SystemProfile, Scope> executor) {
-        dagExecutor.registerSystem(name, profile, scope, executor);
+        // 包装为 BiConsumer<SystemProfile, Object> 以适配 ModernDagTickExecutor 的签名
+        dagExecutor.registerSystem(name, profile, scope, (prof, scp) -> executor.accept(prof, (Scope) scp));
         RegionTickExecutor.register(dagExecutor);
         LOGGER.info("[RegionTickPool] DAG system '{}' registered, total systems={}", name, dagExecutor.getSystemCount());
-    }
-
-    public void unregisterDagSystem(@NotNull final String name) {
-        dagExecutor.unregisterSystem(name);
-        LOGGER.info("[RegionTickPool] DAG system '{}' unregistered, total systems={}", name, dagExecutor.getSystemCount());
-    }
-
-    public void executeDagSystems(final long regionId,
-                                   @NotNull final RegionTickContext context,
-                                   @NotNull final List<Map.Entry<SystemProfile, Scope>> systemScopePairs) {
-        dagExecutor.executeSystems(regionId, context, systemScopePairs);
     }
 
     public Map<String, Object> getStats() {
@@ -521,7 +513,6 @@ public final class RegionTickDispatcher {
         stats.put("worker_count", useVirtualThreads ? "unlimited (virtual)" : (workers != null ? workers.length : 0));
         stats.put("use_virtual_threads", useVirtualThreads);
         stats.put("dag_systems", dagExecutor.getSystemCount());
-        stats.put("dag_build_nanos", dagExecutor.getDagBuildNanos());
         stats.put("pending_chunk_ticks", this.pendingChunkFutures.size());
         stats.put("slow_entity_diagnostics", new ArrayList<>(this.slowEntities));
         stats.put("shutdown", this.shutdown.get());

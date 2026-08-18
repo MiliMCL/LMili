@@ -2,7 +2,7 @@ package fun.bm.mili.lmili.utils;
 
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import com.google.common.collect.Sets;
-import fun.bm.mili.lmili.config.modules.experiment.CommandConfig;
+import fun.bm.mili.config.modules.experiment.CommandConfig;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;

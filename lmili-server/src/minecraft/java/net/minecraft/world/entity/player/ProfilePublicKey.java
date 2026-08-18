@@ -23,7 +23,7 @@ public record ProfilePublicKey(ProfilePublicKey.Data data) {
     public static final Codec<ProfilePublicKey> TRUSTED_CODEC = ProfilePublicKey.Data.CODEC.xmap(ProfilePublicKey::new, ProfilePublicKey::data);
 
     public static ProfilePublicKey createValidated(final SignatureValidator validator, final UUID profileId, final ProfilePublicKey.Data data) throws ProfilePublicKey.ValidationException {
-        if (!data.validateSignature(validator, profileId) && (org.bukkit.Bukkit.getServer().getOnlineMode() && fun.bm.mili.lmili.config.modules.misc.PublickeyVerifyConfig.enabled)) { // Lmili - Verify signature only in online-mode
+        if (!data.validateSignature(validator, profileId) && (org.bukkit.Bukkit.getServer().getOnlineMode() && fun.bm.mili.config.modules.misc.PublickeyVerifyConfig.enabled)) { // Lmili - Verify signature only in online-mode
             throw new ProfilePublicKey.ValidationException(INVALID_SIGNATURE, org.bukkit.event.player.PlayerKickEvent.Cause.INVALID_PUBLIC_KEY_SIGNATURE); // Paper - kick event causes
         } else {
             return new ProfilePublicKey(data);

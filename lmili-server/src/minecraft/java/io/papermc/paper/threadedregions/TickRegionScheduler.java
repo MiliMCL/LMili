@@ -68,7 +68,7 @@ public final class TickRegionScheduler {
             public Thread newThread(final Runnable run) {
                 // Lmili start - cpu affinity
                 final Runnable actualRun;
-                if (fun.bm.mili.lmili.config.modules.optimizations.CpuAffinityConfig.cpuAffinityEnabled) {
+                if (fun.bm.mili.config.modules.optimizations.CpuAffinityConfig.cpuAffinityEnabled) {
                     actualRun = new Runnable() {
                         private boolean affinitySet = false;
 
@@ -76,7 +76,7 @@ public final class TickRegionScheduler {
                         public void run() {
                             if (!this.affinitySet) {
                                 this.affinitySet = true;
-                                net.openhft.affinity.Affinity.setAffinity(fun.bm.mili.lmili.config.modules.optimizations.CpuAffinityConfig.tickRegionAffinityBitSet);
+                                net.openhft.affinity.Affinity.setAffinity(fun.bm.mili.config.modules.optimizations.CpuAffinityConfig.tickRegionAffinityBitSet);
                             }
                             run.run();
                         }

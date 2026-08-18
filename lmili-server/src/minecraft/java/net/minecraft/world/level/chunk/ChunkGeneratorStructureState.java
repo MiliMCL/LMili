@@ -204,11 +204,11 @@ public class ChunkGeneratorStructureState {
         int spread = placement.spread();
         HolderSet<Biome> preferredBiomes = placement.preferredBiomes();
         // Leaf start - Matter - Secure Seed
-        RandomSource random = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+        RandomSource random = fun.bm.mili.config.modules.function.SecureSeedConfig.enabled
                 ? new su.plo.matter.WorldgenCryptoRandom(0, 0, su.plo.matter.Globals.Salt.STRONGHOLDS, 0)
                 :RandomSource.create();
         // Leaf end - Matter - Secure Seed
-        if (!fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+        if (!fun.bm.mili.config.modules.function.SecureSeedConfig.enabled) {
         //Paper start - Add missing structure set seed configs
         if (this.conf.strongholdSeed != null && structureSet.is(net.minecraft.world.level.levelgen.structure.BuiltinStructureSets.STRONGHOLDS)) {
             random.setSeed(this.conf.strongholdSeed);

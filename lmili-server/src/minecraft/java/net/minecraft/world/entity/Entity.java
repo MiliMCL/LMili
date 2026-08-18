@@ -298,7 +298,7 @@ public abstract class Entity
     public double yOld;
     public double zOld;
     public boolean noPhysics;
-    protected final RandomSource random = fun.bm.mili.lmili.config.modules.fixes.VanillaRandomSourceConfig.useLegacyRandomSourceForPlayers ? RandomSource.create() : SHARED_RANDOM; // Paper - Share random for entities to make them more random // Lmili - Add config for vanilla random SHARED_RANDOM
+    protected final RandomSource random = fun.bm.mili.config.modules.fixes.VanillaRandomSourceConfig.useLegacyRandomSourceForPlayers ? RandomSource.create() : SHARED_RANDOM; // Paper - Share random for entities to make them more random // Lmili - Add config for vanilla random SHARED_RANDOM
     public int tickCount;
     private int remainingFireTicks;
     private final EntityFluidInteraction fluidInteraction = new EntityFluidInteraction(Set.of(FluidTags.WATER, FluidTags.LAVA));
@@ -1171,7 +1171,7 @@ public abstract class Entity
         }
         //Lmili start - Fix high position moving
         // Filter the threads as it may be called by the chunk system worker thread
-        if (fun.bm.mili.lmili.config.modules.fixes.FoliaEntityMovingFixConfig.enabled && ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()){
+        if (fun.bm.mili.config.modules.fixes.FoliaEntityMovingFixConfig.enabled && ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()){
             var finalPosition = delta.add(this.position);
             // not NaN (Prevent incorrect checks under NaN minecarts)
             if (!Double.isNaN(finalPosition.x) && !Double.isNaN(finalPosition.y) && !Double.isNaN(finalPosition.z)) {
@@ -4512,8 +4512,8 @@ public abstract class Entity
         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
 
         // Lmili start - Prevent teleprotAsync calls in move events
-        if (this.blockTeleportAsync && fun.bm.mili.lmili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.enabled) {
-            if (fun.bm.mili.lmili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.throwWhenCaught) {
+        if (this.blockTeleportAsync && fun.bm.mili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.enabled) {
+            if (fun.bm.mili.config.modules.fixes.PreventIncorrectTeleportAsyncConfig.throwWhenCaught) {
                 throw new IllegalStateException("Call teleportAsync during move events!");
             }
 

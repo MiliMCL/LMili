@@ -91,7 +91,7 @@ public abstract class BaseCommandBlock {
     }
 
     public boolean performCommand(final ServerLevel level) {
-        if (!fun.bm.mili.lmili.config.modules.experiment.CommandConfig.commandBlock) return false; // Folia - region threading // Lmili - Add experimental config for command block command execution
+        if (!fun.bm.mili.config.modules.experiment.CommandConfig.commandBlock) return false; // Folia - region threading // Lmili - Add experimental config for command block command execution
         if (level.getGameTime() == this.lastExecution) {
             return false;
         }

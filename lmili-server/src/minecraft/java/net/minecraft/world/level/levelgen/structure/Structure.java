@@ -249,7 +249,7 @@ public abstract class Structure {
 
         private static WorldgenRandom makeRandom(final long seed, final ChunkPos chunkPos) {
             // Leaf start - Matter - Secure Seed
-            if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+            if (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled) {
                 return new su.plo.matter.WorldgenCryptoRandom(chunkPos.x(), chunkPos.z(), su.plo.matter.Globals.Salt.GENERATE_FEATURE, seed);
             }
             // Leaf end - Matter - Secure Seed

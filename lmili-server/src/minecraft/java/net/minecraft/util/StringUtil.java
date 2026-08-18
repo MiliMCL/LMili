@@ -65,7 +65,7 @@ public class StringUtil {
 
     // Lmili start - Add config for username checks
     public static boolean isValidPlayerName(final String username){
-        return isValidPlayerName(username, !fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled);
+        return isValidPlayerName(username, !fun.bm.mili.config.modules.misc.UsernameCheckConfig.enabled);
     }
     // Lmili end
 

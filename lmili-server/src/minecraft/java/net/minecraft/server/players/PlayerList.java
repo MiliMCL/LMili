@@ -343,7 +343,7 @@ public abstract class PlayerList {
         // only after setting the connection listener to game type, add the connection to this regions list
         level.getCurrentWorldData().addConnection(player);
         // Folia end - rewrite login process
-        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Lmili - Async protocol switch // we will run async switch once these main thread logics became done
+        if (!fun.bm.mili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Lmili - Async protocol switch // we will run async switch once these main thread logics became done
         connection.setupInboundProtocol(
             GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection), playerConnection
         );
@@ -513,7 +513,7 @@ public abstract class PlayerList {
         }
         // Paper end - Send empty chunk
         // Lmili start - Async protocol switch
-        if (fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
+        if (fun.bm.mili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
             // auto read will be enabled once the async switch is done
             connection.setupInboundProtocolAsync(
                     GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection),

@@ -258,7 +258,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
             if (this.stopReadingPackets) {
                 return;
             }
-            if (!fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && (this.allPacketCounts != null || // Lmili - Add config to force disable the packet limiter of Paper
+            if (!fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && (this.allPacketCounts != null || // Lmili - Add config to force disable the packet limiter of Paper
                 io.papermc.paper.configuration.GlobalConfiguration.get().packetLimiter.overrides.containsKey(packet.getClass()))) { // Lmili - Add config to force disable the packet limiter of Paper
                 long time = System.nanoTime();
                 synchronized (PACKET_LIMIT_LOCK) {

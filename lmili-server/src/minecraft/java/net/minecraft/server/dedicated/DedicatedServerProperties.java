@@ -140,7 +140,7 @@ public class DedicatedServerProperties extends Settings<DedicatedServerPropertie
         boolean generateStructures = this.get("generate-structures", true);
         long seed = WorldOptions.parseSeed(levelSeed).orElse(WorldOptions.randomSeed());
         // Leaf start - Matter - Secure Seed
-        if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+        if (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled) {
             String featureSeedStr = this.get("feature-level-seed", "");
             long[] featureSeed = su.plo.matter.Globals.parseSeed(featureSeedStr)
                     .orElse(su.plo.matter.Globals.createRandomWorldSeed());

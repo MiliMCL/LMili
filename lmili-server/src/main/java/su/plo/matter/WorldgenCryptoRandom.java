@@ -1,6 +1,6 @@
 package su.plo.matter;
 
-import fun.bm.mili.lmili.config.modules.function.SecureSeedConfig;
+import fun.bm.mili.config.modules.function.SecureSeedConfig;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.levelgen.LegacyRandomSource;

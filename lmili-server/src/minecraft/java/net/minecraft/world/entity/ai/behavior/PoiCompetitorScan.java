@@ -31,7 +31,7 @@ public class PoiCompetitorScan {
                         // we don't care if we should clear the memory of JOB_SITE
                         // as it will be automatically removed in SetWalkTargetFromBlockMemory
                         // so simply break down if it's not loaded
-                        var poiChunk = fun.bm.mili.lmili.config.modules.fixes.POIRangeFixes.doNotCompetePOIIfUnloaded ? poiManager.get(sectionPosOfJobSite) : poiManager.getOrLoad(sectionPosOfJobSite);
+                        var poiChunk = fun.bm.mili.config.modules.fixes.POIRangeFixes.doNotCompetePOIIfUnloaded ? poiManager.get(sectionPosOfJobSite) : poiManager.getOrLoad(sectionPosOfJobSite);
                         poiChunk.flatMap(poiSection -> poiSection.getType(blockPosOfJobSite))
                         // Lmili end - POI fixes
                         /*level.getPoiManager() // Lmili - POI fixes

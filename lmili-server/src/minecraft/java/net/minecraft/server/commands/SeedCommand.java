@@ -14,7 +14,7 @@ public class SeedCommand {
                 Component seedText = ComponentUtils.copyOnClickText(String.valueOf(seed));
                 c.getSource().sendSuccess(() -> Component.translatable("commands.seed.success", seedText), false);
                 // Leaf start - Matter - SecureSeed Command
-                if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+                if (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled) {
                     su.plo.matter.Globals.setupGlobals(c.getSource().getLevel());
                     String seedStr = su.plo.matter.Globals.seedToString(su.plo.matter.Globals.worldSeed);
                     Component featureSeedComponent = ComponentUtils.copyOnClickText(seedStr);

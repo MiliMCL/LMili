@@ -12,7 +12,7 @@ import org.apache.commons.lang3.StringUtils;
 public class WorldOptions {
     // Leaf start - Matter - Secure Seed
     private static final com.google.gson.Gson gson = new com.google.gson.Gson();
-    private static final boolean isSecureSeedEnabled = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled;
+    private static final boolean isSecureSeedEnabled = fun.bm.mili.config.modules.function.SecureSeedConfig.enabled;
     public static final MapCodec<WorldOptions> CODEC = RecordCodecBuilder.mapCodec(
             // Leaf start - Matter - Secure Seed
             i -> isSecureSeedEnabled

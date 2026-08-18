@@ -12,7 +12,7 @@ public record ServerboundChatCommandPacket(String command) implements Packet<Ser
     );
 
     private ServerboundChatCommandPacket(final FriendlyByteBuf input) {
-        this(fun.bm.mili.lmili.config.modules.fixes.LongCommandSupportConfig.enabled ? input.readUtf() : input.readUtf(MAX_CHAT_PACKET_INPUT_SIZE)); // Paper - limit chat command inputs // Lmili - add support for long command inputs
+        this(fun.bm.mili.config.modules.fixes.LongCommandSupportConfig.enabled ? input.readUtf() : input.readUtf(MAX_CHAT_PACKET_INPUT_SIZE)); // Paper - limit chat command inputs // Lmili - add support for long command inputs
     }
 
     private void write(final FriendlyByteBuf output) {

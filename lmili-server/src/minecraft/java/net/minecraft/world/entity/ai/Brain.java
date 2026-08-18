@@ -404,7 +404,7 @@ public class Brain<E extends LivingEntity> {
                 final net.minecraft.world.level.Level ownerLevel = owner.level();
 
                 // type: entity
-                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForEntity && value instanceof LivingEntity entity) {
+                if (fun.bm.mili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForEntity && value instanceof LivingEntity entity) {
                     if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
                         this.eraseMemory(entry.getKey());
                         continue;
@@ -412,7 +412,7 @@ public class Brain<E extends LivingEntity> {
                 }
 
                 // type: block_pos
-                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForBlockPos && value instanceof net.minecraft.core.BlockPos blockPos) {
+                if (fun.bm.mili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForBlockPos && value instanceof net.minecraft.core.BlockPos blockPos) {
                     if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(ownerLevel, blockPos)) {
                         this.eraseMemory(entry.getKey());
                         continue;
@@ -420,7 +420,7 @@ public class Brain<E extends LivingEntity> {
                 }
 
                 //type: position_tracker and walk_target
-                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForPositionTracker) {
+                if (fun.bm.mili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForPositionTracker) {
                     net.minecraft.world.entity.ai.behavior.PositionTracker tracker = null;
 
                     if (value instanceof net.minecraft.world.entity.ai.behavior.PositionTracker positionTracker) {

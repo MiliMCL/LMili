@@ -86,7 +86,7 @@ public final class ActivationRange {
     private static final java.util.concurrent.ThreadLocalRandom wakeUpDurationRandom = java.util.concurrent.ThreadLocalRandom.current();
 
     private static int getWakeUpDurationWithVariance(Entity entity, int wakeUpDuration) {
-        double deviation = fun.bm.mili.lmili.config.modules.optimizations.GaleVariableEntityWakeupConfig.entityWakeUpDurationRatioStandardDeviation;
+        double deviation = fun.bm.mili.config.modules.optimizations.GaleVariableEntityWakeupConfig.entityWakeUpDurationRatioStandardDeviation;
         if (deviation <= 0) {
             return wakeUpDuration;
         }

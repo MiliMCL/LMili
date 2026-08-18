@@ -128,7 +128,7 @@ public class Heightmap {
         if (rawData.length == data.length) {
             System.arraycopy(data, 0, rawData, 0, data.length);
         } else {
-            if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableHeightmapWarning)
+            if (!fun.bm.mili.config.modules.misc.DisableWarningConfig.disableHeightmapWarning)
                 LOGGER.warn("Ignoring heightmap data for chunk {}, size does not match; expected: {}, got: {}", chunk.getPos(), rawData.length, data.length);
             primeHeightmaps(chunk, EnumSet.of(type));
         }

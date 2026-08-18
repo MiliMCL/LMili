@@ -139,7 +139,7 @@ public abstract class StructurePlacement {
     private static boolean legacyArbitrarySaltProbabilityReducer(final long seed, final int salt, final int sourceX, final int sourceZ, final float probability, final @org.jspecify.annotations.Nullable Integer saltOverride) { // Paper - Add missing structure set seed configs
         // Leaf start - Matter - Secure Seed
         WorldgenRandom random;
-        if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+        if (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled) {
             random = new su.plo.matter.WorldgenCryptoRandom(sourceX, sourceZ, su.plo.matter.Globals.Salt.UNDEFINED, saltOverride != null ? saltOverride : HIGHLY_ARBITRARY_RANDOM_SALT);
         } else {
             random = new WorldgenRandom(new LegacyRandomSource(0L));

@@ -466,19 +466,19 @@ public final class RegionizedWorldData {
 
     // Lmili start - Portal rate limiter
     public final fun.bm.mili.lmili.utils.RateThrottler portalRateThrottler = new fun.bm.mili.lmili.utils.RateThrottler();
-    public final net.objecthunter.exp4j.Expression portalRateCapExpression = fun.bm.mili.lmili.config.modules.function.PortalRateLimiterConfig.getExpressionIfConfigured();
+    public final net.objecthunter.exp4j.Expression portalRateCapExpression = fun.bm.mili.config.modules.function.PortalRateLimiterConfig.getExpressionIfConfigured();
 
     private int computePortalRateCap() {
         // expression mode is disabled
         if (this.portalRateCapExpression == null) {
-            return fun.bm.mili.lmili.config.modules.function.PortalRateLimiterConfig.maxPortalTeleportsPerTick;
+            return fun.bm.mili.config.modules.function.PortalRateLimiterConfig.maxPortalTeleportsPerTick;
         }
 
         final int tickingEntityCount = this.entityTickList.size();
         final int tickingChunkCount = this.tickingChunks.size();
         final int playerCount = this.localPlayers.size();
 
-        return fun.bm.mili.lmili.config.modules.function.PortalRateLimiterConfig.computeExpression(
+        return fun.bm.mili.config.modules.function.PortalRateLimiterConfig.computeExpression(
                 this.portalRateCapExpression,
                 tickingEntityCount,
                 tickingChunkCount,
@@ -486,7 +486,7 @@ public final class RegionizedWorldData {
         );
     }
     public boolean isPortalTeleportationOutOfRate() {
-        if (!fun.bm.mili.lmili.config.modules.function.PortalRateLimiterConfig.enabled) {
+        if (!fun.bm.mili.config.modules.function.PortalRateLimiterConfig.enabled) {
             return false;
         }
 

@@ -295,7 +295,7 @@ public final class ExecutionContext {
 
 ## 5. 实施计划
 
-### Phase 1: 基础设施（1-2 天）
+### Phase 1: 基础设施（1-2 天） ✅ 已完成
 
 1. 创建 `mili-scheduler` 模块骨架
 2. 定义核心接口（MiliScheduler, TaskHandle, RegionTask）
@@ -318,7 +318,7 @@ public final class ExecutionContext {
 - `lmili-server/src/main/java/fun/bm/mili/lmili/thread/regiontick/executor/DagExecutionEngine.java`
 - `lmili-server/src/main/java/fun/bm/mili/lmili/thread/regiontick/executor/ModernDagTickExecutor.java`
 
-### Phase 3: Layer 3 核心（2-3 天）
+### Phase 3: Layer 3 核心（2-3 天） ✅ 已完成
 
 1. 实现 VirtualThreadPool（替代单例）
 2. 实现 WorkStealingCoordinator
@@ -326,18 +326,29 @@ public final class ExecutionContext {
 4. 实现 BlockingTaskIsolation
 5. 优化 StructuredScope
 
-### Phase 4: 集成与迁移（1-2 天）
+### Phase 4: 集成与迁移（1-2 天） ✅ 已完成
 
 1. 实现 MiliSchedulerBuilder
 2. 创建适配器连接现有 RegionTickDispatcher
 3. 灰度切换：配置开关选择新旧实现
 4. 性能基准测试
 
-### Phase 5: 清理（1 天）
+### Phase 5: 清理（1 天）✅ 已完成
 
-1. 移除旧实现
-2. 更新文档
-3. 清理废弃代码
+1. ✅ 移除旧实现 — 删除 `DagBasedTickExecutor`、`RegionDag`、`RegionDagExecutor`、`DagNode`、`ConflictDetector`、`VirtualThreadScheduler`、旧 `StructuredScope`、旧 `regiontick.api` 包
+2. ✅ 更新文档 — 更新 `MiliGameSystems` 注释引用，更新本计划文档
+3. ✅ 清理废弃代码 — 迁移 `RegionTickDispatcher` 使用 `ModernDagTickExecutor`，迁移 `PublicSchedulerAdapter` 适配新接口，迁移 `RegionTickBootstrap` 使用 `MiliSchedulerBuilder`
+
+**变更文件：**
+- 删除 `dag/ConflictDetector.java`、`dag/DagNode.java`、`dag/RegionDag.java`、`dag/RegionDagExecutor.java`
+- 删除 `executor/DagBasedTickExecutor.java`
+- 删除 `suspend/VirtualThreadScheduler.java`、`suspend/StructuredScope.java`
+- 删除 `api/MiliScheduler.java`、`api/EntityOrphanedException.java`、`api/EntityTaskContext.java`
+- 迁移 `regiontick/RegionTickDispatcher.java` — 使用 `ModernDagTickExecutor`
+- 迁移 `regiontick/RegionTickBootstrap.java` — 使用 `MiliSchedulerBuilder` + `PublicSchedulerAdapter`(新接口)
+- 迁移 `api/internal/PublicSchedulerAdapter.java` — 适配新 `scheduler.api.MiliScheduler`
+- 更新 `regiontick/MiliGameSystems.java` — 注释引用 `ModernDagTickExecutor`
+- 保留 `suspend/MiliThreadFactory.java` — 仍被 `RegionTickDispatcher` 使用
 
 ---
 

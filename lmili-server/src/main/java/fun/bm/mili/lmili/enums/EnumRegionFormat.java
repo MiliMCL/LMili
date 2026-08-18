@@ -1,7 +1,7 @@
 package fun.bm.mili.lmili.enums;
 
 import abomination.LinearRegionFile;
-import fun.bm.mili.lmili.config.modules.function.RegionFormatConfig;
+import fun.bm.mili.config.modules.function.RegionFormatConfig;
 import fun.bm.mili.lmili.data.BufferedLinearRegionFile;
 import fun.bm.mili.lmili.utils.IRegionCreateFunction;
 import net.minecraft.world.level.chunk.storage.RegionFile;

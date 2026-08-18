@@ -59,7 +59,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
     }
     // Lmili start - Configurable region file format
     public static abomination.IRegionFile createNew(RegionStorageInfo info, Path filePath, Path folder, boolean sync) throws IOException{
-        final fun.bm.mili.lmili.enums.EnumRegionFormat regionFormat = fun.bm.mili.lmili.config.modules.function.RegionFormatConfig.regionFormat;
+        final fun.bm.mili.lmili.enums.EnumRegionFormat regionFormat = fun.bm.mili.config.modules.function.RegionFormatConfig.regionFormat;
         final String fullFileName = filePath.getFileName().toString();
         final String[] fullNameSplit = fullFileName.split("\\.");
         final String extensionName = fullNameSplit[fullNameSplit.length - 1];
@@ -72,7 +72,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
     }
 
     public static String getExtensionName() {
-        return "." + fun.bm.mili.lmili.config.modules.function.RegionFormatConfig.regionFormat.getArgument();
+        return "." + fun.bm.mili.config.modules.function.RegionFormatConfig.regionFormat.getArgument();
     }
     // Lmili end
 

@@ -61,7 +61,7 @@ public class FlyingPathNavigation extends PathNavigation {
             if (!this.isDone()) {
                 Vec3 target = this.path.getNextEntityPos(this.mob);
                 // Lmili - Recompute path when path finding out of current tick region
-                if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
+                if (fun.bm.mili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
                     // we assume that:
                     // 1. The code above doesn't touch the 'main thread context' with the position from 'this.path'
                     // 2. The pathfinder could correctly recompute or discard the incorrect target position and this situation is happening rarely

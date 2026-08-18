@@ -104,7 +104,7 @@ public abstract class PathNavigation {
             this.hasDelayedRecomputation = true;
         } else if (this.targetPos != null) {
             // Lmili - Recompute path when path finding out of current tick region
-            if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
+            if (fun.bm.mili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
                 // The target seems to be pointed to a position out of current region, so reset if it is
                 // also it will interrupt the pathfinding
                 if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.mob.level(), this.targetPos)) {
@@ -203,7 +203,7 @@ public abstract class PathNavigation {
         }
         // Paper end - EntityPathfindEvent
         // Lmili - Do not path find for targets out of current region
-        if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.doNotPathfindToNotOwnedTargets) {
+        if (fun.bm.mili.config.modules.fixes.PathfindingFixesConfig.doNotPathfindToNotOwnedTargets) {
             // filter the targets not owned by current region
             targets = new HashSet<>(targets); // well no idea about how to determine if this should be copied to a modifiable one
             targets.removeIf(pos -> !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.mob.level(), pos));
@@ -313,7 +313,7 @@ public abstract class PathNavigation {
             if (!this.isDone()) {
                 Vec3 target = this.path.getNextEntityPos(this.mob);
                 // Lmili - Recompute path when path finding out of current tick region
-                if (fun.bm.mili.lmili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
+                if (fun.bm.mili.config.modules.fixes.PathfindingFixesConfig.breakDownPathfindingWhenOutOfRegion) {
                     // we assume that:
                     // 1. The code above doesn't touch the 'main thread context' with the position from 'this.path'
                     // 2. The pathfinder could correctly recompute or discard the incorrect target position and this situation is happening rarely

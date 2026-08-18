@@ -1,7 +1,7 @@
 package fun.bm.mili.lmili.functions.bars;
 
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
-import fun.bm.mili.lmili.config.modules.function.MembarConfig;
+import fun.bm.mili.config.modules.function.MembarConfig;
 import fun.bm.mili.lmili.enums.EnumStatusBarDisplay;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;

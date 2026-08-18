@@ -65,7 +65,7 @@ public class JigsawPlacement {
         StructureTemplateManager structureTemplateManager = context.structureTemplateManager();
         LevelHeightAccessor heightAccessor = context.heightAccessor();
         // Leaf start - Matter - Secure Seed
-        WorldgenRandom random = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+        WorldgenRandom random = fun.bm.mili.config.modules.function.SecureSeedConfig.enabled
                 ? new su.plo.matter.WorldgenCryptoRandom(context.chunkPos().x(), context.chunkPos().z(), su.plo.matter.Globals.Salt.JIGSAW_PLACEMENT, 0)
                 : context.random();
         // Leaf end - Matter - Secure Seed

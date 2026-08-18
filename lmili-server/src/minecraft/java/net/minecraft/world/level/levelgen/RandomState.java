@@ -35,17 +35,17 @@ public final class RandomState {
     private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, final long seed) {
         // this.random = settings.getRandomSource().newInstance(seed).forkPositional(); // Lmili - Add secure seed V2 with Blake3
         // Lmili start - Add secure seed V2 with Blake3
-        final long[] secureWorldSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+        final long[] secureWorldSeed = (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.config.modules.function.SecureSeedConfig.version == 2)
             ? su.plo.matter.HashingV2.expandLevelSeedTo1024Bits(seed)
             : null;
 
-        long terrainSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+        long terrainSeed = (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.config.modules.function.SecureSeedConfig.version == 2)
             ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.BASE_TERRAIN)
             : seed;
-        long aquiferSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+        long aquiferSeed = (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.config.modules.function.SecureSeedConfig.version == 2)
             ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.AQUIFER)
             : seed;
-        long oreSeed = (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+        long oreSeed = (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.config.modules.function.SecureSeedConfig.version == 2)
             ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.ORE)
             : seed;
         // Lmili end
@@ -65,7 +65,7 @@ public final class RandomState {
 
             private RandomSource newLegacyInstance(final long seedOffset) {
                 // Lmili start - Add secure seed V2 with Blake3
-                if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2) {
+                if (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.config.modules.function.SecureSeedConfig.version == 2) {
                     long climateSeed = su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.CLIMATE);
                     return new su.plo.matter.WorldgenCryptoRandom(0, 0, su.plo.matter.Globals.Salt.UNDEFINED, climateSeed + seedOffset);
                 }
@@ -98,7 +98,7 @@ public final class RandomState {
                     return function instanceof DensityFunctions.EndIslandDensityFunction
                         //? new DensityFunctions.EndIslandDensityFunction(seed) // Lmili - Add secure seed V2 with Blake3
                         // Lmili start - Add secure seed V2 with Blake3
-                        ? new DensityFunctions.EndIslandDensityFunction((fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.version == 2)
+                        ? new DensityFunctions.EndIslandDensityFunction((fun.bm.mili.config.modules.function.SecureSeedConfig.enabled && fun.bm.mili.config.modules.function.SecureSeedConfig.version == 2)
                             ? su.plo.matter.HashingV2.getTerrainSeed(secureWorldSeed, su.plo.matter.HashingV2.TerrainType.SURFACE)
                             : seed)
                        // Lmili end

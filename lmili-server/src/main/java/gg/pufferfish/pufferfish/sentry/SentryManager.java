@@ -44,7 +44,7 @@ public class SentryManager {
             initialized = true;
 
             Sentry.init(options -> {
-                options.setDsn(fun.bm.mili.lmili.config.modules.misc.SentryConfig.sentryDsn);
+                options.setDsn(fun.bm.mili.config.modules.misc.SentryConfig.sentryDsn);
                 options.setMaxBreadcrumbs(100);
             });
 

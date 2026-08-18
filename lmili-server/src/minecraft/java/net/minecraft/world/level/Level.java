@@ -1588,7 +1588,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
             var currPosition = ent.position();
             var toPosition = moveOutOfRegionException.getMovement().add(currPosition);
 
-            if (fun.bm.mili.lmili.config.modules.fixes.FoliaEntityMovingFixConfig.warnOnDetected) {
+            if (fun.bm.mili.config.modules.fixes.FoliaEntityMovingFixConfig.warnOnDetected) {
                 MinecraftServer.LOGGER.warn("Entity {} with entityId {} has tried moving to another region!",ent, ent.getId());
             }
 
@@ -1602,7 +1602,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
             ), null, 1L);
             // Lmili end
         } catch (Throwable t) {
-            if (fun.bm.mili.lmili.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Lmili
+            if (fun.bm.mili.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Lmili
             // Paper start - Prevent block entity and entity crashes
             final String msg = String.format("Entity threw exception at %s:%s,%s,%s", io.papermc.paper.util.MCUtil.getLevelName(entity.level()), entity.getX(), entity.getY(), entity.getZ());
             MinecraftServer.LOGGER.error(msg, t);

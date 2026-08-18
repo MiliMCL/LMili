@@ -77,7 +77,7 @@ public class EndPortalBlock extends BaseEntityBlock implements Portal {
                 player.showEndCredits();
             } else {
                 // Lmili start - unsafe teleportation
-                if (fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled && !(entity instanceof net.minecraft.world.entity.player.Player)) {
+                if (fun.bm.mili.config.modules.fixes.UnsafeTeleportationConfig.enabled && !(entity instanceof net.minecraft.world.entity.player.Player)) {
                     entity.endPortalLogicAsync(pos);
                 }
                 // Lmili end

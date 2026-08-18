@@ -348,7 +348,7 @@ public abstract class ChunkGenerator {
                 .collect(Collectors.groupingBy(structure -> structure.step().ordinal()));
             List<FeatureSorter.StepFeatureData> featureList = this.featuresPerStep.get();
             // Leaf start - Matter - Secure Seed
-            WorldgenRandom random = fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled
+            WorldgenRandom random = fun.bm.mili.config.modules.function.SecureSeedConfig.enabled
                     ? new su.plo.matter.WorldgenCryptoRandom(origin.getX(), origin.getZ(), su.plo.matter.Globals.Salt.UNDEFINED, 0)
                     : new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
             // Leaf end - Matter - Secure Seed
@@ -577,7 +577,7 @@ public abstract class ChunkGenerator {
                                 options.addAll(structures);
                                 // Leaf start - Matter - Secure Seed
                                 WorldgenRandom random;
-                                if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+                                if (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled) {
                                     random = new su.plo.matter.WorldgenCryptoRandom(sourceChunkPos.x(), sourceChunkPos.z(), su.plo.matter.Globals.Salt.GENERATE_FEATURE, 0);
                                 } else {
                                     random = new WorldgenRandom(new LegacyRandomSource(0L));

@@ -69,7 +69,7 @@ public class RandomSpreadStructurePlacement extends StructurePlacement {
         int spacedGridZ = Math.floorDiv(sourceZ, this.spacing);
         // Leaf start - Matter - Secure Seed
         WorldgenRandom random;
-        if (fun.bm.mili.lmili.config.modules.function.SecureSeedConfig.enabled) {
+        if (fun.bm.mili.config.modules.function.SecureSeedConfig.enabled) {
             random = new su.plo.matter.WorldgenCryptoRandom(spacedGridX, spacedGridZ, su.plo.matter.Globals.Salt.POTENTIONAL_FEATURE, this.salt);
         } else {
             random = new WorldgenRandom(new LegacyRandomSource(0L));

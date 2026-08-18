@@ -1,6 +1,6 @@
 package su.plo.matter;
 
-import fun.bm.mili.lmili.config.modules.function.SecureSeedConfig;
+import fun.bm.mili.config.modules.function.SecureSeedConfig;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;

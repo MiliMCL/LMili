@@ -644,7 +644,7 @@ public class ServerGamePacketListenerImpl
                     return;
                 }
                 // Paper end - Prevent moving into unloaded chunks
-                if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(100.0, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) i * speed)) && !this.isSingleplayerOwner()) { // Leaves - disable can
+                if (!fun.bm.mili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(100.0, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) i * speed)) && !this.isSingleplayerOwner()) { // Leaves - disable can
                     // CraftBukkit end
                     LOGGER.warn(
                         "{} (vehicle of {}) moved too quickly! {},{},{}", vehicle.getPlainTextName(), this.player.getPlainTextName(), xDist, yDist, zDist
@@ -674,7 +674,7 @@ public class ServerGamePacketListenerImpl
                 zDist = targetZ - vehicle.getZ();
                 movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
                 boolean fail = false;
-                if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist > org.spigotmc.SpigotConfig.movedWronglyThreshold) { // Spigot // Leaves - disable can
+                if (!fun.bm.mili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist > org.spigotmc.SpigotConfig.movedWronglyThreshold) { // Spigot // Leaves - disable can
                     fail = true;
                     LOGGER.warn("{} (vehicle of {}) moved wrongly! {}", vehicle.getPlainTextName(), this.player.getPlainTextName(), Math.sqrt(movedDist));
                 }
@@ -892,7 +892,7 @@ public class ServerGamePacketListenerImpl
     public void handleCustomCommandSuggestions(final ServerboundCommandSuggestionPacket packet) {
         // PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level()); // Paper - AsyncTabCompleteEvent; run this async
         // CraftBukkit start
-        if (!fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !this.tabSpamThrottler.isIncrementAndUnderThreshold() && !this.server.getPlayerList().isOp(this.player.nameAndId()) && !this.server.isSingleplayerOwner(this.player.nameAndId())) { // Paper - configurable tab spam limits // Leaves - can disable
+        if (!fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !this.tabSpamThrottler.isIncrementAndUnderThreshold() && !this.server.getPlayerList().isOp(this.player.nameAndId()) && !this.server.isSingleplayerOwner(this.player.nameAndId())) { // Paper - configurable tab spam limits // Leaves - can disable
             this.disconnectAsync(Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - Kick event cause // Paper - add proper async disconnect
             return;
         }
@@ -1615,7 +1615,7 @@ public class ServerGamePacketListenerImpl
 
                                     if (this.shouldCheckPlayerMovement(isFallFlying)) {
                                         float metersPerTick = isFallFlying ? 300.0F : 100.0F;
-                                        if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(metersPerTick, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) deltaPackets * speed))) { // Leaves - disable can
+                                        if (!fun.bm.mili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning && movedDist - expectedDist > Math.max(metersPerTick, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) deltaPackets * speed))) { // Leaves - disable can
                                             // CraftBukkit end
                                             // Paper start - Add fail move event
                                             io.papermc.paper.event.player.PlayerFailMoveEvent event = fireFailMove(io.papermc.paper.event.player.PlayerFailMoveEvent.FailReason.MOVED_TOO_QUICKLY,
@@ -1676,7 +1676,7 @@ public class ServerGamePacketListenerImpl
                                 zDist = targetZ - this.player.getZ();
                                 movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
                                 boolean movedWrongly = false; // Paper - Add fail move event; rename
-                                if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning // Leaves - disable can
+                                if (!fun.bm.mili.config.modules.misc.DisableWarningConfig.disableMovedWronglyThresholdWarning // Leaves - disable can
                                             && !this.player.isChangingDimension()
                                     && movedDist > org.spigotmc.SpigotConfig.movedWronglyThreshold // Spigot
                                     && !this.player.isSleeping()
@@ -2130,7 +2130,7 @@ public class ServerGamePacketListenerImpl
     private long lastLimitedPacket = -1;
 
     private boolean checkLimit(long timestamp) {
-        if (fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return true; // Leaves - disable
+        if (fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return true; // Leaves - disable
         if (!io.papermc.paper.configuration.GlobalConfiguration.get().spamLimiter.incomingPacketThreshold.enabled()) {
             return true;
         }
@@ -2691,7 +2691,7 @@ public class ServerGamePacketListenerImpl
 
     // Spigot start - spam exclusions
     private void detectRateSpam(final TickThrottler throttler, final String message) {
-        if (fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return; // Leaves - disable
+        if (fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return; // Leaves - disable
         if (org.spigotmc.SpigotConfig.enableSpamExclusions) {
             for (String exclude : org.spigotmc.SpigotConfig.spamExclusions) {
                 if (exclude != null && message.startsWith(exclude)) {
@@ -2905,7 +2905,7 @@ public class ServerGamePacketListenerImpl
         } // Folia end - rewrite login process - move connection ownership to global region
         this.waitingForSwitchToConfig = true; // Folia - rewrite login process - fix bad ordering of this field write - moved down
         this.send(ClientboundStartConfigurationPacket.INSTANCE);
-        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Lmili - Async protocol switch
+        if (!fun.bm.mili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Lmili - Async protocol switch
         this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
         // Lmili start - Async protcol switch
         } else {
@@ -3490,7 +3490,7 @@ public class ServerGamePacketListenerImpl
     @Override
     public void handlePlaceRecipe(final ServerboundPlaceRecipePacket packet) {
         // Paper start - auto recipe limit
-        if (!fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !org.bukkit.Bukkit.isPrimaryThread()) { // Leaves - can disable
+        if (!fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !org.bukkit.Bukkit.isPrimaryThread()) { // Leaves - can disable
             if (!this.recipeSpamPackets.isIncrementAndUnderThreshold()) {
                 this.disconnectAsync(net.minecraft.network.chat.Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - kick event cause // Paper - add proper async disconnect
                 return;
@@ -3796,7 +3796,7 @@ public class ServerGamePacketListenerImpl
         }
 
         final ServerConfigurationPacketListenerImpl listener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, this.createCookie(this.player.clientInformation())); // Paper
-        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Lmili - Async protocol switch
+        if (!fun.bm.mili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) { // Lmili - Async protocol switch
         this.connection
             .setupInboundProtocol(
                 ConfigurationProtocols.SERVERBOUND,

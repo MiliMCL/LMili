@@ -247,7 +247,7 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
         }
         // Lmili start - Async protocol switch
         };
-        if (!fun.bm.mili.lmili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
+        if (!fun.bm.mili.config.modules.optimizations.AsyncProtocolChangeConfig.enabled) {
             this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
             afterSwitch.run(); // directly run callback as we won't process any packet this time
         } else {

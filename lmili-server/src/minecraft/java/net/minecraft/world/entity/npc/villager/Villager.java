@@ -195,8 +195,8 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
     private int notLobotomizedCount = 0; // Purpur
 
     private boolean checkLobotomized() {
-        int interval = fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeCheckInterval;
-        boolean shouldCheckForTradeLocked = fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeWaitUntilTradeLocked;
+        int interval = fun.bm.mili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeCheckInterval;
+        boolean shouldCheckForTradeLocked = fun.bm.mili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeWaitUntilTradeLocked;
         if (this.notLobotomizedCount > 3) {
             // check half as often if not lobotomized for the last 3+ consecutive checks
             interval *= 2;
@@ -311,7 +311,7 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
         ProfilerFiller profiler = Profiler.get();
         profiler.push("villagerBrain");
         // Purpur start
-        if (fun.bm.mili.lmili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeEnabled) {
+        if (fun.bm.mili.config.modules.optimizations.LobotomizeVillageConfig.villagerLobotomizeEnabled) {
             // treat as inactive if lobotomized
             inactive = inactive || checkLobotomized();
         } else {
