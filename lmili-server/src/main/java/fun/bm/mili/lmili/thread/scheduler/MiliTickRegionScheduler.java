@@ -81,7 +81,8 @@ public final class MiliTickRegionScheduler {
      * @param threadCount worker 线程数
      */
     public MiliTickRegionScheduler(final int threadCount) {
-        final int workerCount = Math.max(1, threadCount);
+        // 至少使用2个worker线程，确保global tick不会被region tick阻塞
+        final int workerCount = Math.max(2, threadCount);
 
         // 创建 MiliScheduler（用于延迟任务等）
         this.scheduler = MiliSchedulerBuilder.create("tick-region-scheduler")
