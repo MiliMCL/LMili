@@ -116,6 +116,9 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
             return;
         }
         if (this.tick++ == MAX_TICKS_BEFORE_LOGIN) {
+            LOGGER.warn("[Mili] Login timeout for {}: state={}, tick={}, maxTick={}, thread={}",
+                    this.getUserName(), this.state, this.tick, MAX_TICKS_BEFORE_LOGIN,
+                    Thread.currentThread().getName());
             this.disconnectAsync(Component.translatable("multiplayer.disconnect.slow_login")); // Paper
         }
     }
