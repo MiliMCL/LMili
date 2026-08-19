@@ -132,7 +132,7 @@ public final class AsyncLoginHandler {
                     connection.getRemoteAddress(), throwable.getMessage());
             } else {
                 LOGGER.info("Login successful for connection {} (profile: {})",
-                    connection.getRemoteAddress(), profile.getName());
+                    connection.getRemoteAddress(), profile.name());
             }
         });
 

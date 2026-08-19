@@ -68,7 +68,7 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
     private final RegionTickExecutor fallbackExecutor;
 
     /** 系统名称到 Scope 的映射（用于兼容旧 API） */
-    private final Int2ObjectMap<ScopeWrapper> scopeMap = Int2ObjectMaps.synchronizedMap(new Int2ObjectOpenHashMap<>());
+    private final Int2ObjectMap<ScopeWrapper> scopeMap = Int2ObjectMaps.synchronize(new Int2ObjectOpenHashMap<>());
 
     /** 编译后的 DAG 缓存 */
     private volatile CompiledDag cachedDag;
