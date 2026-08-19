@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import io.papermc.paper.threadedregions.TickRegions;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
+import it.unimi.dsi.fastutil.longs.LongLists;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
@@ -38,7 +39,9 @@ public final class RegionTickContext {
         /** 空闲，可以开始新 tick */
         IDLE,
         /** 正在 tick，slice 正在执行 */
-        TICKING
+        TICKING,
+        /** 超时，tick 未完成 */
+        TIMED_OUT
     }
 
     public final long regionId;
@@ -76,22 +79,32 @@ public final class RegionTickContext {
         this.region = Objects.requireNonNull(region, "region");
     }
 
-    public void refreshOwnedChunks(@NotNull final LongList chunks) { this.ownedChunks.set(chunks); }
+    public void refreshOwnedChunks(@NotNull final LongList chunks) {
+        // 保存不可修改的 snapshot，避免外部修改影响内部状态
+        this.ownedChunks.set(LongLists.unmodifiable(new LongArrayList(chunks)));
+    }
     public LongList getOwnedChunks() { return this.ownedChunks.get(); }
 
     /**
      * 尝试开始 tick —— 使用 CAS 防止 tick 重叠。
      *
-     * <p>如果前一个 tick 仍在执行，记录跳过并返回 false。</p>
+     * <p>如果前一个 tick 仍在执行，记录跳过并返回 false。
+     * 如果之前处于 TIMED_OUT 状态，也允许开始新 tick。</p>
      *
      * @param sliceCount 本次 tick 的 slice 数量
      * @return true 如果成功进入 TICKING 状态
      */
     public boolean tryBeginTick(final int sliceCount) {
-        // 先尝试 CAS 状态转换
-        if (!tickState.compareAndSet(RegionTickState.IDLE, RegionTickState.TICKING)) {
+        RegionTickState currentState = tickState.get();
+        if (currentState == RegionTickState.TICKING) {
             totalSkippedTicks.increment();
             LOGGER.debug("[RegionTickContext] Region #{} tick skipped — already ticking", regionId);
+            return false;
+        }
+        // 从 IDLE 或 TIMED_OUT 进入 TICKING
+        if (!tickState.compareAndSet(currentState, RegionTickState.TICKING)) {
+            totalSkippedTicks.increment();
+            LOGGER.debug("[RegionTickContext] Region #{} tick skipped — state changed", regionId);
             return false;
         }
 
@@ -107,13 +120,55 @@ public final class RegionTickContext {
 
     /**
      * 标记一个 slice 完成。
+     *
+     * @param tickGeneration slice 所属的 tick generation
      */
-    public void arriveSlice() {
+    public void arriveSlice(final long tickGeneration) {
+        // 只有 generation 匹配时才更新计数和 latch
+        if (tickGeneration != currentTick.get()) {
+            // late completion，忽略
+            return;
+        }
         completedSlices.incrementAndGet();
         CountDownLatch latch = this.tickLatch;
         if (latch != null) {
             latch.countDown();
         }
+    }
+
+    /**
+     * 标记一个 slice 完成（使用当前 generation）。
+     *
+     * <p>注意：此方法使用当前 generation，可能在 tick 已经切换时失效。
+     */
+    public void arriveSlice() {
+        arriveSlice(currentTick.get());
+    }
+
+    /**
+     * 标记一个 slice 失败（使用当前 generation）。
+     *
+     * <p>失败也会推进完成计数，但会记录失败状态。
+     *
+     * @param throwable 失败原因
+     */
+    public void failSlice(final long tickGeneration, final Throwable throwable) {
+        if (tickGeneration != currentTick.get()) {
+            return;
+        }
+        completedSlices.incrementAndGet();
+        CountDownLatch latch = this.tickLatch;
+        if (latch != null) {
+            latch.countDown();
+        }
+        LOGGER.error("[RegionTickContext] Slice failed in region #{}", regionId, throwable);
+    }
+
+    /**
+     * 标记一个 slice 失败（使用当前 generation）。
+     */
+    public void failSlice(final Throwable throwable) {
+        failSlice(currentTick.get(), throwable);
     }
 
     /**
@@ -126,7 +181,17 @@ public final class RegionTickContext {
         if (latch == null) return true;
 
         try {
-            return latch.await(AWAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            // 等待 latch，但同时检查 completedSlices 以避免旧任务错误 countDown
+            long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(AWAIT_TIMEOUT_MS);
+            while (System.nanoTime() < deadline) {
+                if (completedSlices.get() >= expectedSlices.get()) {
+                    return true;
+                }
+                if (latch.await(50, TimeUnit.MILLISECONDS)) {
+                    return completedSlices.get() >= expectedSlices.get();
+                }
+            }
+            return completedSlices.get() >= expectedSlices.get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
@@ -134,16 +199,28 @@ public final class RegionTickContext {
     }
 
     /**
-     * 结束 tick —— 记录耗时统计并回到 IDLE 状态。
+     * 结束 tick —— 记录耗时统计并根据 slice 完成情况决定状态。
+     *
+     * <p>只有当所有 slice 都完成时才进入 IDLE，否则进入 TIMED_OUT。
      */
     public void endTick() {
         long elapsed = System.nanoTime() - this.tickStartNanos;
         this.lastTickDurationNanos = elapsed;
+
+        // 检查是否所有 slice 都已完成
+        if (completedSlices.get() < expectedSlices.get()) {
+            // 有 slice 未完成，标记为超时
+            tickState.set(RegionTickState.TIMED_OUT);
+            LOGGER.warn("[RegionTickContext] Tick timeout in region #{}: {}ms (slices={}/{})",
+                    regionId, elapsed / 1_000_000, completedSlices.get(), expectedSlices.get());
+            return;
+        }
+
         this.totalTicksCompleted.increment();
         this.totalTickTimeNanos.add(elapsed);
         this.maxTickDurationNanos.accumulateAndGet(elapsed, Math::max);
 
-        // 强制回到 IDLE 状态
+        // 所有 slice 完成，回到 IDLE 状态
         tickState.set(RegionTickState.IDLE);
 
         if (elapsed / 1_000_000 > SLOW_TICK_WARNING_MS) {
@@ -183,8 +260,12 @@ public final class RegionTickContext {
 
     /**
      * 强制重置 tick 状态 —— 仅用于错误恢复。
+     *
+     * <p>通过递增 generation 使旧 tick 的延迟完成失效，并回到 IDLE 状态。
      */
     public void forceReset() {
+        // 递增 generation，使旧 tick 的 arriveSlice 调用被忽略
+        currentTick.incrementAndGet();
         tickState.set(RegionTickState.IDLE);
         LOGGER.warn("[RegionTickContext] Force reset tick state for region #{}", regionId);
     }

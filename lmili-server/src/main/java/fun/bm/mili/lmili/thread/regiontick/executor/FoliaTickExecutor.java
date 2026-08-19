@@ -60,22 +60,16 @@ public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiont
             LevelChunk chunk = AsyncChunkAccessor.getLoadedChunk(level, chunkPos);
             if (chunk == null) continue;
 
-            // Mili start - 时间预算检查：如果已接近预算上限，跳过随机 tick 只执行基础 tick
+            // Mili start - 时间预算检查：如果已超过预算上限，跳过剩余 chunk 的 tick
             long elapsedSliceMs = (System.nanoTime() - sliceStartNanos) / 1_000_000;
             if (elapsedSliceMs >= SLICE_TIME_BUDGET_MS) {
                 if (!budgetExceeded) {
                     LOGGER.warn("[FoliaTickExecutor] Slice time budget exceeded ({}ms) in region #{} — " +
-                                    "skipping random tick for remaining {} chunks",
+                                    "skipping tick for remaining {} chunks",
                             elapsedSliceMs, context.regionId, sliceSize - i);
                     budgetExceeded = true;
                 }
-                // 仍然执行 tickChunk 但使用 tickSpeed=0 跳过随机 tick
-                try {
-                    level.tickChunk(chunk, 0);
-                } catch (Throwable throwable) {
-                    LOGGER.error("[FoliaTickExecutor] Failed to tick chunk {} in region #{} (budget-limited)",
-                            chunk.getPos(), context.regionId, throwable);
-                }
+                // 跳过剩余 chunk 的 tick，避免改变游戏行为
                 continue;
             }
             // Mili end

@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.LongAdder;
  * <h3>设计目标</h3>
  * <ul>
  *   <li><b>无锁入队</b>：使用 ConcurrentLinkedDeque 实现无锁任务提交</li>
- *   <li><b>顺序保证</b>：同一 region 的任务按提交顺序执行（FIFO）</li>
+ *   <li><b>顺序保证</b>：本地 worker 使用 LIFO 消费（利用缓存局部性），窃取者使用 FIFO（保证公平性）</li>
  *   <li><b>Work-Stealing 友好</b>：支持从队列头部窃取任务（供 WorkStealingCoordinator 使用）</li>
  *   <li><b>轻量级</b>：最小化内存开销，无额外线程</li>
  * </ul>

@@ -61,6 +61,7 @@ public final class RegionTickWorker implements Runnable {
         } catch (Throwable throwable) {
             com.mojang.logging.LogUtils.getClassLogger().error(
                     "[RegionTickWorker] slice {} failed in region #{}", slice.sliceIndex, context.regionId, throwable);
+            context.failSlice(throwable);
         } finally {
             context.arriveSlice();
         }

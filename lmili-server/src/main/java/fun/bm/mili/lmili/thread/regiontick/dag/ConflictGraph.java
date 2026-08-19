@@ -157,14 +157,18 @@ public final class ConflictGraph {
          * @return 新的 ConflictGraph 实例
          */
         public @NotNull ConflictGraph build() {
-            // 冻结所有邻接表
-            for (IntSet neighbors : adjacency.values()) {
+            // 深拷贝以确保不可变性：创建新的 map 和 set
+            Int2ObjectMap<IntSet> immutableAdjacency = new Int2ObjectOpenHashMap<>(adjacency.size());
+            for (var entry : adjacency.int2ObjectEntrySet()) {
+                IntSet copy = new IntOpenHashSet(entry.getValue());
+                immutableAdjacency.put(entry.getIntKey(), copy);
+            }
+            for (IntSet neighbors : immutableAdjacency.values()) {
                 if (neighbors instanceof IntOpenHashSet) {
                     ((IntOpenHashSet) neighbors).trim();
                 }
             }
-            adjacency.trim();
-            return new ConflictGraph(adjacency, nodeCount);
+            return new ConflictGraph(immutableAdjacency, nodeCount);
         }
     }
 }

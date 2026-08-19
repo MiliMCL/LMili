@@ -85,6 +85,9 @@ public final class WorkStealingCoordinator {
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicInteger registeredRegionCount = new AtomicInteger(0);
 
+    // ---- 已注销的 region 集合（防止被 submit 复活） ----
+    private final ConcurrentHashMap<Long, Boolean> unregisteredRegions = new ConcurrentHashMap<>();
+
     /**
      * 创建工作窃取协调器。
      *
@@ -114,6 +117,8 @@ public final class WorkStealingCoordinator {
      */
     @NotNull
     public RegionQueue registerRegion(final long regionId) {
+        // 清除注销标记，允许重新注册
+        unregisteredRegions.remove(regionId);
         return regionQueues.computeIfAbsent(regionId, id -> {
             RegionQueue queue = new RegionQueue(id);
             registeredRegionCount.incrementAndGet();
@@ -130,6 +135,8 @@ public final class WorkStealingCoordinator {
      */
     @NotNull
     public List<RegionTask> unregisterRegion(final long regionId) {
+        // 标记为已注销，防止 submit 复活
+        unregisteredRegions.put(regionId, Boolean.TRUE);
         RegionQueue queue = regionQueues.remove(regionId);
         if (queue != null) {
             registeredRegionCount.decrementAndGet();
@@ -163,11 +170,30 @@ public final class WorkStealingCoordinator {
      * @param task 要提交的任务
      */
     public void submit(@NotNull RegionTask task) {
+        if (!running.get()) {
+            LOGGER.warn("[WorkStealingCoordinator] Submit rejected: coordinator not running");
+            return;
+        }
         long regionId = task.regionId();
+        // 检查是否已注销，防止复活
+        if (unregisteredRegions.containsKey(regionId)) {
+            LOGGER.warn("[WorkStealingCoordinator] Submit rejected: region #{} has been unregistered", regionId);
+            task.onCancel();
+            return;
+        }
         RegionQueue queue = regionQueues.computeIfAbsent(regionId, id -> {
+            // 再次检查，防止在检查后、创建前被注销
+            if (unregisteredRegions.containsKey(id)) {
+                return null;
+            }
             registeredRegionCount.incrementAndGet();
             return new RegionQueue(id);
         });
+        if (queue == null) {
+            LOGGER.warn("[WorkStealingCoordinator] Submit rejected: region #{} has been unregistered", regionId);
+            task.onCancel();
+            return;
+        }
         queue.push(task);
     }
 
@@ -177,17 +203,31 @@ public final class WorkStealingCoordinator {
      * @param tasks 任务列表
      */
     public void submitAll(@NotNull List<RegionTask> tasks) {
+        if (!running.get()) {
+            LOGGER.warn("[WorkStealingCoordinator] SubmitAll rejected: coordinator not running");
+            return;
+        }
         // 按 regionId 分组，减少 map 查找
         ConcurrentHashMap<Long, java.util.List<RegionTask>> grouped = new ConcurrentHashMap<>();
         for (RegionTask task : tasks) {
-            grouped.computeIfAbsent(task.regionId(), k -> new ArrayList<>()).add(task);
+            long regionId = task.regionId();
+            // 跳过已注销的 region
+            if (unregisteredRegions.containsKey(regionId)) {
+                task.onCancel();
+                continue;
+            }
+            grouped.computeIfAbsent(regionId, k -> new ArrayList<>()).add(task);
         }
 
         for (var entry : grouped.entrySet()) {
             RegionQueue queue = regionQueues.computeIfAbsent(entry.getKey(), id -> {
+                if (unregisteredRegions.containsKey(id)) {
+                    return null;
+                }
                 registeredRegionCount.incrementAndGet();
                 return new RegionQueue(id);
             });
+            if (queue == null) continue;
             for (RegionTask task : entry.getValue()) {
                 queue.push(task);
             }
@@ -252,15 +292,33 @@ public final class WorkStealingCoordinator {
 
         totalStealAttempts.increment();
 
-        // Mili start - fix: use toArray() instead of new ArrayList() to reduce allocation
-        // on every steal attempt (hot path)
-        int startIdx = ThreadLocalRandom.current().nextInt(size);
-        Long[] regionIds = regionQueues.keySet().toArray(new Long[0]);
+        // Mili start - 优化：避免每次分配数组，使用迭代器遍历
+        // 使用迭代器遍历以减少分配，但随机起点通过跳过实现
+        int skip = ThreadLocalRandom.current().nextInt(size);
+        int idx = 0;
+        for (var entry : regionQueues.entrySet()) {
+            if (idx < skip) {
+                idx++;
+                continue;
+            }
+            long regionId = entry.getKey();
+            RegionQueue queue = entry.getValue();
 
-        for (int i = 0; i < regionIds.length; i++) {
-            int idx = (startIdx + i) % regionIds.length;
-            long regionId = regionIds[idx];
-            RegionQueue queue = regionQueues.get(regionId);
+            if (queue != null && queue.isActive()) {
+                RegionTask task = queue.steal();
+                if (task != null) {
+                    totalSteals.increment();
+                    // 更新本地缓存
+                    workers[localWorkerId].lastRegionId.set(regionId);
+                    return task;
+                }
+            }
+            idx++;
+        }
+        // 从头开始遍历剩余部分
+        for (var entry : regionQueues.entrySet()) {
+            long regionId = entry.getKey();
+            RegionQueue queue = entry.getValue();
 
             if (queue != null && queue.isActive()) {
                 RegionTask task = queue.steal();
@@ -355,6 +413,7 @@ public final class WorkStealingCoordinator {
             remaining.addAll(queue.drain());
         }
         regionQueues.clear();
+        unregisteredRegions.clear();
         registeredRegionCount.set(0);
 
         LOGGER.info("[WorkStealingCoordinator] Shutdown (steals: {}, success rate: {}%)",

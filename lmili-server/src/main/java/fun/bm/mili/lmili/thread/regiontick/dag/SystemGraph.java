@@ -61,7 +61,7 @@ public final class SystemGraph {
     private volatile CompiledDag cachedDag;
 
     /** 图结构版本号（每次修改递增） */
-    private int version = 0;
+    private volatile int version = 0;
 
     /**
      * 注册一个 tick 系统。

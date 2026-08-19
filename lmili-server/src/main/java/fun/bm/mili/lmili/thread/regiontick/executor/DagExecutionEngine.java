@@ -182,6 +182,12 @@ public final class DagExecutionEngine {
                 if (tickCtx != null) {
                     tickCtx.reportFailure(t);
                 }
+                // 节点失败，不再提交后继节点
+                return;
+            }
+
+            // 检查是否已失败/取消
+            if (handle.isCancelled() || state.isCancelled()) {
                 return;
             }
 

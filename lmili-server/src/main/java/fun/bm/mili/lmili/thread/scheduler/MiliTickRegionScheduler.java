@@ -257,21 +257,12 @@ public final class MiliTickRegionScheduler {
     /**
      * Region Tick Worker —— 每个 worker 维护一个本地任务队列，从其他 worker 窃取任务。
      *
-     * <p>这是替代 Folia 的 {@code TickThreadRunner} + {@code Scheduler} 的核心组件。
-     * 使用 PriorityBlockingQueue 确保 global tick（region==null）优先于 region tick。</p>
+     * <p>这是替代 Folia 的 {@code TickThreadRunner} + {@code Scheduler} 的核心组件。</p>
      */
     private final class TickRegionWorker implements Runnable {
         private final int workerId;
         private volatile MiliTickThread thread; // 在 run() 开始时设置
-        // Global tick（region==null）优先级最高，确保玩家登录等关键任务不被 region tick 饥饿
-        private final PriorityBlockingQueue<TickRegionScheduler.RegionScheduleHandle> taskQueue =
-                new PriorityBlockingQueue<>(16, (a, b) -> {
-                    final boolean aGlobal = (a.region == null);
-                    final boolean bGlobal = (b.region == null);
-                    if (aGlobal && !bGlobal) return -1;
-                    if (!aGlobal && bGlobal) return 1;
-                    return 0;
-                });
+        private final ConcurrentLinkedQueue<TickRegionScheduler.RegionScheduleHandle> taskQueue = new ConcurrentLinkedQueue<>();
         private final AtomicBoolean running = new AtomicBoolean(true);
         private volatile boolean idle = true;
 
@@ -361,8 +352,20 @@ public final class MiliTickRegionScheduler {
         private void executeRegionTick(final MiliTickThread thread,
                                         final TickRegionScheduler.RegionScheduleHandle handle) {
             try {
+                // 记录 tick 开始时间，用于计算下次 tick 的等待时间
+                final long tickStartNanos = System.nanoTime();
+
                 // 执行 tick — runTick() 内部会调用 setTickingRegion() 设置上下文
                 final boolean reschedule = handle.runTick();
+
+                // 等待到下一个 tick 时间点，防止 tick 以过快的频率执行
+                // runTick() 内部通过 setScheduledStart() 设置了下次 tick 的时间，
+                // 但我们无法直接读取该值，所以用 TIME_BETWEEN_TICKS 作为最小间隔
+                final long elapsed = System.nanoTime() - tickStartNanos;
+                final long remaining = TIME_BETWEEN_TICKS - elapsed;
+                if (remaining > 0) {
+                    LockSupport.parkNanos(remaining);
+                }
 
                 // 如果需要继续调度，重新提交到 worker 队列
                 if (reschedule && !halted.get() && !handle.isMarkedAsNonSchedulable()) {

@@ -2,6 +2,7 @@ package fun.bm.mili.lmili.thread.regiontick.dag;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
+import it.unimi.dsi.fastutil.ints.IntLists;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
@@ -87,7 +88,7 @@ public final class CompiledDag {
      * @return 后继节点列表（不可修改）
      */
     public @NotNull IntList successors(final int nodeId) {
-        return adjacency[nodeId];
+        return IntLists.unmodifiable(adjacency[nodeId]);
     }
 
     /**
@@ -128,7 +129,7 @@ public final class CompiledDag {
      * @return 就绪节点列表（不可修改）
      */
     public @NotNull IntList readyNodes() {
-        return readyNodes;
+        return IntLists.unmodifiable(readyNodes);
     }
 
     /**
@@ -248,7 +249,15 @@ public final class CompiledDag {
             if (from == to) {
                 throw new IllegalArgumentException("Self-loop not allowed: " + from);
             }
-            adjacency[from].add(to);
+            // 去重：检查边是否已存在
+            IntList successors = adjacency[from];
+            for (int i = 0; i < successors.size(); i++) {
+                if (successors.getInt(i) == to) {
+                    // 边已存在，无需重复添加
+                    return this;
+                }
+            }
+            successors.add(to);
             inDegrees[to]++;
             return this;
         }

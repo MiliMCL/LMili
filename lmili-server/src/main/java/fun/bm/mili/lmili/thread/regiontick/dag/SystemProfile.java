@@ -21,10 +21,15 @@ public final class SystemProfile {
     }
 
     public @NotNull String name() { return this.name; }
-    public long @NotNull [] readBits() { return this.readBits; }
-    public long @NotNull [] writeBits() { return this.writeBits; }
-    public long @NotNull [] allBits() { return this.allBits; }
+    public long @NotNull [] readBits() { return this.readBits.clone(); }
+    public long @NotNull [] writeBits() { return this.writeBits.clone(); }
+    public long @NotNull [] allBits() { return this.allBits.clone(); }
     public int priority() { return this.priority; }
+
+    // 内部方法：直接访问字段以提高性能，避免克隆
+    long[] rawReadBits() { return this.readBits; }
+    long[] rawWriteBits() { return this.writeBits; }
+    long[] rawAllBits() { return this.allBits; }
 
     public boolean typeIntersects(final SystemProfile other) {
         return ResourceType.intersects(this.allBits, other.allBits);

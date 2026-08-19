@@ -8,6 +8,7 @@ import fun.bm.mili.lmili.thread.regiontick.dag.CompiledDag;
 import fun.bm.mili.lmili.thread.regiontick.dag.SystemGraph;
 import fun.bm.mili.lmili.thread.scheduler.tick.TickContext;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMaps;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -67,7 +68,7 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
     private final RegionTickExecutor fallbackExecutor;
 
     /** 系统名称到 Scope 的映射（用于兼容旧 API） */
-    private final Int2ObjectMap<ScopeWrapper> scopeMap = new Int2ObjectOpenHashMap<>();
+    private final Int2ObjectMap<ScopeWrapper> scopeMap = Int2ObjectMaps.synchronizedMap(new Int2ObjectOpenHashMap<>());
 
     /** 编译后的 DAG 缓存 */
     private volatile CompiledDag cachedDag;
@@ -78,7 +79,7 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
     /**
      * Scope 包装器 — 保存系统注册时的 scope 信息。
      */
-    private record ScopeWrapper(Object scope, BiConsumer<Object, Object> rawExecutor) {}
+    private record ScopeWrapper(String name, Object scope, BiConsumer<Object, Object> rawExecutor) {}
 
     /**
      * 创建现代 DAG 执行器。
@@ -121,25 +122,35 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(profile, "profile");
 
+        // 确保 name 与 profile.name() 一致
+        if (!name.equals(profile.name())) {
+            throw new IllegalArgumentException(
+                    "System name mismatch: name='" + name + "', profile.name()='" + profile.name() + "'");
+        }
+
         systemGraph.register(profile, ctx -> executor.accept(profile, scope));
         // 安全转换：SystemProfile 是 Object 的子类型，BiConsumer 可以向上转型
         BiConsumer<Object, Object> rawExec = (BiConsumer<Object, Object>) (BiConsumer<?, ?>) executor;
-        scopeMap.put(systemGraph.getHandle(name).id(), new ScopeWrapper(scope, rawExec));
+        SystemGraph.SystemHandle handle = systemGraph.getHandle(profile.name());
+        if (handle == null) {
+            throw new IllegalStateException("Failed to obtain system handle for: " + profile.name());
+        }
+        scopeMap.put(handle.id(), new ScopeWrapper(profile.name(), scope, rawExec));
     }
 
     /**
      * 注销一个 tick 系统。
      *
-     * <p>注意：当前实现中 SystemGraph 不支持注销，此方法会抛出 UnsupportedOperationException。
-     * 如需动态注册/注销，请使用 {@link SystemGraph} 直接操作。
+     * <p>当前实现不支持运行时注销，调用此方法将抛出 UnsupportedOperationException。
+     * 如需修改系统，请重新创建执行器实例。
      *
      * @param name 系统名称
      * @throws UnsupportedOperationException 当前不支持
      */
     public void unregisterSystem(final @NotNull String name) {
         throw new UnsupportedOperationException(
-                "ModernDagTickExecutor does not support unregister. " +
-                "Use SystemGraph directly for dynamic registration.");
+                "ModernDagTickExecutor does not support runtime unregister. " +
+                "System registration is immutable after initialization.");
     }
 
     /**
@@ -161,7 +172,9 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
             final @NotNull RegionTickSlice slice,
             final @NotNull RegionTickContext context
     ) {
-        executeSliceAsync(worker, slice, context, null);
+        CompletionStage<Void> stage = executeSliceAsync(worker, slice, context, null);
+        // 等待 DAG 完成，确保不会 fire-and-forget
+        stage.toCompletableFuture().join();
     }
 
     /**
@@ -254,9 +267,13 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
      * 获取已注册的 Scope 映射（用于兼容旧代码）。
      */
     public @NotNull Map<String, Object> getScopeMap() {
-        // 临时兼容方法：返回空 map
-        // 未来可以改为返回实际的 scope 映射
-        return java.util.Collections.emptyMap();
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        synchronized (scopeMap) {
+            for (ScopeWrapper wrapper : scopeMap.values()) {
+                result.put(wrapper.name(), wrapper.scope());
+            }
+        }
+        return java.util.Collections.unmodifiableMap(result);
     }
 
     /**
