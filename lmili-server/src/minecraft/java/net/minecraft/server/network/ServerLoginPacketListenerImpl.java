@@ -111,7 +111,11 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
     }
     public void tickTimeout() {
     // Paper end - login cookie API
-        if (this.tick++ >= MAX_TICKS_BEFORE_LOGIN) {
+        // Mili: 在 HELLO 状态（认证进行中）不递增 tick，防止认证耗时导致误超时
+        if (this.state == ServerLoginPacketListenerImpl.State.HELLO) {
+            return;
+        }
+        if (this.tick++ == MAX_TICKS_BEFORE_LOGIN) {
             this.disconnectAsync(Component.translatable("multiplayer.disconnect.slow_login")); // Paper
         }
     }
