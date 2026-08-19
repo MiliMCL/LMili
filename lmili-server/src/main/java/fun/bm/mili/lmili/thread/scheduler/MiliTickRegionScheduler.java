@@ -377,6 +377,16 @@ public final class MiliTickRegionScheduler {
         private void executeRegionTick(final MiliTickThread thread,
                                         final TickRegionScheduler.RegionScheduleHandle handle) {
             try {
+                // 在执行 region tick 前，检查是否有 global tick 等待
+                // 如果有，重新调度当前 region tick 以优先处理 global tick
+                if (handle.region != null && !globalQueue.isEmpty()) {
+                    // 有 global tick 等待，重新调度 region tick
+                    if (!handle.isMarkedAsNonSchedulable()) {
+                        taskQueue.offer(handle);
+                    }
+                    return;
+                }
+
                 // 执行 tick — runTick() 内部会调用 setTickingRegion() 设置上下文
                 final boolean reschedule = handle.runTick();
 
