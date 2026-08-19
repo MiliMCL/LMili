@@ -111,8 +111,15 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
     }
     public void tickTimeout() {
     // Paper end - login cookie API
-        // Mili: 在 HELLO 状态（认证进行中）不递增 tick，防止认证耗时导致误超时
-        if (this.state == ServerLoginPacketListenerImpl.State.HELLO) {
+        // Mili: 在等待外部事件的状态下不递增 tick，防止网络延迟或异步任务耗时导致误超时
+        // HELLO: 等待客户端发送 hello 包
+        // VERIFYING: 认证在异步线程进行中
+        // WAITING_FOR_DUPE_DISCONNECT: 等待旧连接断开
+        // PROTOCOL_SWITCHING: 等待客户端发送 login acknowledgement
+        if (this.state == ServerLoginPacketListenerImpl.State.HELLO
+            || this.state == ServerLoginPacketListenerImpl.State.VERIFYING
+            || this.state == ServerLoginPacketListenerImpl.State.WAITING_FOR_DUPE_DISCONNECT
+            || this.state == ServerLoginPacketListenerImpl.State.PROTOCOL_SWITCHING) {
             return;
         }
         if (this.tick++ == MAX_TICKS_BEFORE_LOGIN) {
