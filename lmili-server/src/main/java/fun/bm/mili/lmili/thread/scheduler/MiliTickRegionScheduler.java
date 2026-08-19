@@ -377,21 +377,8 @@ public final class MiliTickRegionScheduler {
         private void executeRegionTick(final MiliTickThread thread,
                                         final TickRegionScheduler.RegionScheduleHandle handle) {
             try {
-                // 记录 tick 开始时间，用于计算下次 tick 的等待时间
-                final long tickStartNanos = System.nanoTime();
-
                 // 执行 tick — runTick() 内部会调用 setTickingRegion() 设置上下文
                 final boolean reschedule = handle.runTick();
-
-                // 只对 region tick（非 global）应用间隔等待
-                // global tick（如登录）需要立即执行，不应等待
-                if (handle.region != null) {
-                    final long elapsed = System.nanoTime() - tickStartNanos;
-                    final long remaining = TIME_BETWEEN_TICKS - elapsed;
-                    if (remaining > 0) {
-                        LockSupport.parkNanos(remaining);
-                    }
-                }
 
                 // 如果需要继续调度，重新提交到 worker 队列
                 if (reschedule && !halted.get() && !handle.isMarkedAsNonSchedulable()) {
