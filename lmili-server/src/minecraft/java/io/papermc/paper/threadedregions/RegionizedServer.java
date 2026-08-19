@@ -20,6 +20,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
+import net.minecraft.server.network.ServerLoginPacketListenerImpl;
 import net.minecraft.world.attribute.EnvironmentAttributeSystem;
 import net.minecraft.world.level.gamerules.GameRules;
 import org.bukkit.Bukkit;
@@ -326,39 +327,60 @@ public final class RegionizedServer {
     private void tickConnections() {
         final List<Connection> connections = new ArrayList<>(this.connections);
         Collections.shuffle(connections); // shuffle to prevent people from "gaming" the server by re-logging
+        // Mili: 优先处理登录连接，防止登录请求因全局tick延迟而超时
+        final List<Connection> loginConnections = new ArrayList<>();
+        final List<Connection> otherConnections = new ArrayList<>();
         for (final Connection conn : connections) {
-            if (!conn.becomeActive()) {
-                continue;
+            if (conn.getPacketListener() instanceof ServerLoginPacketListenerImpl) {
+                loginConnections.add(conn);
+            } else {
+                otherConnections.add(conn);
+            }
+        }
+        // 先处理登录连接
+        for (final Connection conn : loginConnections) {
+            tickSingleConnection(conn);
+        }
+        // 再处理其他连接
+        for (final Connection conn : otherConnections) {
+            tickSingleConnection(conn);
+        }
+    }
+
+    /**
+     * 处理单个连接的 tick —— 提取为独立方法以支持优先处理登录连接。
+     */
+    private void tickSingleConnection(final Connection conn) {
+        if (!conn.becomeActive()) {
+            return;
+        }
+
+        if (isNotOwnedByGlobalRegion(conn)) {
+            // we actually require that the owning regions remove the connection for us, as it is possible
+            // that ownership is transferred back to us
+            return;
+        }
+
+        if (!conn.isConnected()) {
+            this.removeConnection(conn);
+            conn.handleDisconnection();
+            return;
+        }
+
+        try {
+            conn.tick();
+        } catch (final Exception exception) {
+            if (conn.isMemoryConnection()) {
+                throw new ReportedException(CrashReport.forThrowable(exception, "Ticking memory connection"));
             }
 
-            if (isNotOwnedByGlobalRegion(conn)) {
-                // we actually require that the owning regions remove the connection for us, as it is possible
-                // that ownership is transferred back to us
-                continue;
-            }
+            LOGGER.warn("Failed to handle packet for {}", conn.getLoggableAddress(MinecraftServer.getServer().logIPs()), exception);
+            MutableComponent ichatmutablecomponent = Component.literal("Internal server error");
 
-            if (!conn.isConnected()) {
-                this.removeConnection(conn);
-                conn.handleDisconnection();
-                continue;
-            }
-
-            try {
-                conn.tick();
-            } catch (final Exception exception) {
-                if (conn.isMemoryConnection()) {
-                    throw new ReportedException(CrashReport.forThrowable(exception, "Ticking memory connection"));
-                }
-
-                LOGGER.warn("Failed to handle packet for {}", conn.getLoggableAddress(MinecraftServer.getServer().logIPs()), exception);
-                MutableComponent ichatmutablecomponent = Component.literal("Internal server error");
-
-                conn.send(new ClientboundDisconnectPacket(ichatmutablecomponent), PacketSendListener.thenRun(() -> {
-                    conn.disconnect(ichatmutablecomponent);
-                }));
-                conn.setReadOnly();
-                continue;
-            }
+            conn.send(new ClientboundDisconnectPacket(ichatmutablecomponent), PacketSendListener.thenRun(() -> {
+                conn.disconnect(ichatmutablecomponent);
+            }));
+            conn.setReadOnly();
         }
     }
 

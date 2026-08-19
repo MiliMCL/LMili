@@ -56,7 +56,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
     private static final AtomicInteger UNIQUE_THREAD_ID = new AtomicInteger(0);
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final java.util.concurrent.ExecutorService authenticatorPool = java.util.concurrent.Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("User Authenticator #", 0).uncaughtExceptionHandler(new DefaultUncaughtExceptionHandler(LOGGER)).factory()); // Paper - Virtual authenticator threads
-    private static final int MAX_TICKS_BEFORE_LOGIN = 600;
+    private static final int MAX_TICKS_BEFORE_LOGIN = 1200; // Mili: 增加登录超时时间从600到1200 tick（60秒），防止服务器启动时全局tick延迟导致玩家被踢出
     private final byte[] challenge;
     private final MinecraftServer server;
     public final Connection connection;
@@ -111,7 +111,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
     }
     public void tickTimeout() {
     // Paper end - login cookie API
-        if (this.tick++ == 600) {
+        if (this.tick++ >= MAX_TICKS_BEFORE_LOGIN) {
             this.disconnectAsync(Component.translatable("multiplayer.disconnect.slow_login")); // Paper
         }
     }
