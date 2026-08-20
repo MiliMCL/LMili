@@ -56,6 +56,11 @@ jobs:
             exit 1
           fi
           ls -la libs/hyacinthusclip.jar
+          # Validate the downloaded JAR is a real, non-corrupted zip
+          if ! python3 -c "import zipfile,sys; zipfile.ZipFile('libs/hyacinthusclip.jar').testzip(); print('OK: valid zip')"; then
+            echo "ERROR: hyacinthusclip.jar is corrupted (invalid zip)"
+            exit 1
+          fi
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
