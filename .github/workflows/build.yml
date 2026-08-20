@@ -72,18 +72,12 @@ jobs:
           git config --global advice.mergeConflict false
           git config --global init.defaultBranch main
 
-      - name: Clean build output and corrupted caches
+      - name: Clean build output only
         run: |
           set -eux
           # Clean build outputs — keep committed lmili-server/src/minecraft/ intact
           rm -rf lmili-server/build lmili-api/build
           rm -rf .gradle/configuration-cache
-          # Purge Gradle dependency caches that may contain corrupted JARs
-          # (fixes "zip END header not found" during Kotlin DSL accessor generation)
-          rm -rf ~/.gradle/caches/jars-*
-          rm -rf ~/.gradle/caches/transforms-*
-          rm -rf ~/.gradle/caches/modules-*/files-*
-          rm -rf ~/.gradle/caches/modules-*/metadata-*
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -94,6 +88,18 @@ jobs:
           cache-exclude: |
             **/paperweight/**
             **/caches/paperweight/**
+
+      - name: Purge corrupted Gradle caches
+        run: |
+          set -eux
+          # After cache restore, purge any corrupted JARs that cause
+          # "zip END header not found" during Kotlin DSL accessor generation
+          rm -rf ~/.gradle/caches/jars-*
+          rm -rf ~/.gradle/caches/transforms-*
+          rm -rf ~/.gradle/caches/modules-*/files-*
+          rm -rf ~/.gradle/caches/modules-*/metadata-*
+          # Also clean the project-level Gradle cache
+          rm -rf .gradle/caches
 
       - name: Apply All Patches (generate paper-api + paper-server + folia-server)
         run: |
