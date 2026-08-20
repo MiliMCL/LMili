@@ -299,15 +299,25 @@ public final class MiliTickRegionScheduler {
                 }
 
                 // 执行 tick — runTick() 内部会调用 setTickingRegion() 设置上下文
+                // TPS 修复：记录 tick 开始时间，用于计算自适应延迟
+                final long tickStartMillis = System.currentTimeMillis();
                 final boolean reschedule = handle.runTick();
+                final long tickElapsedMillis = System.currentTimeMillis() - tickStartMillis;
                 state.tryMarkIdle();
 
                 // 如果需要继续调度，延迟提交到统壹队列
                 if (reschedule && !handle.isMarkedAsNonSchedulable() && !halted.get()) {
                     if (handle.region != null) {
-                        handle.nextAllowedTickTimeMillis = System.currentTimeMillis() + TIME_BETWEEN_TICKS_MS;
+                        // TPS 修复：基于实际 tick 计算执行时间自适应延迟
+                        // 如果 tick 执行时间 < 50ms，等待剩余时间；如果超时，立即执行
+                        long delay = TIME_BETWEEN_TICKS_MS - tickElapsedMillis;
+                        if (delay < 0) delay = 0;
+                        handle.nextAllowedTickTimeMillis = System.currentTimeMillis() + delay;
+                        resubmitDelayed(delay);
+                    } else {
+                        // global region 仍使用固定延迟
+                        resubmitDelayed(TIME_BETWEEN_TICKS_MS);
                     }
-                    resubmitDelayed(TIME_BETWEEN_TICKS_MS);
                 }
             } catch (Throwable thr) {
                 state.tryMarkIdle();
