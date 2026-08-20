@@ -390,6 +390,20 @@ public abstract class Entity
     public int teleportTickType = 0;// Lmili - Entity portal-teleport speed fix
 
     public void inactiveTick() {
+        // Lmili: 即使实体处于 inactive 状态，也需要处理传送门逻辑
+        // 否则在百万猪人塔等场景中，远离玩家的猪人永远无法通过传送门
+        if (this.portalProcess != null && !this.portalProcess.hasExpired()) {
+            // 检查传送门速率限制
+            var worldData = this.level() instanceof ServerLevel level ? level.getCurrentWorldData() : null;
+            if (worldData != null && worldData.isPortalTeleportationOutOfRate()) {
+                return;
+            }
+            if (this.handlePortal()) {
+                if (worldData != null) {
+                    worldData.portalRateThrottler.increase();
+                }
+            }
+        }
     }
     // Paper end - EAR 2
     // CraftBukkit end
