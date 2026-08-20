@@ -14,6 +14,8 @@ import fun.bm.mili.lmili.thread.scheduler.internal.PerformanceMetrics;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
+import java.util.concurrent.locks.LockSupport;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
@@ -87,7 +89,8 @@ public final class MiliSchedulerImpl implements MiliScheduler {
                 builder.poolName,
                 builder.threadNamePrefix,
                 builder.carrierThreads,
-                builder.maxBlockingTasks
+                builder.maxBlockingTasks,
+                builder.tickThreads
         );
 
         // 初始化组件
@@ -106,12 +109,23 @@ public final class MiliSchedulerImpl implements MiliScheduler {
         this.workerThreads = new Thread[workerCount];
         for (int i = 0; i < workerCount; i++) {
             this.workers[i] = new SchedulerWorker(i, this.workStealingCoordinator, this.blockingTaskIsolation);
-            this.workerThreads[i] = Thread.ofPlatform()
-                    .name(config.threadNamePrefix + "-Worker-" + i)
-                    .daemon(true)
-                    .start(this.workers[i]);
+            if (config.tickThreads) {
+                // R2-07: Tick 模式下使用 MiliTickThread，确保 Folia 线程安全检查正常
+                this.workerThreads[i] = new MiliTickThread(this.workers[i],
+                        config.threadNamePrefix + "-Worker-" + i);
+                this.workerThreads[i].start();
+            } else {
+                this.workerThreads[i] = Thread.ofPlatform()
+                        .name(config.threadNamePrefix + "-Worker-" + i)
+                        .daemon(true)
+                        .start(this.workers[i]);
+            }
         }
-        LOGGER.info("[MiliScheduler] Started {} scheduler workers", workerCount);
+
+        // R2-07: 注册 worker 引用到 coordinator，使 submit 能唤醒 parked worker
+        this.workStealingCoordinator.setWorkerThreads(this.workerThreads);
+
+        LOGGER.info("[MiliScheduler] Started {} scheduler workers (tickThreads={})", workerCount, config.tickThreads);
     }
 
     // ---- MiliScheduler 接口实现 ----
@@ -532,6 +546,7 @@ public final class MiliSchedulerImpl implements MiliScheduler {
             String poolName,
             String threadNamePrefix,
             int carrierThreads,
-            int maxBlockingTasks
+            int maxBlockingTasks,
+            boolean tickThreads
     ) {}
 }

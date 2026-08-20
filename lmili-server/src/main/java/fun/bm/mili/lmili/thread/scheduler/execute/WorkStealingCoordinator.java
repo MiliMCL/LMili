@@ -14,6 +14,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.LockSupport;
 
 /**
  * 工作窃取协调器 —— 实现跨 region 的负载均衡。
@@ -39,6 +40,10 @@ public final class WorkStealingCoordinator {
     private final LongAdder failedSteals = new LongAdder();
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicLong generationCounter = new AtomicLong(0);
+    private final AtomicBoolean[] parkedWorkers;
+
+    // ---- R2-07: worker 唤醒支持 ----
+    private volatile Thread[] workerThreads = null;
 
     /**
      * Region 槽位 —— 包含 generation 和 RegionQueue 引用。
@@ -61,10 +66,50 @@ public final class WorkStealingCoordinator {
         this.workerCount = Math.max(1, workerCount);
         this.regionSlots = new ConcurrentHashMap<>();
         this.workers = new WorkerState[this.workerCount];
+        this.parkedWorkers = new AtomicBoolean[this.workerCount];
         for (int i = 0; i < this.workerCount; i++) {
             workers[i] = new WorkerState(i);
+            parkedWorkers[i] = new AtomicBoolean(false);
         }
         LOGGER.info("[WorkStealingCoordinator] Initialized with {} workers", this.workerCount);
+    }
+
+    /**
+     * R2-07: 注册 worker 线程引用，使 submit 能唤醒 parked worker。
+     *
+     * <p>解决已存在的 missed-wakeup 问题：当前 submit() 推送任务后不会唤醒 parked worker，
+     * 导致任务可能长时间滞留在队列中。</p>
+     */
+    public void setWorkerThreads(Thread[] threads) {
+        this.workerThreads = threads;
+    }
+
+    /**
+     * 标记 worker 为 parked 状态。
+     */
+    public void markWorkerParked(int workerId) {
+        parkedWorkers[workerId].set(true);
+    }
+
+    /**
+     * 标记 worker 为 unparked 状态。
+     */
+    public void markWorkerUnparked(int workerId) {
+        parkedWorkers[workerId].set(false);
+    }
+
+    /**
+     * 唤醒一个 parked 的 worker（如果存在）。
+     */
+    private void unparkOneWorker() {
+        Thread[] threads = workerThreads;
+        if (threads == null) return;
+        for (int i = 0; i < workerCount; i++) {
+            if (parkedWorkers[i].get() && threads[i] != null) {
+                LockSupport.unpark(threads[i]);
+                return;
+            }
+        }
     }
 
     // ---- Region 管理 (R2-05 generation 修复) ----
@@ -154,6 +199,8 @@ public final class WorkStealingCoordinator {
             return;
         }
         queue.push(task);
+        // R2-07: 推送任务后唤醒一个 parked worker（解决 missed-wakeup）
+        unparkOneWorker();
     }
 
     public void submitAll(@NotNull List<RegionTask> tasks) {

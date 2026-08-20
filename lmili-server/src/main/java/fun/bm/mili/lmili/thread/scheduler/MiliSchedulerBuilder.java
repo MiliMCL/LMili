@@ -42,6 +42,7 @@ public final class MiliSchedulerBuilder {
     String threadNamePrefix = "MiliVT-";
     int carrierThreads = Runtime.getRuntime().availableProcessors();
     int maxBlockingTasks = Runtime.getRuntime().availableProcessors();
+    boolean tickThreads = false;
 
     /**
      * 私有构造器 —— 使用 {@link #create(String)} 工厂方法。
@@ -111,6 +112,24 @@ public final class MiliSchedulerBuilder {
     @NotNull
     public MiliSchedulerBuilder maxBlockingTasks(int maxBlocking) {
         this.maxBlockingTasks = Math.max(1, maxBlocking);
+        return this;
+    }
+
+    /**
+     * 设置是否使用 TickThread 作为 worker 线程。
+     *
+     * <p>当调度器用于 Region Tick 时（{@link MiliTickRegionScheduler}），
+     * worker 线程必须是 {@link MiliTickThread} 实例，
+     * 以便 Folia 的线程安全检查（{@code TickThread.isTickThreadFor}）能正确识别。
+     *
+     * <p>默认 false（使用普通平台线程）。
+     *
+     * @param tickThreads true 使用 TickThread，false 使用普通平台线程
+     * @return this（链式调用）
+     */
+    @NotNull
+    public MiliSchedulerBuilder tickThreads(final boolean tickThreads) {
+        this.tickThreads = tickThreads;
         return this;
     }
 

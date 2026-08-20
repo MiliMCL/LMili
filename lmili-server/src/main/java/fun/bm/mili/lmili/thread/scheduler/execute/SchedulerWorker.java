@@ -112,12 +112,15 @@ public final class SchedulerWorker implements Runnable {
     private void parkLoop() {
         if (coordinator.totalPendingTasks() > 0) return;
         parked.set(true);
+        coordinator.markWorkerParked(workerId);
         if (coordinator.totalPendingTasks() > 0) {
             parked.set(false);
+            coordinator.markWorkerUnparked(workerId);
             return;
         }
         LockSupport.park(this);
         parked.set(false);
+        coordinator.markWorkerUnparked(workerId);
     }
 
     public long tasksExecuted() { return tasksExecuted; }
