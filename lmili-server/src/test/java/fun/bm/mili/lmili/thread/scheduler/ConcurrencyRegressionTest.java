@@ -5,6 +5,8 @@ import fun.bm.mili.lmili.thread.scheduler.execute.BlockingTaskIsolation;
 import fun.bm.mili.lmili.thread.scheduler.execute.RegionQueue;
 import fun.bm.mili.lmili.thread.scheduler.execute.RegionState;
 import fun.bm.mili.lmili.thread.scheduler.execute.RegionState.ExecutionToken;
+import fun.bm.mili.lmili.thread.scheduler.execute.TaskScheduleState;
+import fun.bm.mili.lmili.thread.scheduler.execute.TaskScheduleState.Phase;
 import fun.bm.mili.lmili.thread.scheduler.execute.WorkStealingCoordinator;
 import fun.bm.mili.lmili.thread.scheduler.execute.WorkStealingCoordinator.PollResult;
 
@@ -36,6 +38,8 @@ public final class ConcurrencyRegressionTest {
         testSubmitRetryOnInactiveQueue();
         testRegisterUnregisterRace();
         testCloseBarrierCompletesOnLastRelease();
+        testTaskScheduleStateFullLifecycle();
+        testTaskScheduleStateResubmitAfterTick();
 
         System.out.println("\n=== Results: " + passed + " passed, " + failed + " failed ===");
         if (failed > 0) {
@@ -362,6 +366,50 @@ public final class ConcurrencyRegressionTest {
         unregisterThread.join(5000);
         assertTrue("unregister completes after last release", !unregisterThread.isAlive());
         pass("testCloseBarrierCompletesOnLastRelease");
+    }
+
+    // ---- TaskScheduleState 完整生命周期（验证 executeTask 修复） ----
+
+    static void testTaskScheduleStateFullLifecycle() {
+        TaskScheduleState state = new TaskScheduleState();
+
+        // 初始状态：IDLE
+        assertEquals("initial state is IDLE", Phase.IDLE, state.get());
+
+        // 模拟 scheduleRegion：IDLE → QUEUED
+        assertTrue("tryMarkQueued succeeds from IDLE", state.tryMarkQueued());
+        assertEquals("state is QUEUED", Phase.QUEUED, state.get());
+
+        // 模拟 executeTask 入口：QUEUED → RUNNING（这是修复的关键）
+        assertTrue("tryMarkRunning succeeds from QUEUED", state.tryMarkRunning());
+        assertEquals("state is RUNNING", Phase.RUNNING, state.get());
+
+        // 模拟 executeTask 完成：RUNNING → IDLE
+        assertTrue("tryMarkIdle succeeds from RUNNING", state.tryMarkIdle());
+        assertEquals("state is IDLE after tick", Phase.IDLE, state.get());
+
+        pass("testTaskScheduleStateFullLifecycle");
+    }
+
+    static void testTaskScheduleStateResubmitAfterTick() {
+        TaskScheduleState state = new TaskScheduleState();
+        AtomicInteger tickCount = new AtomicInteger(0);
+
+        // 模拟多次 tick 循环
+        for (int i = 0; i < 5; i++) {
+            // scheduleRegion: IDLE → QUEUED
+            assertTrue("tick " + i + ": tryMarkQueued", state.tryMarkQueued());
+            // executeTask: QUEUED → RUNNING
+            assertTrue("tick " + i + ": tryMarkRunning", state.tryMarkRunning());
+            // 执行 tick 逻辑
+            tickCount.incrementAndGet();
+            // executeTask 完成: RUNNING → IDLE
+            assertTrue("tick " + i + ": tryMarkIdle", state.tryMarkIdle());
+        }
+
+        assertEquals("executed 5 ticks", 5, tickCount.get());
+        assertEquals("final state is IDLE", Phase.IDLE, state.get());
+        pass("testTaskScheduleStateResubmitAfterTick");
     }
 
     // ---- assertion helpers ----
