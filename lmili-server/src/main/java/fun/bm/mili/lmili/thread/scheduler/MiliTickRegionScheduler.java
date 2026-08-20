@@ -71,6 +71,9 @@ public final class MiliTickRegionScheduler {
     private final TickRegionWorker[] workers;
     private final AtomicInteger threadIdGen = new AtomicInteger();
 
+    // C-05 修复：Round-robin 分配计数器，避免 Worker0 倾斜
+    private final AtomicInteger nextWorkerCounter = new AtomicInteger(0);
+
     // ---- 状态 ----
     private final AtomicBoolean halted = new AtomicBoolean(false);
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
@@ -149,19 +152,25 @@ public final class MiliTickRegionScheduler {
      * <p>将 region 的 tick 任务提交到 work-stealing 队列。
      * Worker 线程会从队列中获取任务并执行。</p>
      *
+     * <p>C-05 修复：使用 round-robin 分配，从随机起始点遍历，避免 Worker0 倾斜。</p>
+     *
      * @param handle region 的调度句柄
      */
     public void scheduleRegion(final TickRegionScheduler.RegionScheduleHandle handle) {
         if (halted.get()) return;
 
-        // 立即提交到 worker 队列（不使用延迟调度，简化实现）
-        for (TickRegionWorker worker : workers) {
-            if (worker.submitRegion(handle)) {
+        final int workerCount = workers.length;
+        // Round-robin 分配，保证均匀分布
+        int startIndex = Math.abs(nextWorkerCounter.getAndIncrement()) % workerCount;
+
+        for (int i = 0; i < workerCount; i++) {
+            int idx = (startIndex + i) % workerCount;
+            if (workers[idx].submitRegion(handle)) {
                 return;
             }
         }
-        // 如果所有 worker 都满了，强制提交到第一个
-        workers[0].forceSubmitRegion(handle);
+        // 如果所有 worker 都拒绝了（已关闭），强制提交到起始 worker
+        workers[startIndex].forceSubmitRegion(handle);
     }
 
     /**
@@ -188,12 +197,24 @@ public final class MiliTickRegionScheduler {
 
     /**
      * 停止调度器。
+     *
+     * <p>C-22 修复：统一 drain/cancel 处理 —— 先 drain 所有 worker 队列中的 pending regions，
+     * 调用它们的 markNonSchedulable()，然后停止 worker 线程。
      */
     public void halt() {
         if (!halted.compareAndSet(false, true)) return;
         LOGGER.info("[MiliTickRegionScheduler] Halting...");
 
-        // 停止所有 worker
+        // 步骤 1：Drain 所有 worker 队列，取消 pending regions（C-22 修复）
+        int cancelledCount = 0;
+        for (TickRegionWorker worker : workers) {
+            cancelledCount += worker.drainAndCancel();
+        }
+        if (cancelledCount > 0) {
+            LOGGER.info("[MiliTickRegionScheduler] Cancelled {} pending regions during halt", cancelledCount);
+        }
+
+        // 步骤 2：停止所有 worker
         for (TickRegionWorker worker : workers) {
             worker.shutdown();
         }
@@ -203,7 +224,7 @@ public final class MiliTickRegionScheduler {
             if (t != null) LockSupport.unpark(t);
         }
 
-        // 关闭 MiliScheduler
+        // 步骤 3：关闭 MiliScheduler
         try {
             scheduler.shutdown(5, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
@@ -304,6 +325,29 @@ public final class MiliTickRegionScheduler {
             running.set(false);
         }
 
+        /**
+         * C-22 修复：Drain 所有队列并取消 pending regions。
+         *
+         * <p>在 halt() 时调用，确保所有已调度但未执行的 region 被正确取消。
+         *
+         * @return 取消的 region 数量
+         */
+        int drainAndCancel() {
+            int count = 0;
+            TickRegionScheduler.RegionScheduleHandle handle;
+            // Drain global queue
+            while ((handle = globalQueue.poll()) != null) {
+                handle.markNonSchedulable();
+                count++;
+            }
+            // Drain task queue
+            while ((handle = taskQueue.poll()) != null) {
+                handle.markNonSchedulable();
+                count++;
+            }
+            return count;
+        }
+
         @Override
         public void run() {
             // 获取当前线程（MiliTickThread）并保存引用
@@ -374,10 +418,24 @@ public final class MiliTickRegionScheduler {
          * <p>runTick() 内部通过 TickRegionScheduler.setTickingRegion() 设置线程的 region 上下文，
          * 无需在此手动设置。setTickingRegion() 已为 MiliTickThread 正确设置
          * currentTickingRegion 和 currentTickingWorldRegionizedData。</p>
+         *
+         * <p>C-06 修复：增加 next-tick gate，防止 region 在允许时间之前被重复 tick。</p>
          */
         private void executeRegionTick(final MiliTickThread thread,
                                         final TickRegionScheduler.RegionScheduleHandle handle) {
             try {
+                // C-06 修复：next-tick gate —— 检查是否到了该 region 的下次允许 tick 时间
+                if (handle.region != null) {
+                    long now = System.currentTimeMillis();
+                    if (now < handle.nextAllowedTickTimeMillis) {
+                        // 还没到时间，重新提交到队列稍后处理
+                        if (!handle.isMarkedAsNonSchedulable()) {
+                            taskQueue.offer(handle);
+                        }
+                        return;
+                    }
+                }
+
                 // 在执行 region tick 前，检查是否有 global tick 等待
                 // 如果有，重新调度当前 region tick 以优先处理 global tick
                 if (handle.region != null && !globalQueue.isEmpty()) {
@@ -393,6 +451,10 @@ public final class MiliTickRegionScheduler {
 
                 // 如果需要继续调度，重新提交到 worker 队列
                 if (reschedule && !halted.get() && !handle.isMarkedAsNonSchedulable()) {
+                    // C-06 修复：更新下次允许 tick 时间
+                    if (handle.region != null) {
+                        handle.nextAllowedTickTimeMillis = System.currentTimeMillis() + (1000L / TICK_RATE);
+                    }
                     submitRegion(handle);
                 }
             } catch (Throwable thr) {

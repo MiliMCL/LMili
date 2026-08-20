@@ -121,9 +121,42 @@ public final class DefaultTaskHandle implements TaskHandle {
 
     /**
      * 标记任务取消。
+     *
+     * <p>C-18 修复：如果设置了 cancel action（如 ScheduledFuture），会先执行它。
      */
     public void cancel() {
+        Runnable action = cancelAction.getAndSet(null);
+        if (action != null) {
+            try {
+                action.run();
+            } catch (Exception e) {
+                // 忽略取消操作的异常
+            }
+        }
         doComplete(State.CANCELLED);
+    }
+
+    /**
+     * C-18 修复：取消动作 —— 用于真正取消底层调度。
+     */
+    private final AtomicReference<Runnable> cancelAction = new AtomicReference<>();
+
+    /**
+     * C-18 修复：设置取消动作。
+     *
+     * <p>当调用 cancel() 时，此动作会被执行，用于取消底层 ScheduledFuture 或从队列中移除任务。
+     *
+     * @param action 取消动作（如 () -> scheduledFuture.cancel(false)）
+     */
+    public void setCancelAction(@NotNull Runnable action) {
+        cancelAction.set(action);
+    }
+
+    /**
+     * C-18 修复：检查任务是否已取消。
+     */
+    public boolean isCancelled() {
+        return state.get() == State.CANCELLED;
     }
 
     // ---- TaskHandle 接口实现 ----

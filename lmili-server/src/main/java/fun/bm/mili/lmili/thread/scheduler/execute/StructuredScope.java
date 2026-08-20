@@ -63,7 +63,6 @@ public final class StructuredScope implements AutoCloseable {
 
     // ---- 执行环境 ----
     private final VirtualThreadPool pool;
-    private final ExecutorService executor;
 
     // ---- 任务追踪 ----
     private final List<ScopedFuture<?>> futures = Collections.synchronizedList(new ArrayList<>());
@@ -99,7 +98,6 @@ public final class StructuredScope implements AutoCloseable {
         this.failFast = failFast;
         this.defaultTimeoutMillis = Math.max(1, defaultTimeoutMillis);
         this.pool = pool;
-        this.executor = pool.executor();
     }
 
     // ---- 任务提交 ----
@@ -116,7 +114,7 @@ public final class StructuredScope implements AutoCloseable {
         forked.incrementAndGet();
         ScopedFuture<T> scopedFuture = new ScopedFuture<>(task);
         futures.add(scopedFuture);
-        executor.submit(scopedFuture::run);
+        pool.submit(scopedFuture::run);
         return scopedFuture;
     }
 
@@ -134,7 +132,7 @@ public final class StructuredScope implements AutoCloseable {
             return null;
         });
         futures.add(scopedFuture);
-        executor.submit(scopedFuture::run);
+        pool.submit(scopedFuture::run);
         return scopedFuture;
     }
 
@@ -161,7 +159,7 @@ public final class StructuredScope implements AutoCloseable {
 
         ScopedFuture<T> scopedFuture = new ScopedFuture<>(() -> {
             // 内嵌 TimeoutRunner 直接执行任务
-            Future<T> innerFuture = executor.submit(task);
+            Future<T> innerFuture = pool.submit(task);
             try {
                 return innerFuture.get(timeoutMillis, TimeUnit.MILLISECONDS);
             } catch (TimeoutException e) {
@@ -180,7 +178,7 @@ public final class StructuredScope implements AutoCloseable {
         });
 
         futures.add(scopedFuture);
-        executor.submit(scopedFuture::run);
+        pool.submit(scopedFuture::run);
         return scopedFuture;
     }
 
@@ -337,11 +335,6 @@ public final class StructuredScope implements AutoCloseable {
     private void handleFailure(@NotNull Throwable t) {
         failed.incrementAndGet();
         firstFailure.compareAndSet(null, t);
-
-        if (t instanceof VirtualThreadPool.EntityOrphanedSignal) {
-            // 实体孤儿是正常流程，不记录为错误
-            return;
-        }
 
         LOGGER.error("[StructuredScope:{}] Task failed (count: {})",
                 name, failed.get(), t);

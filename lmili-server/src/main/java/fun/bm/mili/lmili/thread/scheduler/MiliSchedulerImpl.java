@@ -3,6 +3,7 @@ package fun.bm.mili.lmili.thread.scheduler;
 import com.mojang.logging.LogUtils;
 import fun.bm.mili.lmili.thread.scheduler.api.*;
 import fun.bm.mili.lmili.thread.scheduler.execute.BlockingTaskIsolation;
+import fun.bm.mili.lmili.thread.scheduler.execute.SchedulerLifecycle;
 import fun.bm.mili.lmili.thread.scheduler.execute.SchedulerWorker;
 import fun.bm.mili.lmili.thread.scheduler.execute.VirtualThreadPool;
 import fun.bm.mili.lmili.thread.scheduler.execute.WorkStealingCoordinator;
@@ -16,7 +17,6 @@ import org.slf4j.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -75,7 +75,8 @@ public final class MiliSchedulerImpl implements MiliScheduler {
     private final SchedulerWorker[] workers;
 
     // ---- 状态 ----
-    private final AtomicBoolean shutdown = new AtomicBoolean(false);
+    // C-11/C-19 修复：使用 SchedulerLifecycle 替代 AtomicBoolean
+    private final SchedulerLifecycle lifecycle = new SchedulerLifecycle();
     private final AtomicReference<ScheduledExecutorService> delayedScheduler = new AtomicReference<>();
 
     /**
@@ -92,13 +93,9 @@ public final class MiliSchedulerImpl implements MiliScheduler {
         // 初始化组件
         this.metrics = new PerformanceMetrics();
         this.diagnostics = new DiagnosticCollector();
-        this.virtualThreadPool = VirtualThreadPool.builder(config.poolName)
-                .threadNamePrefix(config.threadNamePrefix)
-                .build();
+        this.virtualThreadPool = new VirtualThreadPool(config.poolName);
         this.workStealingCoordinator = new WorkStealingCoordinator(config.carrierThreads);
-        this.blockingTaskIsolation = BlockingTaskIsolation.builder()
-                .maxBlockingTasks(config.maxBlockingTasks)
-                .build();
+        this.blockingTaskIsolation = new BlockingTaskIsolation();
 
         LOGGER.info("[MiliScheduler] Initialized (pool={}, carrierThreads={}, maxBlocking={})",
                 config.poolName, config.carrierThreads, config.maxBlockingTasks);
@@ -108,7 +105,7 @@ public final class MiliSchedulerImpl implements MiliScheduler {
         this.workers = new SchedulerWorker[workerCount];
         this.workerThreads = new Thread[workerCount];
         for (int i = 0; i < workerCount; i++) {
-            this.workers[i] = new SchedulerWorker(i, this.workStealingCoordinator);
+            this.workers[i] = new SchedulerWorker(i, this.workStealingCoordinator, this.blockingTaskIsolation);
             this.workerThreads[i] = Thread.ofPlatform()
                     .name(config.threadNamePrefix + "-Worker-" + i)
                     .daemon(true)
@@ -122,7 +119,8 @@ public final class MiliSchedulerImpl implements MiliScheduler {
     @Override
     @NotNull
     public TaskHandle submit(@NotNull RegionTask task) {
-        if (shutdown.get()) {
+        // C-11 修复：使用 lifecycle 检查，拒绝 QUIESCING/CLOSED 状态下的提交
+        if (lifecycle.isShuttingDown()) {
             DefaultTaskHandle cancelled = new DefaultTaskHandle();
             cancelled.cancel();
             return cancelled;
@@ -147,7 +145,7 @@ public final class MiliSchedulerImpl implements MiliScheduler {
     @Override
     @NotNull
     public BatchHandle submitBatch(@NotNull List<RegionTask> tasks) {
-        if (shutdown.get()) {
+        if (lifecycle.isShuttingDown()) {
             List<TaskHandle> cancelled = new ArrayList<>(tasks.size());
             for (int i = 0; i < tasks.size(); i++) {
                 DefaultTaskHandle h = new DefaultTaskHandle();
@@ -167,7 +165,7 @@ public final class MiliSchedulerImpl implements MiliScheduler {
     @Override
     @NotNull
     public TaskHandle scheduleDelayed(@NotNull RegionTask task, long delay, @NotNull TimeUnit unit) {
-        if (shutdown.get()) {
+        if (lifecycle.isShuttingDown()) {
             DefaultTaskHandle cancelled = new DefaultTaskHandle();
             cancelled.cancel();
             return cancelled;
@@ -177,13 +175,18 @@ public final class MiliSchedulerImpl implements MiliScheduler {
         DefaultTaskHandle handle = new DefaultTaskHandle();
 
         ScheduledExecutorService scheduler = getDelayedScheduler();
-        scheduler.schedule(() -> {
-            if (task.isBlocking()) {
-                submitBlockingTask(task, handle);
-            } else {
-                submitRegionTask(task, handle);
+        ScheduledFuture<?> future = scheduler.schedule(() -> {
+            if (!handle.isCancelled()) {
+                if (task.isBlocking()) {
+                    submitBlockingTask(task, handle);
+                } else {
+                    submitRegionTask(task, handle);
+                }
             }
         }, delay, unit);
+
+        // C-18 修复：设置取消动作，使 handle.cancel() 能真正取消 ScheduledFuture
+        handle.setCancelAction(() -> future.cancel(false));
 
         return handle;
     }
@@ -202,51 +205,63 @@ public final class MiliSchedulerImpl implements MiliScheduler {
 
     @Override
     public boolean shutdown(long timeout, @NotNull TimeUnit unit) throws InterruptedException {
-        if (!shutdown.compareAndSet(false, true)) {
-            return false;
+        // C-11/C-19 修复：使用 SchedulerLifecycle 优雅关闭
+        if (!lifecycle.beginShutdown()) {
+            return false; // 已经在关闭了
         }
 
-        LOGGER.info("[MiliScheduler] Shutting down... (pending tasks: {})",
-                metrics.getPendingTaskCount());
+        LOGGER.info("[MiliScheduler] Shutting down... (phase: {}, pending tasks: {})",
+                lifecycle.get(), metrics.getPendingTaskCount());
 
-        // 停止延迟调度器
+        // 步骤 1：停止延迟调度器（C-19 修复：在 worker 停止前停止，防止已取消任务唤醒）
         ScheduledExecutorService scheduler = delayedScheduler.getAndSet(null);
         if (scheduler != null) {
             scheduler.shutdown();
+            try {
+                if (!scheduler.awaitTermination(1, TimeUnit.SECONDS)) {
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                scheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
 
-        // Phase B: 停止 SchedulerWorker 线程
+        // 步骤 2：停止 SchedulerWorker 线程
         for (SchedulerWorker worker : workers) {
-            worker.shutdown();
+            worker.stop();
         }
         // 等待 worker 线程退出
         for (Thread thread : workerThreads) {
             try {
-                thread.join(1000);
+                thread.join(Math.max(100, unit.toMillis(timeout) / 3));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
 
-        // 停止 work-stealing coordinator
+        // 步骤 3：停止 work-stealing coordinator
         workStealingCoordinator.shutdown();
 
-        // 关闭阻塞任务隔离
-        blockingTaskIsolation.shutdown(timeout / 2, unit);
+        // 步骤 4：关闭阻塞任务隔离
+        blockingTaskIsolation.shutdown();
 
-        // 关闭虚拟线程池
-        boolean result = virtualThreadPool.shutdown(timeout, unit);
+        // 步骤 5：关闭虚拟线程池
+        virtualThreadPool.shutdown();
+
+        // 确认关闭完成（QUIESCING → CLOSED）
+        lifecycle.completeShutdown();
 
         PerformanceSnapshot snapshot = metrics.snapshot();
-        LOGGER.info("[MiliScheduler] Shutdown complete (completed: {}, failed: {})",
-                snapshot.totalCompletedTasks(), snapshot.totalFailedTasks());
+        LOGGER.info("[MiliScheduler] Shutdown complete (phase: {}, completed: {}, failed: {})",
+                lifecycle.get(), snapshot.totalCompletedTasks(), snapshot.totalFailedTasks());
 
-        return result;
+        return true;
     }
 
     @Override
     public boolean isShutdown() {
-        return shutdown.get();
+        return lifecycle.isShuttingDown();
     }
 
     // ---- 内部方法 ----
@@ -311,21 +326,48 @@ public final class MiliSchedulerImpl implements MiliScheduler {
 
     /**
      * 提交阻塞任务到专用阻塞池。
+     *
+     * <p>C-09 修复：阻塞任务通过专用 executor 执行，不阻塞 worker 线程。
+     * 通过 RegionState 的 executingCount 跟踪执行状态。
      */
     private void submitBlockingTask(@NotNull RegionTask task, @NotNull DefaultTaskHandle handle) {
-        blockingTaskIsolation.submitBlocking(() -> {
-            long startNanos = System.nanoTime();
-            task.execute();
-            metrics.recordCompletion(System.nanoTime() - startNanos);
-            metrics.recordRegionCompletion(task.regionId());
-            handle.complete();
-            return null;
-        }).whenComplete((result, throwable) -> {
-            if (throwable != null) {
-                metrics.recordFailure();
-                handle.completeExceptionally(throwable);
+        // 创建一个可追踪的 Runnable，执行完成后更新 handle 状态
+        RegionTask trackedTask = new RegionTask() {
+            @Override
+            public void execute() throws Exception {
+                long startNanos = System.nanoTime();
+                try {
+                    task.execute();
+                    metrics.recordCompletion(System.nanoTime() - startNanos);
+                    metrics.recordRegionCompletion(task.regionId());
+                    handle.complete();
+                } catch (Throwable t) {
+                    metrics.recordFailure();
+                    handle.completeExceptionally(t);
+                    diagnostics.recordException("blocking_task_execution", t,
+                            java.util.Map.of("task", task.name(), "region", task.regionId()));
+                    throw t;
+                }
             }
-        });
+
+            @Override
+            public long regionId() { return task.regionId(); }
+
+            @Override
+            public boolean isBlocking() { return true; }
+
+            @Override
+            public long timeoutMillis() { return task.timeoutMillis(); }
+
+            @Override
+            @NotNull
+            public String name() { return task.name(); }
+
+            @Override
+            public void onCancel() { handle.cancel(); }
+        };
+
+        blockingTaskIsolation.executeBlocking(trackedTask);
     }
 
     /**
@@ -396,7 +438,9 @@ public final class MiliSchedulerImpl implements MiliScheduler {
                     throw new RuntimeException(e);
                 }
             };
-            return scheduler.submit(RegionTask.builder(entityRef.entityId())
+            // C-10 修复：使用 entityRef.regionId() 而非 entityId()
+            // regionId 从实体位置计算（chunkX, chunkZ），保证同一 region 的实体共享队列
+            return scheduler.submit(RegionTask.builder(entityRef.regionId())
                     .task(taskAction)
                     .build());
         }
@@ -413,8 +457,9 @@ public final class MiliSchedulerImpl implements MiliScheduler {
                     throw new RuntimeException(e);
                 }
             };
+            // C-10 修复：使用 entityRef.regionId() 而非 entityId()
             return scheduler.scheduleDelayed(
-                    RegionTask.builder(entityRef.entityId())
+                    RegionTask.builder(entityRef.regionId())
                             .task(taskAction)
                             .build(),
                     delayTicks * 50L, TimeUnit.MILLISECONDS
@@ -469,7 +514,8 @@ public final class MiliSchedulerImpl implements MiliScheduler {
 
         @Override
         public long regionId() {
-            return entityRef.entityId(); // 简化：使用 entityId 作为 regionId
+            // C-10 修复：使用 entityRef.regionId()（基于 chunk 坐标），而非 entityId
+            return entityRef.regionId();
         }
     }
 

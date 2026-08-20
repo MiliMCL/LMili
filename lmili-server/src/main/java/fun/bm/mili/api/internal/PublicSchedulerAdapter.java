@@ -113,9 +113,11 @@ public final class PublicSchedulerAdapter implements Scheduler {
             String pluginName = resolveCallingPlugin();
 
             Entity nmsEntity = ((CraftEntity) entity).getHandle();
+            // C-10 修复：从实体位置计算 regionId（entity → position → chunk → region）
+            long regionId = resolveRegionId(nmsEntity);
             fun.bm.mili.lmili.thread.scheduler.api.EntityScheduler.EntityRef ref =
                     fun.bm.mili.lmili.thread.scheduler.api.EntityScheduler.EntityRef.of(
-                            nmsEntity.getId(), nmsEntity.level());
+                            nmsEntity.getId(), nmsEntity.level(), regionId);
 
             internalScheduler.forEntity(ref).submit(
                     fun.bm.mili.lmili.thread.scheduler.api.EntityTask.ofRunnable(
@@ -143,9 +145,11 @@ public final class PublicSchedulerAdapter implements Scheduler {
             String pluginName = resolveCallingPlugin();
 
             Entity nmsEntity = ((CraftEntity) entity).getHandle();
+            // C-10 修复：从实体位置计算 regionId（entity → position → chunk → region）
+            long regionId = resolveRegionId(nmsEntity);
             fun.bm.mili.lmili.thread.scheduler.api.EntityScheduler.EntityRef ref =
                     fun.bm.mili.lmili.thread.scheduler.api.EntityScheduler.EntityRef.of(
-                            nmsEntity.getId(), nmsEntity.level());
+                            nmsEntity.getId(), nmsEntity.level(), regionId);
 
             internalScheduler.forEntity(ref).submitDelayed(
                     fun.bm.mili.lmili.thread.scheduler.api.EntityTask.ofRunnable(
@@ -164,6 +168,18 @@ public final class PublicSchedulerAdapter implements Scheduler {
                     ),
                     delayTicks
             );
+        }
+
+        /**
+         * C-10 修复：从 NMS Entity 位置计算 regionId。
+         *
+         * <p>映射链：entity → position → chunk coordinates → regionId。
+         * 这确保同一 region 的所有实体共享同一队列。
+         */
+        private static long resolveRegionId(@NotNull final Entity nmsEntity) {
+            int cx = net.minecraft.core.BlockPos.containing(nmsEntity.getX(), nmsEntity.getY(), nmsEntity.getZ()).getX() >> 4;
+            int cz = net.minecraft.core.BlockPos.containing(nmsEntity.getX(), nmsEntity.getY(), nmsEntity.getZ()).getZ() >> 4;
+            return ((long) cx & 0xFFFFFFFFL) | (((long) cz & 0xFFFFFFFFL) << 32);
         }
     }
 

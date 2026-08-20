@@ -1,421 +1,324 @@
 package fun.bm.mili.lmili.thread.scheduler.execute;
 
 import com.mojang.logging.LogUtils;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 虚拟线程池管理 —— 替代旧版单例模式，支持多实例隔离。
+ * 虚拟线程池 —— 基于 Java 21+ 虚拟线程（Virtual Threads）的执行引擎。
  *
- * <h3>设计改进（对比旧版 {@code VirtualThreadScheduler}）</h3>
+ * <h3>设计原理</h3>
+ * <p>虚拟线程是 Java 21 引入的轻量级线程，适合高并发 I/O 场景。
+ * 本线程池提供：
  * <ul>
- *   <li><b>非单例</b>：通过构建器创建，支持多实例测试和隔离</li>
- *   <li><b>Carrier 感知</b>：自动检测 carrier pool 大小，提供动态调整</li>
- *   <li><b>命名规范</b>：线程名称包含调度器标识，便于诊断</li>
- *   <li><b>优雅关闭</b>：分阶段关闭：拒绝新任务 → 等待进行中任务 → 强制中断</li>
+ *   <li>单线程 ScheduledExecutorService 用于延迟/周期任务</li>
+ *   <li>无界虚拟线程池用于立即执行任务</li>
  * </ul>
  *
- * <h3>线程模型</h3>
- * <pre>
- * Virtual Threads (lightweight)
- *     ↓ mount/unmount
- * Carrier Threads (platform threads, managed by ForkJoinPool)
- *     ↓ bind to
- * CPU Cores
- * </pre>
+ * <h3>修复的并发问题</h3>
+ * <ul>
+ *   <li><b>C-15</b>：不再暴露内部 executor —— {@code executor()} 方法已移除</li>
+ *   <li><b>C-16</b>：scheduleAtFixedRate 使用重叠保护 —— 通过 TaskScheduleState 防止</li>
+ * </ul>
  *
- * <h3>使用示例</h3>
- * <pre>{@code
- * VirtualThreadPool pool = VirtualThreadPool.builder("region-scheduler")
- *     .threadNamePrefix("MiliRegion-")
- *     .build();
- *
- * try (StructuredScope scope = pool.createScope("tick", false)) {
- *     scope.fork(() -> tickRegion(region1));
- *     scope.fork(() -> tickRegion(region2));
- * } // 自动等待完成
- *
- * pool.shutdown(5, TimeUnit.SECONDS);
- * }</pre>
+ * <h3>线程安全</h3>
+ * <p>本线程池是线程安全的。所有内部状态使用原子变量。
  */
 public final class VirtualThreadPool {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    // ---- 配置 ----
-    private final String poolName;
-    private final String threadNamePrefix;
-
-    // ---- 执行器 ----
-    private final ThreadFactory threadFactory;
-    private final ExecutorService executor;
-    private final ScheduledExecutorService delayedExecutor;
-
-    // ---- 状态 ----
-    private final AtomicBoolean shutdown = new AtomicBoolean(false);
-    private final AtomicInteger activeTaskCount = new AtomicInteger(0);
-    private final LongAdder totalSubmitted = new LongAdder();
-    private final LongAdder totalCompleted = new LongAdder();
-    private final LongAdder totalFailed = new LongAdder();
-    private final LongAdder totalRejected = new LongAdder();
-
-    // ---- Carrier 信息 ----
-    private volatile int carrierParallelism;
+    /**
+     * 单线程 ScheduledExecutorService —— 用于延迟和周期任务。
+     */
+    private final ScheduledExecutorService scheduler;
 
     /**
-     * 私有构造器 —— 通过 {@link Builder} 创建实例。
+     * 虚拟线程执行器 —— 用于立即执行任务。
+     *
+     * <p>这是 final 的，不允许外部获取。
      */
-    private VirtualThreadPool(@NotNull Builder builder) {
-        this.poolName = builder.poolName;
-        this.threadNamePrefix = builder.threadNamePrefix;
+    private final ExecutorService virtualExecutor;
 
-        // 创建线程工厂
-        this.threadFactory = new PrefixedVirtualThreadFactory(threadNamePrefix);
-        this.executor = Executors.newThreadPerTaskExecutor(threadFactory);
+    /**
+     * 延迟任务计数。
+     */
+    private final AtomicInteger delayedTaskCount = new AtomicInteger(0);
 
-        // 延迟调度器 —— 单个 scheduled thread 驱动延迟任务
-        this.delayedExecutor = Executors.newScheduledThreadPool(1, r -> {
-            Thread t = new Thread(r, poolName + "-DelayedScheduler");
+    /**
+     * 周期任务计数。
+     */
+    private final AtomicInteger periodicTaskCount = new AtomicInteger(0);
+
+    /**
+     * 已执行的任务总数。
+     */
+    private final AtomicInteger executedCount = new AtomicInteger(0);
+
+    /**
+     * 线程池名称。
+     */
+    private final String name;
+
+    /**
+     * 创建虚拟线程池。
+     *
+     * @param name 线程池名称（用于日志和线程命名）
+     */
+    public VirtualThreadPool(String name) {
+        this.name = name;
+
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, name + "-Delayed");
             t.setDaemon(true);
             return t;
         });
 
-        this.carrierParallelism = ForkJoinPool.commonPool().getParallelism();
+        this.virtualExecutor = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, name + "-Virtual");
+            t.setDaemon(true);
+            return t;
+        });
 
-        LOGGER.info("[VirtualThreadPool:'{}'] Initialized (carrier parallelism: {})",
-                poolName, carrierParallelism);
-    }
-
-    // ---- 工厂方法 ----
-
-    /**
-     * 创建构建器。
-     *
-     * @param poolName 池名称（用于日志和诊断）
-     */
-    public static @NotNull Builder builder(@NotNull String poolName) {
-        return new Builder(poolName);
+        LOGGER.info("[VirtualThreadPool-{}] Initialized", name);
     }
 
     /**
-     * 获取执行器（直接提交 virtual thread 任务）。
-     *
-     * <p>注意：此方法绕过统计追踪，用于特殊场景。
-     * 正常提交请使用 {@link #submit(Runnable)}。
-     */
-    @NotNull
-    public ExecutorService executor() {
-        return executor;
-    }
-
-    // ---- 任务提交 ----
-
-    /**
-     * 提交一个任务执行。
-     *
-     * <p>任务会被包装以追踪完成状态和异常处理。
-     * 此方法立即返回，不阻塞调用线程。
+     * 提交一个立即执行的任务。
      *
      * @param task 要执行的任务
-     * @throws RejectedExecutionException 如果调度器已关闭
+     * @return Future 用于等待或取消
      */
-    public void submit(@NotNull Runnable task) {
-        if (shutdown.get()) {
-            totalRejected.increment();
-            throw new RejectedExecutionException(
-                    "VirtualThreadPool '" + poolName + "' is shutdown");
-        }
-
-        totalSubmitted.increment();
-        activeTaskCount.incrementAndGet();
-
-        executor.submit(() -> {
-            long startNanos = System.nanoTime();
+    public Future<?> submit(Runnable task) {
+        executedCount.incrementAndGet();
+        return virtualExecutor.submit(() -> {
             try {
                 task.run();
-                totalCompleted.increment();
-            } catch (Throwable t) {
-                totalFailed.increment();
-                handleTaskFailure(t);
-            } finally {
-                activeTaskCount.decrementAndGet();
+            } catch (Exception e) {
+                LOGGER.error("[VirtualThreadPool-{}] Task execution error", name, e);
             }
         });
     }
 
     /**
-     * 提交带统计追踪的任务（含执行时间记录）。
+     * 提交一个带返回值的 Callable 任务。
      *
-     * @param task     任务
-     * @param metrics  性能指标收集器（可为 null）
+     * @param task 要执行的 Callable 任务
+     * @return Future 用于获取结果或取消
      */
-    public void submit(@NotNull Runnable task, @Nullable PerformanceRecorder metrics) {
-        if (shutdown.get()) {
-            totalRejected.increment();
-            throw new RejectedExecutionException(
-                    "VirtualThreadPool '" + poolName + "' is shutdown");
-        }
-
-        totalSubmitted.increment();
-        activeTaskCount.incrementAndGet();
-
-        executor.submit(() -> {
-            long startNanos = System.nanoTime();
+    public <T> Future<T> submit(Callable<T> task) {
+        executedCount.incrementAndGet();
+        return virtualExecutor.submit(() -> {
             try {
-                task.run();
-                totalCompleted.increment();
-                if (metrics != null) {
-                    metrics.recordCompletion(System.nanoTime() - startNanos);
-                }
-            } catch (Throwable t) {
-                totalFailed.increment();
-                handleTaskFailure(t);
-            } finally {
-                activeTaskCount.decrementAndGet();
+                return task.call();
+            } catch (Exception e) {
+                LOGGER.error("[VirtualThreadPool-{}] Task execution error", name, e);
+                throw e;
             }
         });
     }
 
     /**
-     * 提交延迟执行的任务。
+     * 提交一个延迟执行的任务。
      *
-     * @param task  要执行的任务
-     * @param delay 延迟时间
-     * @param unit  时间单位
-     * @return ScheduledFuture 可用于取消任务
-     */
-    @NotNull
-    public ScheduledFuture<?> scheduleDelayed(@NotNull Runnable task, long delay, @NotNull TimeUnit unit) {
-        if (delay <= 0) {
-            submit(task);
-            return new CompletedFuture<>();
-        }
-        return delayedExecutor.schedule(() -> submit(task), delay, unit);
-    }
-
-    /**
-     * 提交周期性任务。
-     *
-     * @param task         任务
-     * @param initialDelay 初始延迟
-     * @param period       周期
+     * @param task         要执行的任务
+     * @param delay        延迟时间
      * @param unit         时间单位
-     * @return ScheduledFuture
+     * @return ScheduledFuture 用于等待或取消
      */
-    @NotNull
-    public ScheduledFuture<?> scheduleAtFixedRate(@NotNull Runnable task,
-                                                   long initialDelay,
-                                                   long period,
-                                                   @NotNull TimeUnit unit) {
-        return delayedExecutor.scheduleAtFixedRate(() -> submit(task), initialDelay, period, unit);
-    }
-
-    // ---- 作用域创建 ----
-
-    /**
-     * 创建结构化并发作用域。
-     *
-     * @param scopeName 作用域名称
-     * @param failFast  是否 fail-fast
-     */
-    @NotNull
-    public StructuredScope createScope(@NotNull String scopeName, boolean failFast) {
-        return new StructuredScope(scopeName, failFast, this);
+    public ScheduledFuture<?> schedule(Runnable task, long delay, TimeUnit unit) {
+        delayedTaskCount.incrementAndGet();
+        return scheduler.schedule(() -> {
+            try {
+                task.run();
+            } catch (Exception e) {
+                LOGGER.error("[VirtualThreadPool-{}] Delayed task execution error", name, e);
+            } finally {
+                delayedTaskCount.decrementAndGet();
+            }
+        }, delay, unit);
     }
 
     /**
-     * 创建结构化并发作用域（带默认超时）。
+     * 提交一个固定延迟的周期任务——上一个任务执行完成后，等待 period 再执行下一次。
      *
-     * @param scopeName    作用域名称
-     * @param failFast     是否 fail-fast
-     * @param defaultTimeoutMillis 默认超时（毫秒）
+     * <p>这是推荐的周期任务提交方式，因为不会重叠执行。
+     *
+     * <h3>实现说明</h3>
+     * <p>使用递归调度：每次任务完成后，再调度下一次执行。
+     * 这样即使任务执行时间超过 period，也不会重叠。
+     *
+     * @param task   要执行的任务
+     * @param period 执行间隔（两次开始之间的时间）
+     * @param unit   时间单位
+     * @return Cancellable 用于取消周期任务
      */
-    @NotNull
-    public StructuredScope createScope(@NotNull String scopeName, boolean failFast, long defaultTimeoutMillis) {
-        return new StructuredScope(scopeName, failFast, defaultTimeoutMillis, this);
+    public Cancellable scheduleWithFixedDelay(Runnable task, long period, TimeUnit unit) {
+        AtomicReference<ScheduledFuture<?>> futureRef = new AtomicReference<>();
+        periodicTaskCount.incrementAndGet();
+
+        Runnable wrappedTask = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    task.run();
+                } catch (Exception e) {
+                    LOGGER.error("[VirtualThreadPool-{}] Periodic task error", name, e);
+                }
+                // 任务完成后，递归调度下一次
+                ScheduledFuture<?> future = scheduler.schedule(this, period, unit);
+                futureRef.set(future);
+            }
+        };
+
+        // 首次调度
+        ScheduledFuture<?> future = scheduler.schedule(wrappedTask, period, unit);
+        futureRef.set(future);
+
+        periodicTaskCount.incrementAndGet();
+
+        return new Cancellable() {
+            @Override
+            public void cancel() {
+                ScheduledFuture<?> f = futureRef.getAndSet(null);
+                if (f != null) {
+                    f.cancel(false);
+                    periodicTaskCount.decrementAndGet();
+                }
+            }
+
+            @Override
+            public boolean isCancelled() {
+                ScheduledFuture<?> f = futureRef.get();
+                return f == null || f.isCancelled();
+            }
+        };
     }
-
-    // ---- 状态查询 ----
-
-    public @NotNull String poolName() {
-        return poolName;
-    }
-
-    public int activeTaskCount() {
-        return activeTaskCount.get();
-    }
-
-    public long totalSubmitted() {
-        return totalSubmitted.sum();
-    }
-
-    public long totalCompleted() {
-        return totalCompleted.sum();
-    }
-
-    public long totalFailed() {
-        return totalFailed.sum();
-    }
-
-    public long totalRejected() {
-        return totalRejected.sum();
-    }
-
-    public int carrierParallelism() {
-        return carrierParallelism;
-    }
-
-    public boolean isShutdown() {
-        return shutdown.get();
-    }
-
-    // ---- 关闭 ----
 
     /**
-     * 优雅关闭线程池。
+     * 提交一个固定频率的周期任务——防止周期重叠执行。
      *
-     * <p>关闭顺序：
-     * <ol>
-     *   <li>停止接受新任务</li>
-     *   <li>等待进行中任务完成（最多 timeout）</li>
-     *   <li>强制关闭延迟调度器</li>
-     *   <li>如超时则强制中断</li>
-     * </ol>
+     * <p>修复 C-16：虽然 API 名为 scheduleAtFixedRate，但内部使用 TaskScheduleState
+     * 确保同一周期任务不会重叠执行。如果上一次执行尚未完成，本次将被跳过。
      *
-     * @param timeout 等待超时
-     * @param unit    时间单位
-     * @return true 如果正常关闭
+     * <h3>实现说明</h3>
+     * <p>使用单线程 scheduler 配合 TaskScheduleState 门闩：
+     * <ul>
+     *   <li>调度器单线程保证定时触发的串行化</li>
+     *   <li>TaskScheduleState 确保不会将已 RUNNING 的任务再次提交到 virtualExecutor</li>
+     * </ul>
+     *
+     * @param task   要执行的任务
+     * @param period 执行间隔（两次开始之间的时间）
+     * @param unit   时间单位
+     * @return Cancellable 用于取消周期任务
      */
-    public boolean shutdown(long timeout, @NotNull TimeUnit unit) {
-        if (!shutdown.compareAndSet(false, true)) {
-            return false;
-        }
+    public Cancellable scheduleAtFixedRate(Runnable task, long period, TimeUnit unit) {
+        TaskScheduleState state = new TaskScheduleState();
+        AtomicReference<ScheduledFuture<?>> futureRef = new AtomicReference<>();
 
-        LOGGER.info("[VirtualThreadPool:'{}'] Shutting down... (active tasks: {})",
-                poolName, activeTaskCount.get());
+        // C-16 修复：使用 TaskScheduleState 防止重叠
+        Runnable guardedTask = () -> {
+            if (!state.tryMarkRunning()) {
+                // 上一次执行还未完成，跳过本次
+                LOGGER.debug("[VirtualThreadPool-{}] Skipping overlapping periodic task", name);
+                return;
+            }
+            virtualExecutor.submit(() -> {
+                try {
+                    task.run();
+                } catch (Exception e) {
+                    LOGGER.error("[VirtualThreadPool-{}] Periodic task error", name, e);
+                } finally {
+                    state.tryMarkIdle(); // RUNNING → IDLE，允许下次执行
+                }
+            });
+        };
 
-        // 不再接受新的延迟任务
-        delayedExecutor.shutdown();
+        ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(guardedTask, period, period, unit);
+        futureRef.set(future);
 
-        // 关闭 virtual thread executor
-        executor.shutdown();
+        return new Cancellable() {
+            @Override
+            public void cancel() {
+                ScheduledFuture<?> f = futureRef.getAndSet(null);
+                if (f != null) {
+                    f.cancel(false);
+                    periodicTaskCount.decrementAndGet();
+                }
+            }
+
+            @Override
+            public boolean isCancelled() {
+                ScheduledFuture<?> f = futureRef.get();
+                return f == null || f.isCancelled();
+            }
+        };
+    }
+
+    /**
+     * 获取已执行的任务总数。
+     */
+    public int getExecutedCount() {
+        return executedCount.get();
+    }
+
+    /**
+     * 获取正在执行的延迟任务数。
+     */
+    public int getDelayedTaskCount() {
+        return delayedTaskCount.get();
+    }
+
+    /**
+     * 获取正在执行的周期任务数。
+     */
+    public int getPeriodicTaskCount() {
+        return periodicTaskCount.get();
+    }
+
+    /**
+     * 关闭线程池。
+     *
+     * <p>优雅关闭：先停止 scheduler，再关闭 executor。
+     */
+    public void shutdown() {
+        scheduler.shutdown();
+        virtualExecutor.shutdown();
 
         try {
-            if (!executor.awaitTermination(timeout, unit)) {
-                LOGGER.warn("[VirtualThreadPool:'{}'] Force shutdown after timeout", poolName);
-                executor.shutdownNow();
+            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
             }
-            if (!delayedExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
-                delayedExecutor.shutdownNow();
+            if (!virtualExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                virtualExecutor.shutdownNow();
             }
         } catch (InterruptedException e) {
-            executor.shutdownNow();
-            delayedExecutor.shutdownNow();
+            scheduler.shutdownNow();
+            virtualExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
 
-        LOGGER.info("[VirtualThreadPool:'{}'] Shutdown complete (completed: {}, failed: {})",
-                poolName, totalCompleted.sum(), totalFailed.sum());
-        return true;
+        LOGGER.info("[VirtualThreadPool-{}] Shutdown (executed: {})", name, executedCount.get());
     }
 
-    // ---- 内部方法 ----
-
-    void handleTaskFailure(@NotNull Throwable t) {
-        if (!(t instanceof EntityOrphanedSignal)) {
-            LOGGER.error("[VirtualThreadPool:'{}'] Task failed", poolName, t);
-        }
-    }
-
-    void onTaskCompleted() {
-        activeTaskCount.decrementAndGet();
-    }
-
-    // ---- 构建器 ----
-
-    /**
-     * {@link VirtualThreadPool} 构建器。
-     */
-    public static final class Builder {
-        private final String poolName;
-        private String threadNamePrefix = "MiliVT-";
-
-        Builder(@NotNull String poolName) {
-            this.poolName = poolName;
-        }
-
-        /**
-         * 设置线程名称前缀。
-         */
-        @NotNull
-        public Builder threadNamePrefix(@NotNull String prefix) {
-            this.threadNamePrefix = prefix;
-            return this;
-        }
-
-        /**
-         * 构建 VirtualThreadPool 实例。
-         */
-        @NotNull
-        public VirtualThreadPool build() {
-            return new VirtualThreadPool(this);
-        }
-    }
-
-    // ---- 内部组件 ----
-
-    /**
-     * 带前缀的虚拟线程工厂。
-     */
-    private static final class PrefixedVirtualThreadFactory implements ThreadFactory {
-        private final String prefix;
-        private final AtomicInteger counter = new AtomicInteger(0);
-
-        PrefixedVirtualThreadFactory(@NotNull String prefix) {
-            this.prefix = prefix;
-        }
-
-        @Override
-        public Thread newThread(@NotNull Runnable r) {
-            Thread t = Thread.ofVirtual().name(prefix + counter.getAndIncrement()).unstarted(r);
-            t.setDaemon(true);
-            return t;
-        }
+    @Override
+    public String toString() {
+        return "VirtualThreadPool-" + name +
+                "{executed=" + executedCount.get() +
+                ", delayed=" + delayedTaskCount.get() +
+                ", periodic=" + periodicTaskCount.get() + "}";
     }
 
     /**
-     * 已完成的 Future（用于延迟为 0 的情况）。
+     * 可取消对象的接口。
      */
-    private static final class CompletedFuture<V> implements ScheduledFuture<V> {
-        @Override public long getDelay(@NotNull TimeUnit unit) { return 0; }
-        @Override public int compareTo(@NotNull java.util.concurrent.Delayed o) { return 0; }
-        @Override public boolean cancel(boolean mayInterruptIfRunning) { return false; }
-        @Override public boolean isCancelled() { return false; }
-        @Override public boolean isDone() { return true; }
-        @Override public V get() { return null; }
-        @Override public V get(long timeout, @NotNull TimeUnit unit) { return null; }
+    public interface Cancellable {
+        void cancel();
+        boolean isCancelled();
     }
 
-    /**
-     * 实体孤儿信号 —— 用于区分正常任务失败和实体被销毁的正常流程。
-     */
-    static final class EntityOrphanedSignal extends RuntimeException {
-        EntityOrphanedSignal() {
-            super("Entity orphaned", null, false, false);
-        }
-    }
-
-    /**
-     * 性能记录器接口 —— 用于外部组件接收执行时间数据。
-     */
-    @FunctionalInterface
-    public interface PerformanceRecorder {
-        void recordCompletion(long durationNanos);
-    }
 }

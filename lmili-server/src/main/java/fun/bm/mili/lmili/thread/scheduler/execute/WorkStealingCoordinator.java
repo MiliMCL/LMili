@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
@@ -21,44 +20,22 @@ import java.util.concurrent.atomic.LongAdder;
  * <p>每个 worker 线程维护一个本地 RegionQueue 栈（LIFO 消费）。
  * 当本地队列为空时，随机选择其他 worker 的队列窃取任务（FIFO 窃取）。
  *
- * <h3>Work-Stealing 算法</h3>
- * <pre>
- * 1. Worker 从本地队列 pop()（尾部，LIFO）
- * 2. 如果本地队列为空：
- *    a. 随机选择一个 victim worker
- *    b. 从 victim 的队列 steal()（头部，FIFO）
- *    c. 如果窃取失败，继续随机选择下一个 victim
- *    d. 如果所有 victim 都为空，返回 null（无任务可做）
- * </pre>
- *
- * <h3>为什么 LIFO 本地 + FIFO 窃取？</h3>
+ * <h3>修复的并发问题</h3>
  * <ul>
- *   <li><b>本地 LIFO</b>：利用 CPU 缓存局部性，最近提交的任务数据更可能在缓存中</li>
- *   <li><b>窃取 FIFO</b>：保证最早提交的任务优先被处理，避免饥饿</li>
+ *   <li><b>C-02</b>：register/unregister lifecycle race —— 使用 RegionState CAS 协议替代
+ *       unregisteredRegions + ConcurrentHashMap 组合</li>
+ *   <li><b>C-08</b>：unregister 与已取出任务冲突 —— unregister 先标记 DRAINING，
+ *       等待 executingCount==0 后再 drain</li>
+ *   <li><b>C-24</b>：registeredRegionCount 与 map 不是统一状态 —— 单一度量来源</li>
+ *   <li><b>C-25</b>：Scheduler shutdown 与 Region lifecycle 没有统一协议 ——
+ *       通过 RegionState 协调</li>
  * </ul>
  *
- * <h3>使用示例</h3>
- * <pre>{@code
- * WorkStealingCoordinator coordinator = new WorkStealingCoordinator(4);
- *
- * // 注册 region
- * coordinator.registerRegion(regionId1);
- * coordinator.registerRegion(regionId2);
- *
- * // 提交任务
- * coordinator.submit(task);
- *
- * // Worker 循环
- * while (running) {
- *     RegionTask task = coordinator.poll(localWorkerId);
- *     if (task != null) {
- *         task.execute();
- *     } else {
- *         // 无任务，短暂等待或让出 CPU
- *         Thread.onSpinWait();
- *     }
- * }
- * }</pre>
+ * <h3>Region 生命周期</h3>
+ * <pre>
+ * registerRegion: 创建 (regionId → RegionQueue.ACTIVE)
+ * unregisterRegion: ACTIVE → DRAINING → 等待 executing=0 → CLOSED → remove
+ * </pre>
  *
  * <h3>线程安全</h3>
  * <p>本协调器是线程安全的。多个 worker 线程可以同时调用 {@link #poll(int)}。
@@ -71,6 +48,7 @@ public final class WorkStealingCoordinator {
     private final int workerCount;
 
     // ---- Region 注册表 ----
+    // 单一度量来源：regionQueues 的 size 就是真实的注册区域数 (C-24)
     private final ConcurrentHashMap<Long, RegionQueue> regionQueues;
 
     // ---- Worker 状态 ----
@@ -83,10 +61,6 @@ public final class WorkStealingCoordinator {
 
     // ---- 控制 ----
     private final AtomicBoolean running = new AtomicBoolean(true);
-    private final AtomicInteger registeredRegionCount = new AtomicInteger(0);
-
-    // ---- 已注销的 region 集合（防止被 submit 复活） ----
-    private final ConcurrentHashMap<Long, Boolean> unregisteredRegions = new ConcurrentHashMap<>();
 
     /**
      * 创建工作窃取协调器。
@@ -112,52 +86,101 @@ public final class WorkStealingCoordinator {
      *
      * <p>如果 region 已存在，返回现有队列。
      *
+     * <p>修复 C-02：使用 {@link RegionState} 的 CAS 协议替代 unregisteredRegions。
+     * 如果 region 之前被注销（CLOSED），可以重新注册（创建新状态）。
+     *
      * @param regionId region ID
      * @return 创建的 RegionQueue
      */
     @NotNull
     public RegionQueue registerRegion(final long regionId) {
-        // 清除注销标记，允许重新注册
-        unregisteredRegions.remove(regionId);
-        return regionQueues.computeIfAbsent(regionId, id -> {
-            RegionQueue queue = new RegionQueue(id);
-            registeredRegionCount.incrementAndGet();
-            LOGGER.debug("[WorkStealingCoordinator] Registered region #{}", id);
-            return queue;
-        });
+        RegionQueue existing = regionQueues.get(regionId);
+        if (existing != null && existing.isActive()) {
+            return existing;
+        }
+        // 如果 region 存在但已关闭，或者不存在 —— 创建新的
+        RegionQueue newQueue = new RegionQueue(regionId);
+        RegionQueue previous = regionQueues.putIfAbsent(regionId, newQueue);
+        if (previous != null) {
+            // 有线程并发注册：检查其状态
+            if (previous.isActive()) {
+                return previous;
+            }
+            // 如果不是 ACTIVE，尝试替换（旧的可能正在被 unregister）
+            if (regionQueues.replace(regionId, previous, newQueue)) {
+                LOGGER.debug("[WorkStealingCoordinator] Re-registered region #{}", regionId);
+                return newQueue;
+            }
+            return regionQueues.get(regionId);
+        }
+        LOGGER.debug("[WorkStealingCoordinator] Registered region #{}", regionId);
+        return newQueue;
     }
 
     /**
      * 注销一个 region，清空其任务队列。
+     *
+     * <p>修复 C-08：unregister 与已取出任务冲突。
+     * <ol>
+     *   <li>先将 RegionState 标记为 DRAINING（阻止新任务入队）</li>
+     *   <li>等待 executingCount==0（所有已取出任务执行完成）</li>
+     *   <li>执行 drain() 清空剩余队列</li>
+     *   <li>将 RegionState 标记为 CLOSED</li>
+     *   <li>从 map 中移除</li>
+     * </ol>
      *
      * @param regionId region ID
      * @return 未执行的任务列表，如果 region 不存在则返回空列表
      */
     @NotNull
     public List<RegionTask> unregisterRegion(final long regionId) {
-        // 标记为已注销，防止 submit 复活
-        unregisteredRegions.put(regionId, Boolean.TRUE);
-        RegionQueue queue = regionQueues.remove(regionId);
-        if (queue != null) {
-            registeredRegionCount.decrementAndGet();
-            LOGGER.debug("[WorkStealingCoordinator] Unregistered region #{}", regionId);
-            return queue.drain();
+        RegionQueue queue = regionQueues.get(regionId);
+        if (queue == null) {
+            return new ArrayList<>();
         }
-        return new ArrayList<>();
+
+        // 步骤 1：标记为 DRAINING，阻止新任务
+        queue.deactivate();
+
+        // 步骤 2：等待 executingCount == 0（已取出但未完成的任务）
+        // 使用有限等待避免无限阻塞
+        RegionState state = queue.regionState();
+        int waitCount = 0;
+        while (state.executingCount() > 0 && waitCount < 100) {
+            Thread.yield();
+            waitCount++;
+        }
+
+        // 步骤 3：尝试关闭（如果 executingCount==0）
+        if (!queue.tryClose()) {
+            LOGGER.warn("[WorkStealingCoordinator] Region #{} still has {} tasks executing after wait",
+                    regionId, state.executingCount());
+        }
+
+        // 步骤 4：从 map 中移除并 drain 剩余
+        regionQueues.remove(regionId);
+        List<RegionTask> remaining = queue.drain();
+
+        LOGGER.debug("[WorkStealingCoordinator] Unregistered region #{} (remaining tasks: {})",
+                regionId, remaining.size());
+        return remaining;
     }
 
     /**
-     * 检查 region 是否已注册。
+     * 检查 region 是否已注册且处于 ACTIVE 状态。
      */
     public boolean isRegionRegistered(final long regionId) {
-        return regionQueues.containsKey(regionId);
+        RegionQueue queue = regionQueues.get(regionId);
+        return queue != null && queue.isActive();
     }
 
     /**
      * 获取已注册的 region 数量。
+     *
+     * <p>修复 C-24：直接返回 map size，单一度量来源。
      */
     public int registeredRegionCount() {
-        return registeredRegionCount.get();
+        return regionQueues.size();
     }
 
     // ---- 任务提交 ----
@@ -167,6 +190,9 @@ public final class WorkStealingCoordinator {
      *
      * <p>如果 region 未注册，会自动注册。
      *
+     * <p>修复 C-02/C-25：不再使用 unregisteredRegions hack。
+     * 通过 RegionState.isActive() 判断是否可以接受任务。
+     *
      * @param task 要提交的任务
      */
     public void submit(@NotNull RegionTask task) {
@@ -175,26 +201,50 @@ public final class WorkStealingCoordinator {
             return;
         }
         long regionId = task.regionId();
-        // 检查是否已注销，防止复活
-        if (unregisteredRegions.containsKey(regionId)) {
-            LOGGER.warn("[WorkStealingCoordinator] Submit rejected: region #{} has been unregistered", regionId);
-            task.onCancel();
-            return;
-        }
-        RegionQueue queue = regionQueues.computeIfAbsent(regionId, id -> {
-            // 再次检查，防止在检查后、创建前被注销
-            if (unregisteredRegions.containsKey(id)) {
-                return null;
-            }
-            registeredRegionCount.incrementAndGet();
-            return new RegionQueue(id);
-        });
+
+        RegionQueue queue = getOrCreateQueue(regionId);
         if (queue == null) {
-            LOGGER.warn("[WorkStealingCoordinator] Submit rejected: region #{} has been unregistered", regionId);
+            // region 正在被注销或被关闭
             task.onCancel();
             return;
         }
+
+        // RegionQueue.push 内部已通过 RegionState 检查 ACTIVE 状态
         queue.push(task);
+    }
+
+    /**
+     * 获取或创建 region 队列。
+     *
+     * <p>如果 region 不存在或已关闭，创建新队列。
+     * 如果 region 正在 DRAINING，返回 null。
+     *
+     * @return RegionQueue 或 null（如果正在 DRAINING）
+     */
+    @Nullable
+    private RegionQueue getOrCreateQueue(final long regionId) {
+        RegionQueue queue = regionQueues.get(regionId);
+        if (queue != null) {
+            if (queue.isActive()) {
+                return queue;
+            }
+            // 正在 DRAINING/CLOSED
+            return null;
+        }
+
+        // 不存在，创建新队列
+        if (!running.get()) return null;
+
+        RegionQueue newQueue = new RegionQueue(regionId);
+        RegionQueue previous = regionQueues.putIfAbsent(regionId, newQueue);
+        if (previous != null) {
+            // 并发创建：使用已存在的
+            if (previous.isActive()) {
+                return previous;
+            }
+            return null;
+        }
+        return newQueue;
     }
 
     /**
@@ -211,8 +261,8 @@ public final class WorkStealingCoordinator {
         ConcurrentHashMap<Long, java.util.List<RegionTask>> grouped = new ConcurrentHashMap<>();
         for (RegionTask task : tasks) {
             long regionId = task.regionId();
-            // 跳过已注销的 region
-            if (unregisteredRegions.containsKey(regionId)) {
+            RegionQueue queue = regionQueues.get(regionId);
+            if (queue != null && !queue.isActive()) {
                 task.onCancel();
                 continue;
             }
@@ -220,14 +270,13 @@ public final class WorkStealingCoordinator {
         }
 
         for (var entry : grouped.entrySet()) {
-            RegionQueue queue = regionQueues.computeIfAbsent(entry.getKey(), id -> {
-                if (unregisteredRegions.containsKey(id)) {
-                    return null;
+            RegionQueue queue = getOrCreateQueue(entry.getKey());
+            if (queue == null) {
+                for (RegionTask task : entry.getValue()) {
+                    task.onCancel();
                 }
-                registeredRegionCount.incrementAndGet();
-                return new RegionQueue(id);
-            });
-            if (queue == null) continue;
+                continue;
+            }
             for (RegionTask task : entry.getValue()) {
                 queue.push(task);
             }
@@ -245,6 +294,9 @@ public final class WorkStealingCoordinator {
      *   <li>如果本地为空，尝试从其他 region 窃取</li>
      *   <li>如果全部为空，返回 null</li>
      * </ol>
+     *
+     * <p>修复 C-01：通过 RegionState 保证 Region 独占执行。
+     * 每个 RegionQueue 的 RegionState 确保同一 region 不会被多个 Worker 同时执行。
      *
      * @param localWorkerId 本地 worker ID（0-based）
      * @return 下一个任务，或 null 如果没有可用任务
@@ -267,13 +319,21 @@ public final class WorkStealingCoordinator {
     @Nullable
     private RegionTask pollFromLocalCache(int localWorkerId) {
         WorkerState worker = workers[localWorkerId];
-        Long cachedRegionId = worker.lastRegionId.get();
+        long cachedRegionId = worker.lastRegionId.get();
 
         if (cachedRegionId >= 0) {
             RegionQueue queue = regionQueues.get(cachedRegionId);
             if (queue != null && queue.isActive()) {
-                RegionTask task = queue.pop();
-                if (task != null) return task;
+                // 标记开始执行
+                RegionState state = queue.regionState();
+                if (state.tryBeginExecution()) {
+                    RegionTask task = queue.pop();
+                    if (task != null) {
+                        return task;
+                    }
+                    // 队列为空，回退
+                    state.endExecution();
+                }
             }
         }
         return null;
@@ -282,8 +342,10 @@ public final class WorkStealingCoordinator {
     /**
      * 从其他 region 窃取任务。
      *
-     * <p>窃取策略：随机选择一个 region，从其队列头部窃取。
-     * 如果失败，继续尝试其他 region。
+     * <p>窃取策略（C-13 优化）：随机选择 victim region，尝试窃取。
+     * 如果失败，继续尝试其他随机 victim。限制最大尝试次数，避免扫描整个 map。
+     *
+     * <p>修复 C-01：通过 RegionState.tryBeginExecution 保证独占。
      */
     @Nullable
     private RegionTask stealWork(int localWorkerId) {
@@ -292,48 +354,79 @@ public final class WorkStealingCoordinator {
 
         totalStealAttempts.increment();
 
-        // Mili start - 优化：避免每次分配数组，使用迭代器遍历
-        // 使用迭代器遍历以减少分配，但随机起点通过跳过实现
-        int skip = ThreadLocalRandom.current().nextInt(size);
+        // C-13 优化：限制最大尝试次数，避免扫描整个 map
+        // 对于少量 region，尝试全部；对于大量 region，采样固定数量
+        int maxAttempts = Math.min(size, Math.max(3, workerCount));
+
+        // 随机起点遍历 regionQueues
+        int skip = size > maxAttempts ? ThreadLocalRandom.current().nextInt(size) : 0;
         int idx = 0;
+        int attempts = 0;
         for (var entry : regionQueues.entrySet()) {
             if (idx < skip) {
                 idx++;
                 continue;
             }
-            long regionId = entry.getKey();
-            RegionQueue queue = entry.getValue();
-
-            if (queue != null && queue.isActive()) {
-                RegionTask task = queue.steal();
-                if (task != null) {
-                    totalSteals.increment();
-                    // 更新本地缓存
-                    workers[localWorkerId].lastRegionId.set(regionId);
-                    return task;
-                }
-            }
+            if (attempts >= maxAttempts) break;
+            RegionTask task = tryStealFromEntry(entry, localWorkerId);
+            if (task != null) return task;
             idx++;
+            attempts++;
         }
         // 从头开始遍历剩余部分
+        idx = 0;
         for (var entry : regionQueues.entrySet()) {
-            long regionId = entry.getKey();
-            RegionQueue queue = entry.getValue();
-
-            if (queue != null && queue.isActive()) {
-                RegionTask task = queue.steal();
-                if (task != null) {
-                    totalSteals.increment();
-                    // 更新本地缓存
-                    workers[localWorkerId].lastRegionId.set(regionId);
-                    return task;
-                }
-            }
+            if (idx >= skip) break;
+            if (attempts >= maxAttempts) break;
+            RegionTask task = tryStealFromEntry(entry, localWorkerId);
+            if (task != null) return task;
+            idx++;
+            attempts++;
         }
-        // Mili end
 
         failedSteals.increment();
         return null;
+    }
+
+    /**
+     * 尝试从指定 entry 窃取任务。
+     */
+    @Nullable
+    private RegionTask tryStealFromEntry(java.util.Map.Entry<Long, RegionQueue> entry, int localWorkerId) {
+        long regionId = entry.getKey();
+        RegionQueue queue = entry.getValue();
+
+        if (queue != null && queue.isActive()) {
+            // 标记开始执行，保证独占
+            RegionState state = queue.regionState();
+            if (state.tryBeginExecution()) {
+                RegionTask task = queue.steal();
+                if (task != null) {
+                    totalSteals.increment();
+                    // 更新本地缓存
+                    workers[localWorkerId].lastRegionId.set(regionId);
+                    return task;
+                }
+                // 队列为空，回退
+                state.endExecution();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 通知指定 region 的任务执行完成。
+     *
+     * <p>Worker 执行完任务后必须调用此方法，使 RegionState.executingCount 递减。
+     * 这是 C-01/C-08 修复的关键：unregister 需要等待 executingCount==0。
+     *
+     * @param regionId region ID
+     */
+    public void notifyTaskCompleted(final long regionId) {
+        RegionQueue queue = regionQueues.get(regionId);
+        if (queue != null) {
+            queue.regionState().endExecution();
+        }
     }
 
     /**
@@ -381,6 +474,8 @@ public final class WorkStealingCoordinator {
 
     /**
      * 获取所有 region 的总待处理任务数。
+     *
+     * <p>注意：这是近似值 (C-23)，仅用于 load balancing 和 metrics。
      */
     public int totalPendingTasks() {
         int total = 0;
@@ -409,12 +504,15 @@ public final class WorkStealingCoordinator {
         running.set(false);
         List<RegionTask> remaining = new ArrayList<>();
 
-        for (RegionQueue queue : regionQueues.values()) {
+        for (var entry : regionQueues.entrySet()) {
+            RegionQueue queue = entry.getValue();
+            // 标记为 DRAINING
+            queue.deactivate();
+            // 直接强制关闭（shutdown 时不再等待 executing）
+            queue.forceClose();
             remaining.addAll(queue.drain());
         }
         regionQueues.clear();
-        unregisteredRegions.clear();
-        registeredRegionCount.set(0);
 
         LOGGER.info("[WorkStealingCoordinator] Shutdown (steals: {}, success rate: {}%)",
                 totalSteals.sum(), String.format("%.1f", stealSuccessRate() * 100));

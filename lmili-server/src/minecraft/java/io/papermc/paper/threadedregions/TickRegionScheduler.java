@@ -447,6 +447,10 @@ public class TickRegionScheduler {
 
         private TickRegionScheduler scheduler;
 
+        // C-06 修复：next-tick gate —— 下次允许 tick 的最早时间（毫秒）
+        // 防止 region 在允许时间之前被重复 tick
+        public volatile long nextAllowedTickTimeMillis = 0L;
+
         public RegionScheduleHandle(final TickRegions.TickRegionData region, final long firstStart) {
             this.currentTick = 0L;
             this.lastTickStart = TimeUtil.DEADLINE_NOT_SET;
