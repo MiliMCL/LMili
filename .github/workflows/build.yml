@@ -94,7 +94,8 @@ jobs:
           set -eux
           # Run full applyAllPatches to ensure correct task chain for upstream checkout.
           # This regenerates everything including lmili-server/src/minecraft/.
-          ./gradlew applyAllPatches --no-configuration-cache
+          # --stacktrace included so a repeat 'zip END header not found' exposes the exact corrupted file
+          ./gradlew applyAllPatches --no-configuration-cache --stacktrace
 
       - name: Restore Committed Sources
         run: |
