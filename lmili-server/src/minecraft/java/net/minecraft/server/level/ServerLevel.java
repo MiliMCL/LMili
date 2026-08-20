@@ -1293,12 +1293,19 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
     // Mili end
 
     private void optimiseRandomTick(final LevelChunk chunk, final int tickSpeed) {
+        // Mili start - 非拥有者线程（如虚拟线程）跳过 randomTick，避免线程所有权检查异常
+        // 串行路径（mili$tickChunksSerial）在拥有者线程上执行，randomTick 正常处理
+        final ChunkPos cpos = chunk.getPos();
+        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor((ServerLevel)(Object)this, cpos.x(), cpos.z())) {
+            return;
+        }
+        // Mili end
+
         final LevelChunkSection[] sections = chunk.getSections();
         final int minSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMinSection((ServerLevel)(Object)this);
         final io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource simpleRandom = this.simpleRandom; // Folia - region threading
         final boolean doubleTickFluids = !ca.spottedleaf.moonrise.common.PlatformHooks.get().configFixMC224294();
 
-        final ChunkPos cpos = chunk.getPos();
         final int offsetX = cpos.x() << 4;
         final int offsetZ = cpos.z() << 4;
 
@@ -1343,28 +1350,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                 // do not use a mutable pos, as some random tick implementations store the input without calling immutable()!
                 final BlockPos pos = new BlockPos((location & 15) | offsetX, ((location >>> (4 + 4)) & 15) | offsetY, ((location >>> 4) & 15) | offsetZ);
 
-                // Mili start - 捕获线程检查异常，防止异步线程执行 randomTick 时因区域所有权检查失败而崩溃
-                try {
-                    state.randomTick((ServerLevel)(Object)this, pos, simpleRandom);
-                } catch (IllegalStateException ex) {
-                    // 在 Folia 区域线程模型下，某些方块（如 GrowingPlantHeadBlock、BuddingAmethystBlock）
-                    // 的 randomTick 会调用 handleBlockSpreadEvent，触发线程所有权检查。
-                    // 当 virtual thread 不拥有该区域时抛出此异常，属于预期行为，跳过该方块的 randomTick 即可。
-                    LOGGER.warn("[Mili] Skipped randomTick for {} at {} due to thread ownership check: {}",
-                            state.getBlock(), pos, ex.getMessage());
-                }
+                state.randomTick((ServerLevel)(Object)this, pos, simpleRandom);
                 if (doubleTickFluids) {
                     final FluidState fluidState = state.getFluidState();
                     if (fluidState.isRandomlyTicking()) {
-                        try {
-                            fluidState.randomTick((ServerLevel)(Object)this, pos, simpleRandom);
-                        } catch (IllegalStateException ex) {
-                            LOGGER.warn("[Mili] Skipped fluid randomTick for {} at {} due to thread ownership check: {}",
-                                    fluidState.getType(), pos, ex.getMessage());
-                        }
+                        fluidState.randomTick((ServerLevel)(Object)this, pos, simpleRandom);
                     }
                 }
-                // Mili end
             }
 
             // Mili start - break the outer section loop if the inner loop was broken due to budget
