@@ -325,13 +325,16 @@ public final class MiliSchedulerImpl implements MiliScheduler {
     }
 
     /**
-     * 提交阻塞任务到专用阻塞池。
+     * 提交阻塞任务到 work-stealing coordinator。
+     *
+     * <p>R2-03 修复：阻塞任务不再直接提交到阻塞池，而是提交到 coordinator。
+     * SchedulerWorker 检测到 isBlocking() 后会调用 BlockingTaskIsolation.executeBlocking()
+     * 并转移 ExecutionToken。
      *
      * <p>C-09 修复：阻塞任务通过专用 executor 执行，不阻塞 worker 线程。
-     * 通过 RegionState 的 executingCount 跟踪执行状态。
      */
     private void submitBlockingTask(@NotNull RegionTask task, @NotNull DefaultTaskHandle handle) {
-        // 创建一个可追踪的 Runnable，执行完成后更新 handle 状态
+        // 创建一个可追踪的任务，执行完成后更新 handle 状态
         RegionTask trackedTask = new RegionTask() {
             @Override
             public void execute() throws Exception {
@@ -367,7 +370,8 @@ public final class MiliSchedulerImpl implements MiliScheduler {
             public void onCancel() { handle.cancel(); }
         };
 
-        blockingTaskIsolation.executeBlocking(trackedTask);
+        // 提交到 coordinator —— SchedulerWorker 会检测 isBlocking 并处理 token 转移
+        workStealingCoordinator.submit(trackedTask);
     }
 
     /**

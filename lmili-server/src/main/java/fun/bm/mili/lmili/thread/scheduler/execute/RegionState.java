@@ -1,116 +1,310 @@
 package fun.bm.mili.lmili.thread.scheduler.execute;
 
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Region 生命周期状态机 —— 解决 register/unregister race (C-02)、push/deactivate TOCTOU (C-07)、
- * unregister 与已取出任务冲突 (C-08) 等并发问题。
+ * Region 运行时状态机 —— 统一生命周期 + 执行权所有权。
  *
- * <h3>状态转换</h3>
+ * <h3>状态转换（R2-01/R2-02 修复）</h3>
  * <pre>
- * ACTIVE ──deactivate()──▶ DRAINING ──(executing==0)──▶ CLOSED
+ * 单一 AtomicReference 保证所有转换原子：
+ *
+ * (ACTIVE, IDLE) ──acquire──▶ (ACTIVE, RUNNING(owner))
+ *                                  └───release──▶ (ACTIVE, IDLE)
+ *
+ * (ACTIVE, *) ──drain──▶ (DRAINING, *) ──(running==0)──▶ (CLOSED, IDLE)
  * </pre>
  *
- * <ul>
- *   <li><b>ACTIVE</b>：接受新任务，正常调度</li>
- *   <li><b>DRAINING</b>：不再接受新任务，等待正在执行的任务完成</li>
- *   <li><b>CLOSED</b>：不再激活，不可复活</li>
- * </ul>
+ * <h3>任务提交协议（R2-02 修复）</h3>
+ * <pre>
+ * tryAcceptTask(): 原子递增 queuedCount (仅 ACTIVE)
+ * tryAcquireExecution(): CAS IDLE → RUNNING (仅 ACTIVE)
+ * releaseExecution(): CAS RUNNING → IDLE
+ * releaseTask(): 递减 queuedCount
+ * </pre>
  *
- * <p>所有状态转换通过 CAS 保证原子性，禁止 CLOSED → ACTIVE 的反向转换。
- *
- * <h3>执行计数器</h3>
- * <p>与状态配合使用，记录当前正在执行的任务数。
- * DRAINING 状态下当 executingCount 降为 0 时才能安全关闭。
+ * <p>所有状态转换通过单一 AtomicReference 的 CAS 保证原子性，
+ * 消除 phase 检查与计数器递增之间的 race condition。
  */
 public final class RegionState {
 
     /**
-     * Region 生命周期阶段。
+     * 生命周期阶段。
      */
     public enum Phase {
-        /** 正常运行，接受新任务 */
+        /** 正常运行 */
         ACTIVE,
-        /** 正在排空，不再接受新任务，等待执行中任务完成 */
+        /** 正在排空 */
         DRAINING,
-        /** 已关闭，不可复活 */
+        /** 已关闭 */
         CLOSED
     }
 
-    private final AtomicReference<Phase> phase;
-    private final java.util.concurrent.atomic.AtomicInteger executingCount;
+    /**
+     * 执行状态（R2-01 核心修复）。
+     */
+    public enum ExecState {
+        /** 空闲 */
+        IDLE,
+        /** 正在执行（值为 owner worker id） */
+        RUNNING
+    }
 
     /**
-     * 创建 ACTIVE 阶段的 RegionState。
+     * 不可变的 Region 运行时状态。
+     *
+     * <p>包含 phase + executionOwner，通过单一 AtomicReference CAS 保证原子转换。
+     */
+    public record Snapshot(Phase phase, ExecState execState, int owner, int queued, long generation) {
+        static final Snapshot INITIAL = new Snapshot(Phase.ACTIVE, ExecState.IDLE, -1, 0, 0);
+
+        boolean isActive() {
+            return phase == Phase.ACTIVE;
+        }
+
+        boolean isIdle() {
+            return execState == ExecState.IDLE;
+        }
+
+        boolean isRunning() {
+            return execState == ExecState.RUNNING;
+        }
+    }
+
+    /**
+     * 执行令牌 —— 持有它即表示拥有 Region 执行权。
+     *
+     * <p>必须在使用完毕后调用 {@link #release()}。
+     */
+    public static final class ExecutionToken {
+        final RegionState state;
+        final long generation;
+        final int owner;
+        private volatile boolean released = false;
+
+        ExecutionToken(RegionState state, long generation, int owner) {
+            this.state = state;
+            this.generation = generation;
+            this.owner = owner;
+        }
+
+        /**
+         * 释放执行权。
+         *
+         * <p>只能由持有者调用一次。非持有者的调用会被忽略。
+         */
+        public void release() {
+            if (!released) {
+                released = true;
+                state.releaseExecution(this);
+            }
+        }
+
+        /**
+         * 转移执行权到另一个 worker（用于 BlockingTask 场景，R2-03 修复）。
+         *
+         * <p>新的 owner 将在其任务完成后调用 release()。
+         */
+        public ExecutionToken transferTo(int newOwner) {
+            if (released) return null;
+            return state.transferExecution(this, newOwner);
+        }
+
+        @Override
+        public String toString() {
+            return "Token{owner=" + owner + ", gen=" + generation + "}";
+        }
+    }
+
+    // ---- 内部状态 ----
+
+    private final AtomicReference<Snapshot> snapshot;
+    private final AtomicLong generationCounter = new AtomicLong(0);
+
+    /**
+     * 创建 ACTIVE/IDLE 状态的 RegionState。
      */
     public RegionState() {
-        this.phase = new AtomicReference<>(Phase.ACTIVE);
-        this.executingCount = new AtomicInteger(0);
+        this.snapshot = new AtomicReference<>(Snapshot.INITIAL);
+    }
+
+    /**
+     * 获取当前状态快照。
+     */
+    public Snapshot getSnapshot() {
+        return snapshot.get();
     }
 
     /**
      * 获取当前生命周期阶段。
      */
-    public Phase get() {
-        return phase.get();
+    public Phase getPhase() {
+        return snapshot.get().phase;
     }
 
     /**
-     * 是否处于 ACTIVE 阶段（接受新任务）。
+     * 是否处于 ACTIVE 阶段。
      */
     public boolean isActive() {
-        return phase.get() == Phase.ACTIVE;
+        return snapshot.get().phase == Phase.ACTIVE;
     }
 
+    // ---- 任务提交协议 (R2-02 修复) ----
+
     /**
-     * 尝试提交任务：仅当 ACTIVE 时递增执行计数器。
+     * 尝试接受一个新任务（原子递增 queuedCount）。
      *
-     * @return true 如果成功（处于 ACTIVE），false 如果已 DRAINING/CLOSED
+     * <p>仅当 ACTIVE 时成功。保证：
+     * <ul>
+     *   <li>如果返回 true，后续 deactivate() 不能立即 CLOSED（因为 queued > 0）</li>
+     *   <li>DRAINING/CLOSED 状态下始终返回 false</li>
+     * </ul>
+     *
+     * @return true 如果成功接受任务
      */
-    public boolean tryBeginExecution() {
+    public boolean tryAcceptTask() {
         while (true) {
-            Phase current = phase.get();
-            if (current != Phase.ACTIVE) {
+            Snapshot current = snapshot.get();
+            if (current.phase != Phase.ACTIVE) {
                 return false;
             }
-            // 快速路径：phase 仍为 ACTIVE，递增计数器
-            // 注意：这里只递增计数器，不修改 phase。deactivate() 会在执行期间将 phase 设为 DRAINING。
-            // 但这没关系——只要 tryBeginExecution 返回 true，我们就承诺执行。
-            executingCount.incrementAndGet();
-            // 双重检查：如果在 increment 之后 phase 被改为 DRAINING，仍然允许执行完成
-            // 因为我们已经在 ACTIVE 状态下获得了执行权
-            return true;
+            Snapshot next = new Snapshot(
+                    current.phase, current.execState, current.owner,
+                    current.queued + 1, current.generation);
+            if (snapshot.compareAndSet(current, next)) {
+                return true;
+            }
         }
     }
 
     /**
-     * 通知一个任务执行完成。
-     *
-     * <p>在 DRAINING 阶段当计数器降为 0 时，可以安全关闭。
+     * 释放一个已完成任务的 queuedCount。
      */
-    public void endExecution() {
-        executingCount.decrementAndGet();
+    public void releaseTask() {
+        while (true) {
+            Snapshot current = snapshot.get();
+            if (current.queued <= 0) return;
+            Snapshot next = new Snapshot(
+                    current.phase, current.execState, current.owner,
+                    current.queued - 1, current.generation);
+            if (snapshot.compareAndSet(current, next)) {
+                return;
+            }
+        }
     }
+
+    // ---- 执行权获取/释放 (R2-01 修复) ----
+
+    /**
+     * 尝试获取 Region 执行权。
+     *
+     * <p>R2-01 核心修复：通过单一原子 CAS 同时检查 ACTIVE + IDLE，
+     * 消除 check-then-increment 的 race window。
+     *
+     * <p>成功时返回 {@link ExecutionToken}，失败时返回 null。
+     * 持有 token 期间，其他 worker 无法获取同一 Region 的执行权。
+     *
+     * @param owner worker id（用于追踪所有权）
+     * @return ExecutionToken 或 null
+     */
+    public ExecutionToken tryAcquireExecution(int owner) {
+        while (true) {
+            Snapshot current = snapshot.get();
+            if (current.phase != Phase.ACTIVE) {
+                return null;
+            }
+            if (current.execState != ExecState.IDLE) {
+                return null; // 已有执行者
+            }
+            long newGen = generationCounter.incrementAndGet();
+            Snapshot next = new Snapshot(
+                    Phase.ACTIVE, ExecState.RUNNING, owner,
+                    current.queued, newGen);
+            if (snapshot.compareAndSet(current, next)) {
+                return new ExecutionToken(this, newGen, owner);
+            }
+        }
+    }
+
+    /**
+     * 释放执行权（RUNNING → IDLE）。
+     *
+     * <p>只能由 Token 持有者调用。generation 不匹配时忽略。
+     */
+    void releaseExecution(ExecutionToken token) {
+        if (token.released) return;
+        while (true) {
+            Snapshot current = snapshot.get();
+            if (current.generation != token.generation) {
+                return; // 已经被转移或重置
+            }
+            if (current.execState != ExecState.RUNNING || current.owner != token.owner) {
+                return; // 不是当前持有者
+            }
+            Snapshot next = new Snapshot(
+                    current.phase, ExecState.IDLE, -1,
+                    current.queued, current.generation);
+            if (snapshot.compareAndSet(current, next)) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * 转移执行权到新的 owner（R2-03 修复：BlockingTask 场景）。
+     *
+     * <p>用于将执行权从 SchedulerWorker 转移到 BlockingWorker。
+     */
+    ExecutionToken transferExecution(ExecutionToken token, int newOwner) {
+        if (token.released) return null;
+        while (true) {
+            Snapshot current = snapshot.get();
+            if (current.generation != token.generation) {
+                return null; // generation 已经变了
+            }
+            if (current.execState != ExecState.RUNNING || current.owner != token.owner) {
+                return null; // 不是当前持有者
+            }
+            long newGen = generationCounter.incrementAndGet();
+            Snapshot next = new Snapshot(
+                    current.phase, ExecState.RUNNING, newOwner,
+                    current.queued, newGen);
+            if (snapshot.compareAndSet(current, next)) {
+                token.released = true; // 旧 token 失效
+                return new ExecutionToken(this, newGen, newOwner);
+            }
+        }
+    }
+
+    // ---- 生命周期转换 ----
 
     /**
      * 尝试进入 DRAINING 阶段。
      *
-     * <p>只能在 ACTIVE → DRAINING 或 DRAINING（幂等）时成功。
+     * <p>阻止新任务提交。已在队列中的任务仍可消费。
      *
-     * @return true 如果成功转换到 DRAINING；false 如果已经是 CLOSED
+     * @return true 如果成功进入 DRAINING；false 如果已经 CLOSED
      */
     public boolean tryBeginDrain() {
-        Phase current;
         while (true) {
-            current = phase.get();
-            if (current == Phase.CLOSED) {
-                return false;
+            Snapshot current = snapshot.get();
+            if (current.phase == Phase.CLOSED) return false;
+            if (current.phase == Phase.DRAINING) return true; // 幂等
+            if (current.execState == ExecState.RUNNING) {
+                // 仍在执行中，只标记 DRAINING 但不关闭
+                Snapshot next = new Snapshot(
+                        Phase.DRAINING, current.execState, current.owner,
+                        current.queued, current.generation);
+                if (snapshot.compareAndSet(current, next)) {
+                    return true;
+                }
+                continue;
             }
-            if (current == Phase.DRAINING) {
-                return true; // 幂等
-            }
-            if (phase.compareAndSet(Phase.ACTIVE, Phase.DRAINING)) {
+            Snapshot next = new Snapshot(
+                    Phase.DRAINING, current.execState, current.owner,
+                    current.queued, current.generation);
+            if (snapshot.compareAndSet(current, next)) {
                 return true;
             }
         }
@@ -119,53 +313,67 @@ public final class RegionState {
     /**
      * 尝试关闭 Region（DRAINING → CLOSED）。
      *
-     * <p>仅在 executingCount == 0 时成功。
+     * <p>仅在 running==IDLE 且 queued==0 时成功。
      *
-     * @return true 如果成功关闭，false 如果还有任务在执行
+     * @return true 如果成功关闭
      */
     public boolean tryClose() {
         while (true) {
-            Phase current = phase.get();
-            if (current == Phase.ACTIVE) {
-                // 先尝试进入 DRAINING
-                if (!phase.compareAndSet(Phase.ACTIVE, Phase.DRAINING)) {
-                    continue; // 有其他线程修改了状态，重试
+            Snapshot current = snapshot.get();
+            if (current.phase == Phase.ACTIVE) {
+                if (!snapshot.compareAndSet(current, new Snapshot(
+                        Phase.DRAINING, current.execState, current.owner,
+                        current.queued, current.generation))) {
+                    continue;
                 }
-                // 已经进入 DRAINING，继续检查 executingCount
-                current = Phase.DRAINING;
+                current = snapshot.get(); // 重新读取
             }
-            if (current == Phase.CLOSED) {
-                return true; // 已经关闭了
+            if (current.phase == Phase.CLOSED) return true;
+            if (current.phase == Phase.DRAINING) {
+                if (current.execState == ExecState.RUNNING) return false;
+                if (current.queued > 0) return false;
+                if (snapshot.compareAndSet(current, new Snapshot(
+                        Phase.CLOSED, ExecState.IDLE, -1, 0, current.generation))) {
+                    return true;
+                }
             }
-            // current == Phase.DRAINING
-            if (executingCount.get() != 0) {
-                return false; // 还有任务在执行
-            }
-            if (phase.compareAndSet(Phase.DRAINING, Phase.CLOSED)) {
-                return true;
-            }
-            // CAS 失败意味着状态被改变，重试
         }
     }
 
     /**
-     * 强制关闭（忽略 executingCount）。
-     *
-     * <p><b>注意</b>：仅在 shutdown 等场景使用，此时假设所有 worker 已停止。
+     * 强制关闭（忽略 running/queued）。
      */
     public void forceClose() {
-        phase.set(Phase.CLOSED);
+        Snapshot current = snapshot.get();
+        snapshot.set(new Snapshot(Phase.CLOSED, ExecState.IDLE, -1, 0, current.generation));
     }
 
     /**
-     * 获取当前正在执行的任务数。
+     * 获取当前正在执行的 worker ID（-1 表示空闲）。
      */
-    public int executingCount() {
-        return executingCount.get();
+    public int getExecutingWorker() {
+        Snapshot s = snapshot.get();
+        return s.execState == ExecState.RUNNING ? s.owner : -1;
+    }
+
+    /**
+     * 获取队列中的任务数。
+     */
+    public int getQueuedCount() {
+        return snapshot.get().queued;
+    }
+
+    /**
+     * 检查是否有任务在执行。
+     */
+    public boolean isRunning() {
+        return snapshot.get().execState == ExecState.RUNNING;
     }
 
     @Override
     public String toString() {
-        return "RegionState{" + phase.get() + ", executing=" + executingCount.get() + "}";
+        Snapshot s = snapshot.get();
+        return String.format("RegionState{%s, %s, owner=%d, queued=%d}",
+                s.phase, s.execState, s.owner, s.queued);
     }
 }

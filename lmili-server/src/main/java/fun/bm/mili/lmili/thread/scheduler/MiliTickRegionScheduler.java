@@ -311,7 +311,13 @@ public final class MiliTickRegionScheduler {
             return true;
         }
 
+        // R2-12 修复：forceSubmitRegion 增加 lifecycle/state 检查
+        // 只允许在 halted 前最后一个手段使用
         void forceSubmitRegion(final TickRegionScheduler.RegionScheduleHandle handle) {
+            // 检查 scheduler lifecycle
+            if (halted.get()) {
+                return; // 已停止，拒绝强制提交
+            }
             if (handle.region == null) {
                 globalQueue.offer(handle);
             } else {

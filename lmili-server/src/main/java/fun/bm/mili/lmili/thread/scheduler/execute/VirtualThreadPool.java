@@ -39,6 +39,9 @@ public final class VirtualThreadPool {
     /**
      * 虚拟线程执行器 —— 用于立即执行任务。
      *
+     * <p>R2-09 修复：使用真正的 Java Virtual Thread（newVirtualThreadPerTaskExecutor），
+     * 而非平台线程池（newCachedThreadPool）。
+     *
      * <p>这是 final 的，不允许外部获取。
      */
     private final ExecutorService virtualExecutor;
@@ -77,11 +80,8 @@ public final class VirtualThreadPool {
             return t;
         });
 
-        this.virtualExecutor = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, name + "-Virtual");
-            t.setDaemon(true);
-            return t;
-        });
+        // R2-09 修复：使用真正的 Java Virtual Thread（Java 21+）
+        this.virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
         LOGGER.info("[VirtualThreadPool-{}] Initialized", name);
     }
@@ -158,6 +158,7 @@ public final class VirtualThreadPool {
      */
     public Cancellable scheduleWithFixedDelay(Runnable task, long period, TimeUnit unit) {
         AtomicReference<ScheduledFuture<?>> futureRef = new AtomicReference<>();
+        // R2-10 修复：只递增一次
         periodicTaskCount.incrementAndGet();
 
         Runnable wrappedTask = new Runnable() {
@@ -177,8 +178,6 @@ public final class VirtualThreadPool {
         // 首次调度
         ScheduledFuture<?> future = scheduler.schedule(wrappedTask, period, unit);
         futureRef.set(future);
-
-        periodicTaskCount.incrementAndGet();
 
         return new Cancellable() {
             @Override
@@ -247,6 +246,7 @@ public final class VirtualThreadPool {
                 ScheduledFuture<?> f = futureRef.getAndSet(null);
                 if (f != null) {
                     f.cancel(false);
+                    state.tryCancel(); // R2-11 修复：同步 TaskScheduleState
                     periodicTaskCount.decrementAndGet();
                 }
             }
