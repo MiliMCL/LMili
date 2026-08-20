@@ -2,7 +2,7 @@
 
 > 本文档汇总 Mili 的修复、改动与新增功能，并说明各项功能对应的实现位置与优化点。
 >
-> **适用版本**：`26.2-R0.1-SNAPSHOT`（基于 Paper → Folia 构建）
+> **适用版本**：`26.2-R0.1`（基于 Paper → Folia 构建）
 
 ---
 
@@ -13,7 +13,7 @@
 主要设计方向：
 - 在保持上游兼容的前提下，修复 Folia 区域化调度引入的并发问题；
 - 提供可配置的原版行为开关，方便生存/生电服按需调整；
-- 通过 Rust 原生模块对高频计算路径做 JNI 零拷贝加速。
+- 通过 SIMD 与并发数据结构对高频计算路径做纯 Java 优化。
 
 ---
 
@@ -35,7 +35,6 @@ Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理多层
 | `paper-api` / `paper-server` | 上游 Paper，不直接修改 |
 | `folia-api` / `folia-server` | 上游 Folia，不直接修改 |
 | `mili-api` / `mili-server` | Mili 自己的 API 与核心补丁/源码 |
-| `mili-rust` | Rust 原生优化模块 |
 
 补丁文件位于 `mili-server/minecraft-patches/features/`，共 **121 个** feature 补丁。
 
@@ -47,15 +46,14 @@ Mili 使用 **Hyacinthusweight**（基于 paperweight）补丁系统管理多层
 |------|------|
 | JDK | Java 25（toolchain + `--release 25`） |
 | 构建工具 | Gradle 9.4.1（Kotlin DSL）+ Hyacinthusweight 补丁系统 |
-| Rust | edition 2024，通过 `cargo build --release` 产出 JNI 原生库 |
-| 产物 | `mili-server/build/libs/mili-paperclip-26.2-R0.1-SNAPSHOT.jar` |
-| Maven 坐标 | `fun.bm.mili:mili-api:26.2-R0.1-SNAPSHOT` |
+| 产物 | `lmili-server/build/libs/lmili-26.2-R0.1-paperclip.jar` |
+| Maven 坐标 | `io.github.xucy10:lmili-api:26.2-R0.1` |
 
 首次构建必须先执行：
 
 ```bash
 ./gradlew applyAllPatches --no-configuration-cache --no-build-cache
-./gradlew :mili-server:createMojmapPaperclipJar
+./gradlew :lmili-server:createPaperclipJar
 ```
 
 ---
@@ -161,54 +159,8 @@ Mili 对全部 Java 源码进行了系统性 bug 排查，修复了以下类别�
 
 ---
 
-## 7. Rust 原生优化模块（`mili-rust`）
+## 7. 配置系统
 
-`mili-rust` 是一个 Rust crate（edition 2024），构建后打包进服务端 JAR，通过 **JNI DirectByteBuffer 零拷贝**与 Java 交互。
-
-### 7.1 模块结构
-
-| 模块 | 功能 | 技术亮点 |
-|------|------|----------|
-| `config.rs` | TOML 配置文件读写 | `toml_edit` 保留注释与格式，JSON ↔ TOML 双向转换，JNI 批量传输 |
-| `entity_cull.rs` | 实体视锥剔除 | 6 平面 AABB frustum 测试，DirectByteBuffer 零拷贝，Rayon 并行批处理 |
-| `frustum.rs` | 视锥体构建与测试 | 从相机参数或投影矩阵构建，球体/AABB/点测试，EPSILON 浮点防护 |
-| `jni_bridge.rs` | JNI 桥接层 | 批量处理 only，`catch_unwind` 防 panic 传播，负数实体数/null 指针/容量校验 |
-
-### 7.2 JNI 交互方式
-
-**非子进程通信，而是 JNI 原生库直接调用**：
-
-1. Java 侧 `RustBridge.java` 通过 `System.loadLibrary` 加载 `mili_optimizer` 原生库
-2. 实体数据打包进 `DirectByteBuffer`，Rust 通过 `GetDirectBufferAddress` 直接读取内存地址
-3. 每 tick 仅 M 次 JNI 调用（M = 观察者数量），而非 N×M 次（N = 实体数）
-4. Rust 二进制不可用时，自动回退到纯 Java 实现
-
-### 7.3 安全设计
-
-- `catch_unwind(AssertUnwindSafe(...))` 包装所有 JNI 入口，防止 panic 跨 FFI 边界传播
-- `#[unsafe(no_mangle)]` 符合 edition 2024 规范
-- `overflow-checks=true` 防止算术溢出 UB
-- `checked_mul` 防止长度溢出
-- EPSILON=1e-6 浮点比较防护
-- 退化向量测试
-
-### 7.4 构建配置
-
-```toml
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-panic = "unwind"          # 支持 catch_unwind
-strip = "symbols"
-overflow-checks = true     # 防止算术溢出 UB
-```
-
-验证：`cargo clippy --release` — 0 error, 0 warning；`cargo test --release` — 28 tests passed。
-
----
-
-## 8. 配置系统
 
 Mili 提供两套 TOML 配置文件：
 
@@ -227,7 +179,7 @@ Mili 提供两套 TOML 配置文件：
 
 ---
 
-## 9. 客户端协议兼容层
+## 8. 客户端协议兼容层
 
 | 协议 | 说明 | Patch |
 |------|------|-------|
@@ -244,7 +196,7 @@ Mili 提供两套 TOML 配置文件：
 
 ---
 
-## 10. 假玩家 / Bot 系统
+## 9. 假玩家 / Bot 系统
 
 从 Leaves 移植并适配 Folia：
 
@@ -263,7 +215,7 @@ API 事件（`org.leavesmc.leaves.event.bot`）：
 
 ---
 
-## 11. 其他功能
+## 10. 其他功能
 
 | 功能 | 说明 | 实现 |
 |------|------|------|
@@ -279,9 +231,9 @@ API 事件（`org.leavesmc.leaves.event.bot`）：
 
 ---
 
-## 12. 配置速查表
+## 11. 配置速查表
 
-### 12.1 主配置（`lmili_config.toml`）
+### 11.1 主配置（`lmili_config.toml`）
 
 | 配置键 | 类型 | 说明 |
 |--------|------|------|
@@ -303,7 +255,7 @@ API 事件（`org.leavesmc.leaves.event.bot`）：
 | `fixes.update-suppression-crash-fix.enabled` | Boolean | 更新抑制崩溃修复 |
 | `misc.auto-update.enabled` | Boolean | 自动更新 |
 
-### 12.2 Carpet 兼容配置（`lmili_carpet_config.toml`）
+### 11.2 Carpet 兼容配置（`lmili_carpet_config.toml`）
 
 | 配置键 | 说明 |
 |--------|------|
@@ -314,17 +266,17 @@ API 事件（`org.leavesmc.leaves.event.bot`）：
 
 ---
 
-## 13. 注意事项与限制
+## 12. 注意事项与限制
 
 1. **实验性功能**：`experiment` 类别下的 Region Balancer、Cross-Region Helper 等属于实验性优化，建议先在测试环境验证后再上线。
-2. **Rust 优化器可选**：`mili-rust` 提供加速，但若 Rust 二进制缺失，Java 侧会回退到纯 Java 实现，不影响功能正确性。
+2. **配置系统**：项目使用纯 Java night-config 实现 TOML 配置解析，无需原生模块。
 3. **Folia 语义**：部分修复（如全局实体计数器、跨区伤害追踪）是为了在 Folia 区域模型下保持与 Paper 一致的行为，启用后请留意相关插件的兼容性。
 4. **Carpet 规则映射**：并非所有 Carpet 规则都已实现，详细状态见 [`docs/carpet-compat-status.md`](carpet-compat-status.md)。
 5. **补丁工作流**：修改 `mili-server/src/minecraft/` 后必须执行 `./gradlew :mili-server:rebuildPatches` 并提交生成的 `.patch` 文件。
 
 ---
 
-## 14. 相关链接
+## 13. 相关链接
 
 - Folia（直接上游）: https://github.com/PaperMC/Folia
 - Paper: https://github.com/PaperMC/Paper

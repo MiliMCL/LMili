@@ -6,7 +6,7 @@ This file provides guidance to CodeBuddy / AI code assistants when working with 
 
 **Mili** 是直接基于 [Folia](https://github.com/PaperMC/Folia) 的 Minecraft 26.2服务端核心，使用纯 Java 25 构建。目标是在 Folia 并发调度环境下提供更稳定、可配置的服务器运行时。项目不包含任何 Rust 原生模块或生电/协议修改。
 
-**版本**：`26.2-R0.1-SNAPSHOT`
+**版本**：`26.2-R0.1`
 **构建工具**：Gradle 9.4.1（Kotlin DSL）+ Hyacinthusweight 补丁系统（97 个 feature 补丁）
 **上游**：Folia `57f643f`（`foliaRef` in `gradle.properties`）
 **包名**：`fun.bm.mili`（lmili 子包 `fun.bm.mili.lmili`）
@@ -95,7 +95,7 @@ Minecraft（原版）
 
 | 文件 | 说明 |
 |------|------|
-| `gradle.properties` | 项目版本 `26.2-R0.1-SNAPSHOT`、MC 版本 `26.2`、`foliaRef=57f643f`、`weightVersion=2.0.15`、`clipVersion=3.0.18` |
+| `gradle.properties` | 项目版本 `26.2-R0.1`、MC 版本 `26.2`、`foliaRef=57f643f`、`weightVersion=2.0.15`、`clipVersion=3.0.18` |
 | `mili-server/build.gradle.kts` | 服务器构建核心（Java toolchain 25、lithium 依赖等） |
 | `lmili_config.toml` | 运行时主配置（TOML 格式） |
 

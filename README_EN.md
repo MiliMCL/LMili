@@ -129,7 +129,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly("fun.bm.mili:mili-api:26.2-R0.1-SNAPSHOT")
+    compileOnly("io.github.xucy10:lmili-api:26.2-R0.1")
 }
 ```
 
@@ -144,12 +144,12 @@ dependencies {
 </repositories>
 
 <dependencies>
-  <dependency>
-    <groupId>fun.bm.mili</groupId>
-    <artifactId>mili-api</artifactId>
-    <version>26.2-R0.1-SNAPSHOT</version>
-    <scope>provided</scope>
-  </dependency>
+<dependency>
+  <groupId>io.github.xucy10</groupId>
+  <artifactId>lmili-api</artifactId>
+  <version>26.2-R0.1</version>
+  <scope>provided</scope>
+</dependency>
 </dependencies>
 ```
 
