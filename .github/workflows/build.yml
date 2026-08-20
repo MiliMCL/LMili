@@ -45,6 +45,18 @@ jobs:
           distribution: zulu
           java-version: 25
 
+      - name: Build Hyacinthusweight plugin from source
+        run: |
+          set -eux
+          # repo.menthamc.org added JavaScript fingerprinting protection,
+          # so we build the plugin from source and install to mavenLocal
+          cd /tmp
+          git clone --depth 1 https://github.com/LuminolCustomArchive/Hyacinthusweight.git
+          cd Hyacinthusweight
+          chmod +x gradlew
+          ./gradlew publishToMavenLocal --no-daemon
+          echo "Hyacinthusweight plugin installed to mavenLocal"
+
       - name: Download Hyacinthusclip
         run: |
           mkdir -p libs
@@ -94,8 +106,7 @@ jobs:
           set -eux
           # Run full applyAllPatches to ensure correct task chain for upstream checkout.
           # This regenerates everything including lmili-server/src/minecraft/.
-          # --refresh-dependencies forces re-download to avoid corrupted cached JARs
-          ./gradlew applyAllPatches --no-configuration-cache --stacktrace --refresh-dependencies
+          ./gradlew applyAllPatches --no-configuration-cache --stacktrace
 
       - name: Restore Committed Sources
         run: |
