@@ -1222,14 +1222,32 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
         this.scheduledTickStart = this.tickSchedule.getDeadline(interval);
     }
 
+    // Mili start - 用于确保只有一个线程记录 tick 数据给全局 TPS 计算
+    private final java.util.concurrent.atomic.AtomicLong lastRecordedTickNanos = new java.util.concurrent.atomic.AtomicLong(0L);
+    private static final long MIN_TICK_INTERVAL_NS = 45_000_000L; // 略小于 50ms，允许一定误差
+    // Mili end
+
     private void recordEndOfTick() {
+        // Mili start - 线程安全：确保每个 tick 只记录一次给全局 TPS 计算
+        // 在 Mili 并行架构中，多个 region tick 线程都会调用此方法
+        // 使用时间戳去重，只允许一个 tick 记录到全局 tick 数据
+        final long now = Util.getNanos();
+        final long lastRecorded = this.lastRecordedTickNanos.get();
+        if (now - lastRecorded < MIN_TICK_INTERVAL_NS) {
+            // 已经有其他线程在当前 tick 周期内记录过了，跳过
+            return;
+        }
+        // 尝试原子更新，如果失败说明其他线程已经更新了
+        if (!this.lastRecordedTickNanos.compareAndSet(lastRecorded, now)) {
+            return;
+        }
+        // Mili end
+
         final long prevStart = this.lastTickStart;
         final long currStart = this.currentTickStart;
         this.lastTickStart = this.currentTickStart;
         final long scheduledStart = this.scheduledTickStart;
         this.scheduledTickStart = this.nextTickTimeNanos; // set scheduledStart for next tick
-
-        final long now = Util.getNanos();
 
         final ca.spottedleaf.common.time.TickTime time = new ca.spottedleaf.common.time.TickTime(
             prevStart,
