@@ -113,7 +113,8 @@ public final class MiliTickRegionScheduler {
         try {
             task.taskHandle = scheduler.submit(task.toRegionTask());
         } catch (Exception e) {
-            task.state.tryMarkIdle();
+            // 提交失败，状态仍是 QUEUED（不是 RUNNING），tryMarkIdle() 无法工作，使用 forceCancel() 清理
+            task.state.forceCancel();
             LOGGER.warn("[MiliTickRegionScheduler] Failed to submit tick task for region #{}",
                     handle.region != null ? handle.region.id : -1, e);
         }
@@ -283,12 +284,14 @@ public final class MiliTickRegionScheduler {
          * handle.runTick() 内部通过 setTickingRegion() 设置线程上下文。
          */
         void executeTask() {
+            // 状态机：QUEUED → RUNNING，确保后续 tryMarkIdle() 能正确归还到 IDLE
+            state.tryMarkRunning();
             try {
                 // C-06 修复：next-tick gate —— 检查是否到了该 region 的下次允许 tick 时间
                 if (handle.region != null) {
                     final long now = System.currentTimeMillis();
                     if (now < handle.nextAllowedTickTimeMillis) {
-                        // 还没到时间，归还 QUEUED→IDLE 并延迟提交
+                        // 还没到时间，归还 RUNNING→IDLE 并延迟提交
                         state.tryMarkIdle();
                         resubmitDelayed(handle.nextAllowedTickTimeMillis - now);
                         return;
@@ -323,7 +326,8 @@ public final class MiliTickRegionScheduler {
                 taskHandle = scheduler.scheduleDelayed(toRegionTask(),
                         Math.max(1, delayMs), TimeUnit.MILLISECONDS);
             } catch (Exception e) {
-                state.tryMarkIdle();
+                // scheduleDelayed 失败，状态仍是 QUEUED（不是 RUNNING），使用 forceCancel() 清理
+                state.forceCancel();
             }
         }
     }
