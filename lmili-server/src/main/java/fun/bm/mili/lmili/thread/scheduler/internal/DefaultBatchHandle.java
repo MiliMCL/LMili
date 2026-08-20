@@ -153,6 +153,16 @@ public final class DefaultBatchHandle implements fun.bm.mili.lmili.thread.schedu
     }
 
     @Override
+    public boolean cancel() {
+        // 取消所有子任务，然后取消父 handle
+        boolean allCancelled = parentHandle.cancel();
+        for (TaskHandle child : children) {
+            child.cancel();
+        }
+        return allCancelled;
+    }
+
+    @Override
     @NotNull
     public java.util.concurrent.CompletableFuture<Void> toCompletableFuture() {
         return parentHandle.toCompletableFuture();

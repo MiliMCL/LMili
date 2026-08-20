@@ -123,6 +123,8 @@ public final class WorkStealingCoordinator {
         long gen = generationCounter.incrementAndGet();
         RegionQueue newQueue = new RegionQueue(regionId);
         RegionSlot newSlot = new RegionSlot(gen, newQueue);
+        // LATEST-02: 连接 closeBarrier 到 RegionState 回调
+        newQueue.regionState().setCloseCallback(() -> newSlot.closeBarrier.complete(null));
         RegionSlot previous = regionSlots.putIfAbsent(regionId, newSlot);
         if (previous != null) {
             if (previous.queue.isActive()) {
@@ -185,65 +187,55 @@ public final class WorkStealingCoordinator {
         return regionSlots.size();
     }
 
-    // ---- 任务提交 ----
+    // ---- 任务提交 (LATEST-05: generation 验证 + 重试) ----
 
+    /**
+     * LATEST-05: 提交任务到指定 region。
+     *
+     * <p>通过验证 queue 仍然 active 确保任务不会进入 stale generation 的队列。
+     * 如果 queue 已停用（被 unregister 替换），自动重试获取新 queue。
+     */
     public void submit(@NotNull RegionTask task) {
         if (!running.get()) {
             task.onCancel();
             return;
         }
         long regionId = task.regionId();
-        RegionQueue queue = getOrCreateQueue(regionId);
-        if (queue == null) {
-            task.onCancel();
-            return;
+
+        // LATEST-05: 最多重试 3 次以应对 register/unregister 并发
+        for (int attempt = 0; attempt < 3; attempt++) {
+            RegionSlot slot = regionSlots.get(regionId);
+            if (slot == null || !slot.queue.isActive()) {
+                // region 未注册或正在 drain，创建或等待新 slot
+                RegionQueue freshQueue = registerRegion(regionId);
+                if (freshQueue == null) {
+                    task.onCancel();
+                    return;
+                }
+                slot = regionSlots.get(regionId);
+                if (slot == null) continue; // 重试
+            }
+
+            try {
+                slot.queue.push(task);
+                // R2-07: 推送任务后唤醒一个 parked worker（解决 missed-wakeup）
+                unparkOneWorker();
+                return;
+            } catch (IllegalStateException e) {
+                // LATEST-05: queue 已停用（被 unregister），重试获取新 queue
+            }
         }
-        queue.push(task);
-        // R2-07: 推送任务后唤醒一个 parked worker（解决 missed-wakeup）
-        unparkOneWorker();
+        // 重试耗尽，取消任务
+        task.onCancel();
     }
 
+    /**
+     * LATEST-05: 批量提交任务，每个任务独立走 submit 的 generation 验证 + 重试逻辑。
+     */
     public void submitAll(@NotNull List<RegionTask> tasks) {
-        if (!running.get()) {
-            tasks.forEach(RegionTask::onCancel);
-            return;
-        }
-        ConcurrentHashMap<Long, List<RegionTask>> grouped = new ConcurrentHashMap<>();
         for (RegionTask task : tasks) {
-            RegionSlot slot = regionSlots.get(task.regionId());
-            if (slot != null && !slot.queue.isActive()) {
-                task.onCancel();
-                continue;
-            }
-            grouped.computeIfAbsent(task.regionId(), k -> new ArrayList<>()).add(task);
+            submit(task);
         }
-        for (var entry : grouped.entrySet()) {
-            RegionQueue queue = getOrCreateQueue(entry.getKey());
-            if (queue == null) {
-                entry.getValue().forEach(RegionTask::onCancel);
-                continue;
-            }
-            for (RegionTask task : entry.getValue()) {
-                queue.push(task);
-            }
-        }
-    }
-
-    @Nullable
-    private RegionQueue getOrCreateQueue(final long regionId) {
-        RegionSlot slot = regionSlots.get(regionId);
-        if (slot != null) {
-            return slot.queue.isActive() ? slot.queue : null;
-        }
-        if (!running.get()) return null;
-        long gen = generationCounter.incrementAndGet();
-        RegionQueue newQueue = new RegionQueue(regionId);
-        RegionSlot newSlot = new RegionSlot(gen, newQueue);
-        RegionSlot previous = regionSlots.putIfAbsent(regionId, newSlot);
-        if (previous != null) {
-            return previous.queue.isActive() ? previous.queue : null;
-        }
-        return newQueue;
     }
 
     // ---- 任务消费 (R2-01 ExecutionToken 修复) ----

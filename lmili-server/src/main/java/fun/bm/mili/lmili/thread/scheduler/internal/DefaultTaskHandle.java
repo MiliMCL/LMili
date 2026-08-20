@@ -123,8 +123,11 @@ public final class DefaultTaskHandle implements TaskHandle {
      * 标记任务取消。
      *
      * <p>C-18 修复：如果设置了 cancel action（如 ScheduledFuture），会先执行它。
+     *
+     * @return 总是返回 true（任务已被取消）
      */
-    public void cancel() {
+    @Override
+    public boolean cancel() {
         Runnable action = cancelAction.getAndSet(null);
         if (action != null) {
             try {
@@ -133,7 +136,7 @@ public final class DefaultTaskHandle implements TaskHandle {
                 // 忽略取消操作的异常
             }
         }
-        doComplete(State.CANCELLED);
+        return doComplete(State.CANCELLED);
     }
 
     /**
@@ -218,8 +221,10 @@ public final class DefaultTaskHandle implements TaskHandle {
 
     /**
      * 完成状态转换并触发回调。
+     *
+     * @return true 如果状态成功从 PENDING 转换
      */
-    private void doComplete(State newState) {
+    private boolean doComplete(State newState) {
         if (state.compareAndSet(State.PENDING, newState)) {
             // 更新 Future
             if (newState == State.COMPLETED) {
@@ -239,6 +244,8 @@ public final class DefaultTaskHandle implements TaskHandle {
                     // 回调异常不应影响其他回调
                 }
             }
+            return true;
         }
+        return false;
     }
 }

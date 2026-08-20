@@ -254,7 +254,7 @@ public final class MiliTickRegionScheduler {
      * <p>R2-08: 通过 {@link TaskScheduleState#tryMarkQueued()} 防止重复入队，
      * 通过状态机保证同一 handle 同一时刻只有一个 tick 任务在系统中。</p>
      */
-    static final class TickTask {
+    final class TickTask {
         final TickRegionScheduler.RegionScheduleHandle handle;
         final TaskScheduleState state = new TaskScheduleState();
         volatile TaskHandle taskHandle;
@@ -269,8 +269,9 @@ public final class MiliTickRegionScheduler {
 
         RegionTask toRegionTask() {
             final long rid = regionId();
+            final Runnable r = this::executeTask;
             return RegionTask.builder(rid)
-                    .task(this::executeTask)
+                    .task(r)
                     .name(handle.region != null ? "TickRegion#" + handle.region.id : "TickGlobal")
                     .build();
         }
@@ -330,7 +331,7 @@ public final class MiliTickRegionScheduler {
     /**
      * 获取或创建 handle 对应的 TickTask（identity-based，同一 handle 只有一个实例）。
      */
-    private static TickTask computeTask(final TickRegionScheduler.RegionScheduleHandle handle) {
+    private TickTask computeTask(final TickRegionScheduler.RegionScheduleHandle handle) {
         synchronized (REGISTRY) {
             TickTask existing = REGISTRY.get(handle);
             if (existing != null) return existing;

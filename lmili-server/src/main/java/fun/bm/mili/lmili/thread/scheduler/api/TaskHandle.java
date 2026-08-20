@@ -127,6 +127,16 @@ public interface TaskHandle {
     int completedCount();
 
     /**
+     * 取消任务。
+     *
+     * <p>如果任务已在执行，取消动作（如果有）会被执行。
+     * 取消不保证立即停止正在执行的任务，但会阻止尚未开始的任务执行。
+     *
+     * @return true 如果成功取消（任务不再处于 PENDING 状态）
+     */
+    boolean cancel();
+
+    /**
      * 获取追踪的底层 CompletableFuture。
      *
      * <p>用于与现有 CompletableFuture 链集成。

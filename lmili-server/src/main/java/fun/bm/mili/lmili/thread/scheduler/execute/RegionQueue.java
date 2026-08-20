@@ -115,20 +115,28 @@ public final class RegionQueue {
     // ---- 生命周期 ----
 
     /**
-     * 停用队列（进入 DRAINING）。
+     * LATEST-02: 停用队列（进入 DRAINING）。
+     *
+     * <p>如果停用时已无运行任务和队列任务，立即尝试关闭并触发 closeBarrier。
      */
     public void deactivate() {
         regionState.tryBeginDrain();
+        // 立即尝试关闭（如果条件满足），以完成 closeBarrier
+        regionState.tryClose();
     }
 
     /**
-     * 清空队列并返回未执行的任务。
+     * LATEST-03: 清空队列并返回未执行的任务。
+     *
+     * <p>每个被 drain 的任务都必须对应一次 releaseTask()，
+     * 否则 RegionState.queued 计数不会归零，导致 tryClose() 失败。
      */
     @NotNull
     public java.util.List<RegionTask> drain() {
         java.util.List<RegionTask> remaining = new java.util.ArrayList<>();
         RegionTask task;
         while ((task = deque.poll()) != null) {
+            regionState.releaseTask(); // LATEST-03: 同步减少 queued 计数
             remaining.add(task);
             task.onCancel();
         }

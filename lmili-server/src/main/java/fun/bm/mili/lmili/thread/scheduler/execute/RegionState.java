@@ -1,5 +1,6 @@
 package fun.bm.mili.lmili.thread.scheduler.execute;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -81,7 +82,7 @@ public final class RegionState {
         final RegionState state;
         final long generation;
         final int owner;
-        private volatile boolean released = false;
+        private final AtomicBoolean released = new AtomicBoolean(false);
 
         ExecutionToken(RegionState state, long generation, int owner) {
             this.state = state;
@@ -90,13 +91,17 @@ public final class RegionState {
         }
 
         /**
-         * 释放执行权。
+         * LATEST-01 修复：释放执行权。
          *
-         * <p>只能由持有者调用一次。非持有者的调用会被忽略。
+         * <p>使用 {@code AtomicBoolean.compareAndSet(false, true)} 保证幂等性：
+         * 多次调用 release() 只会产生一次有效的 state.releaseExecution()。
+         *
+         * <p>修复前 bug：released 是 volatile boolean，release() 先设 released=true
+         * 再调用 releaseExecution()；后者检查 token.released 后直接 return，导致
+         * RUNNING→IDLE CAS 永远不执行。
          */
         public void release() {
-            if (!released) {
-                released = true;
+            if (released.compareAndSet(false, true)) {
                 state.releaseExecution(this);
             }
         }
@@ -107,7 +112,7 @@ public final class RegionState {
          * <p>新的 owner 将在其任务完成后调用 release()。
          */
         public ExecutionToken transferTo(int newOwner) {
-            if (released) return null;
+            if (released.get()) return null;
             return state.transferExecution(this, newOwner);
         }
 
@@ -122,11 +127,35 @@ public final class RegionState {
     private final AtomicReference<Snapshot> snapshot;
     private final AtomicLong generationCounter = new AtomicLong(0);
 
+    // ---- LATEST-02: close barrier callback ----
+    private volatile Runnable closeCallback;
+
     /**
      * 创建 ACTIVE/IDLE 状态的 RegionState。
      */
     public RegionState() {
         this.snapshot = new AtomicReference<>(Snapshot.INITIAL);
+    }
+
+    /**
+     * LATEST-02: 设置 close 回调。
+     *
+     * <p>当 RegionState 成功转换到 CLOSED 时，此回调会被触发（且仅触发一次）。
+     * 用于通知 {@link WorkStealingCoordinator} 的 closeBarrier 完成。
+     */
+    public void setCloseCallback(Runnable callback) {
+        this.closeCallback = callback;
+    }
+
+    /**
+     * LATEST-02: 触发 close 回调（幂等）。
+     */
+    private void fireCloseCallback() {
+        Runnable cb = closeCallback;
+        if (cb != null) {
+            closeCallback = null; // 防止重复触发
+            cb.run();
+        }
     }
 
     /**
@@ -179,7 +208,9 @@ public final class RegionState {
     }
 
     /**
-     * 释放一个已完成任务的 queuedCount。
+     * LATEST-02: 释放一个已完成任务的 queuedCount。
+     *
+     * <p>释放后若处于 DRAINING 且满足关闭条件，自动尝试关闭并触发 barrier。
      */
     public void releaseTask() {
         while (true) {
@@ -189,6 +220,8 @@ public final class RegionState {
                     current.phase, current.execState, current.owner,
                     current.queued - 1, current.generation);
             if (snapshot.compareAndSet(current, next)) {
+                // LATEST-02: 释放后检查是否满足 close 条件
+                tryCloseIfDraining();
                 return;
             }
         }
@@ -228,12 +261,15 @@ public final class RegionState {
     }
 
     /**
-     * 释放执行权（RUNNING → IDLE）。
+     * LATEST-01 修复：释放执行权（RUNNING → IDLE）。
      *
-     * <p>只能由 Token 持有者调用。generation 不匹配时忽略。
+     * <p>幂等性由 {@link ExecutionToken#release()} 的 {@code AtomicBoolean.compareAndSet} 保证。
+     * 本方法通过 generation + owner 双重验证确保只有当前持有者能释放。
+     *
+     * <p>修复前 bug：先检查 token.released（已被 release() 设为 true）后直接 return，
+     * 导致 RUNNING→IDLE CAS 永远不执行。
      */
     void releaseExecution(ExecutionToken token) {
-        if (token.released) return;
         while (true) {
             Snapshot current = snapshot.get();
             if (current.generation != token.generation) {
@@ -246,18 +282,20 @@ public final class RegionState {
                     current.phase, ExecState.IDLE, -1,
                     current.queued, current.generation);
             if (snapshot.compareAndSet(current, next)) {
+                // LATEST-02: 释放后检查是否满足 close 条件
+                tryCloseIfDraining();
                 return;
             }
         }
     }
 
     /**
-     * 转移执行权到新的 owner（R2-03 修复：BlockingTask 场景）。
+     * LATEST-01 修复：转移执行权到新的 owner（R2-03 修复：BlockingTask 场景）。
      *
      * <p>用于将执行权从 SchedulerWorker 转移到 BlockingWorker。
      */
     ExecutionToken transferExecution(ExecutionToken token, int newOwner) {
-        if (token.released) return null;
+        if (token.released.get()) return null;
         while (true) {
             Snapshot current = snapshot.get();
             if (current.generation != token.generation) {
@@ -271,7 +309,7 @@ public final class RegionState {
                     current.phase, ExecState.RUNNING, newOwner,
                     current.queued, newGen);
             if (snapshot.compareAndSet(current, next)) {
-                token.released = true; // 旧 token 失效
+                token.released.set(true); // 旧 token 失效（AtomicBoolean）
                 return new ExecutionToken(this, newGen, newOwner);
             }
         }
@@ -311,9 +349,10 @@ public final class RegionState {
     }
 
     /**
-     * 尝试关闭 Region（DRAINING → CLOSED）。
+     * LATEST-02 修复：尝试关闭 Region（DRAINING → CLOSED）。
      *
      * <p>仅在 running==IDLE 且 queued==0 时成功。
+     * 成功时触发 close 回调（完成 closeBarrier）。
      *
      * @return true 如果成功关闭
      */
@@ -334,6 +373,7 @@ public final class RegionState {
                 if (current.queued > 0) return false;
                 if (snapshot.compareAndSet(current, new Snapshot(
                         Phase.CLOSED, ExecState.IDLE, -1, 0, current.generation))) {
+                    fireCloseCallback(); // LATEST-02: 触发 barrier
                     return true;
                 }
             }
@@ -341,11 +381,31 @@ public final class RegionState {
     }
 
     /**
-     * 强制关闭（忽略 running/queued）。
+     * LATEST-02 修复：如果当前处于 DRAINING 且满足关闭条件，尝试关闭。
+     *
+     * <p>在 releaseExecution / releaseTask 后调用，
+     * 当所有任务完成时自动完成 closeBarrier。</p>
+     */
+    private void tryCloseIfDraining() {
+        Snapshot current = snapshot.get();
+        if (current.phase == Phase.DRAINING
+                && current.execState == ExecState.IDLE
+                && current.queued == 0) {
+            tryClose();
+        }
+    }
+
+    /**
+     * LATEST-02 修复：强制关闭（忽略 running/queued）。
+     *
+     * <p>仍触发 closeBarrier 以避免 unregister 阻塞。
      */
     public void forceClose() {
         Snapshot current = snapshot.get();
-        snapshot.set(new Snapshot(Phase.CLOSED, ExecState.IDLE, -1, 0, current.generation));
+        if (snapshot.compareAndSet(current,
+                new Snapshot(Phase.CLOSED, ExecState.IDLE, -1, 0, current.generation))) {
+            fireCloseCallback(); // LATEST-02: 触发 barrier
+        }
     }
 
     /**
