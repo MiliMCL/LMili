@@ -2,6 +2,7 @@ package fun.bm.mili.lmili.thread.scheduler;
 
 import com.mojang.logging.LogUtils;
 import fun.bm.mili.lmili.thread.scheduler.api.MiliScheduler;
+import fun.bm.mili.lmili.thread.scheduler.execute.TaskScheduleState;
 import io.papermc.paper.threadedregions.*;
 import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
@@ -9,7 +10,10 @@ import org.slf4j.Logger;
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -70,6 +74,10 @@ public final class MiliTickRegionScheduler {
     private final Thread[] workerThreads;
     private final TickRegionWorker[] workers;
     private final AtomicInteger threadIdGen = new AtomicInteger();
+
+    // ---- R2-08/R2-13: handle → TickTask wrapper registry (identity-based) ----
+    private static final Map<TickRegionScheduler.RegionScheduleHandle, TickTask> REGISTRY =
+            Collections.synchronizedMap(new IdentityHashMap<>());
 
     // C-05 修复：Round-robin 分配计数器，避免 Worker0 倾斜
     private final AtomicInteger nextWorkerCounter = new AtomicInteger(0);
@@ -273,6 +281,41 @@ public final class MiliTickRegionScheduler {
     }
 
     // =========================================================================
+    // TickTask —— 带 TaskScheduleState 的 handle 包装 (R2-08/R2-13)
+    // =========================================================================
+
+    /**
+     * Handle 包装器，附带 TaskScheduleState 门闩。
+     *
+     * <p>R2-08: 通过 {@link TaskScheduleState#tryMarkQueued()} 防止重复入队，
+     * 通过 {@link TaskScheduleState#tryMarkRunning()} 防止并发执行。</p>
+     *
+     * <p>R2-13: 同一 handle 始终映射到唯一 TickTask 实例（通过 {@link #REGISTRY}），
+     * 确保 steal 路径也必须经过 TaskScheduleState 的 CAS 协议。</p>
+     */
+    static final class TickTask {
+        final TickRegionScheduler.RegionScheduleHandle handle;
+        final TaskScheduleState state = new TaskScheduleState();
+
+        TickTask(final TickRegionScheduler.RegionScheduleHandle handle) {
+            this.handle = handle;
+        }
+    }
+
+    /**
+     * 获取或创建 handle 对应的 TickTask（identity-based，同一 handle 只有一个实例）。
+     */
+    private static TickTask computeTask(final TickRegionScheduler.RegionScheduleHandle handle) {
+        synchronized (REGISTRY) {
+            TickTask existing = REGISTRY.get(handle);
+            if (existing != null) return existing;
+            TickTask created = new TickTask(handle);
+            REGISTRY.put(handle, created);
+            return created;
+        }
+    }
+
+    // =========================================================================
     // TickRegionWorker - 核心 worker 实现
     // =========================================================================
 
@@ -285,8 +328,8 @@ public final class MiliTickRegionScheduler {
         private final int workerId;
         private volatile MiliTickThread thread; // 在 run() 开始时设置
         // Global tick（region==null）使用高优先级队列，确保登录等关键任务不被 region tick 饥饿
-        private final ConcurrentLinkedQueue<TickRegionScheduler.RegionScheduleHandle> globalQueue = new ConcurrentLinkedQueue<>();
-        private final ConcurrentLinkedQueue<TickRegionScheduler.RegionScheduleHandle> taskQueue = new ConcurrentLinkedQueue<>();
+        private final ConcurrentLinkedQueue<TickTask> globalQueue = new ConcurrentLinkedQueue<>();
+        private final ConcurrentLinkedQueue<TickTask> taskQueue = new ConcurrentLinkedQueue<>();
         private final AtomicBoolean running = new AtomicBoolean(true);
         private volatile boolean idle = true;
 
@@ -300,11 +343,17 @@ public final class MiliTickRegionScheduler {
 
         boolean submitRegion(final TickRegionScheduler.RegionScheduleHandle handle) {
             if (!running.get()) return false;
+            // R2-08: 通过 TaskScheduleState 门闩防止重复入队
+            TickTask task = computeTask(handle);
+            if (!task.state.tryMarkQueued()) {
+                // 已在 QUEUED/RUNNING 状态，无需重复入队
+                return true;
+            }
             // Global tick（region==null）放入高优先级队列
             if (handle.region == null) {
-                globalQueue.offer(handle);
+                globalQueue.offer(task);
             } else {
-                taskQueue.offer(handle);
+                taskQueue.offer(task);
             }
             final MiliTickThread t = this.thread;
             if (t != null) LockSupport.unpark(t);
@@ -318,10 +367,15 @@ public final class MiliTickRegionScheduler {
             if (halted.get()) {
                 return; // 已停止，拒绝强制提交
             }
+            // R2-08: 通过 TaskScheduleState 门闩防止重复入队
+            TickTask task = computeTask(handle);
+            if (!task.state.tryMarkQueued()) {
+                return; // 已在 QUEUED/RUNNING 状态
+            }
             if (handle.region == null) {
-                globalQueue.offer(handle);
+                globalQueue.offer(task);
             } else {
-                taskQueue.offer(handle);
+                taskQueue.offer(task);
             }
             final MiliTickThread t = this.thread;
             if (t != null) LockSupport.unpark(t);
@@ -340,15 +394,19 @@ public final class MiliTickRegionScheduler {
          */
         int drainAndCancel() {
             int count = 0;
-            TickRegionScheduler.RegionScheduleHandle handle;
+            TickTask task;
             // Drain global queue
-            while ((handle = globalQueue.poll()) != null) {
-                handle.markNonSchedulable();
+            while ((task = globalQueue.poll()) != null) {
+                task.handle.markNonSchedulable();
+                task.state.forceCancel();
+                REGISTRY.remove(task.handle, task);
                 count++;
             }
             // Drain task queue
-            while ((handle = taskQueue.poll()) != null) {
-                handle.markNonSchedulable();
+            while ((task = taskQueue.poll()) != null) {
+                task.handle.markNonSchedulable();
+                task.state.forceCancel();
+                REGISTRY.remove(task.handle, task);
                 count++;
             }
             return count;
@@ -362,18 +420,18 @@ public final class MiliTickRegionScheduler {
 
             while (running.get() && !halted.get()) {
                 // 优先处理 global tick（登录等关键任务）
-                TickRegionScheduler.RegionScheduleHandle handle = globalQueue.poll();
+                TickTask task = globalQueue.poll();
 
-                if (handle == null) {
-                    handle = taskQueue.poll();
+                if (task == null) {
+                    task = taskQueue.poll();
                 }
 
-                if (handle == null) {
-                    // 尝试从其他 worker 窃取
-                    handle = stealWork();
+                if (task == null) {
+                    // 尝试从其他 worker 窃取（R2-13: steal 也走 TaskScheduleState CAS）
+                    task = stealWork();
                 }
 
-                if (handle == null) {
+                if (task == null) {
                     // 无任务，等待
                     idle = true;
                     if (!halted.get()) {
@@ -383,13 +441,21 @@ public final class MiliTickRegionScheduler {
                     continue;
                 }
 
+                // R2-08: 通过 CAS 保证只有取得 RUNNING 状态的 worker 才能执行
+                // 如果另一个 worker 已经 steal 并取得了 RUNNING 状态，这里会失败
+                if (!task.state.tryMarkRunning()) {
+                    continue;
+                }
+
                 // 检查是否已取消
-                if (handle.isMarkedAsNonSchedulable()) {
+                if (task.handle.isMarkedAsNonSchedulable()) {
+                    // 归还状态回到 IDLE
+                    task.state.forceCancel();
                     continue;
                 }
 
                 // 执行 tick（global tick 不等待间隔，region tick 等待）
-                executeRegionTick(currentThread, handle);
+                executeRegionTick(currentThread, task);
             }
 
             LOGGER.debug("[MiliTickRegionScheduler-Worker-{}] Stopped", workerId);
@@ -397,12 +463,17 @@ public final class MiliTickRegionScheduler {
 
         /**
          * 从其他 worker 窃取任务。
+         *
+         * <p>R2-13 修复：steal 操作从其他 worker 的队列中移除 handle，
+         * 但实际执行权需要通过 run() 中的 {@link TaskScheduleState#tryMarkRunning()} CAS 获取。
+         * 如果 steal 成功但 tryMarkRunning 失败（另一个 worker 已经 steal 并执行），
+         * handle 会在 run() 中被安全跳过。</p>
          */
-        private TickRegionScheduler.RegionScheduleHandle stealWork() {
+        private TickTask stealWork() {
             // 优先窃取 global tick
             for (TickRegionWorker other : workers) {
                 if (other == this) continue;
-                TickRegionScheduler.RegionScheduleHandle stolen = other.globalQueue.poll();
+                TickTask stolen = other.globalQueue.poll();
                 if (stolen != null) {
                     return stolen;
                 }
@@ -410,7 +481,7 @@ public final class MiliTickRegionScheduler {
             // 然后窃取 region tick
             for (TickRegionWorker other : workers) {
                 if (other == this) continue;
-                TickRegionScheduler.RegionScheduleHandle stolen = other.taskQueue.poll();
+                TickTask stolen = other.taskQueue.poll();
                 if (stolen != null) {
                     return stolen;
                 }
@@ -428,15 +499,17 @@ public final class MiliTickRegionScheduler {
          * <p>C-06 修复：增加 next-tick gate，防止 region 在允许时间之前被重复 tick。</p>
          */
         private void executeRegionTick(final MiliTickThread thread,
-                                        final TickRegionScheduler.RegionScheduleHandle handle) {
+                                        final TickTask task) {
+            final TickRegionScheduler.RegionScheduleHandle handle = task.handle;
             try {
                 // C-06 修复：next-tick gate —— 检查是否到了该 region 的下次允许 tick 时间
                 if (handle.region != null) {
                     long now = System.currentTimeMillis();
                     if (now < handle.nextAllowedTickTimeMillis) {
-                        // 还没到时间，重新提交到队列稍后处理
+                        // 还没到时间，归还 RUNNING→IDLE 并重新入队稍后处理
+                        task.state.tryMarkIdle();
                         if (!handle.isMarkedAsNonSchedulable()) {
-                            taskQueue.offer(handle);
+                            taskQueue.offer(task);
                         }
                         return;
                     }
@@ -445,9 +518,10 @@ public final class MiliTickRegionScheduler {
                 // 在执行 region tick 前，检查是否有 global tick 等待
                 // 如果有，重新调度当前 region tick 以优先处理 global tick
                 if (handle.region != null && !globalQueue.isEmpty()) {
-                    // 有 global tick 等待，重新调度 region tick
+                    // 有 global tick 等待，归还 RUNNING→IDLE 并重新调度 region tick
+                    task.state.tryMarkIdle();
                     if (!handle.isMarkedAsNonSchedulable()) {
-                        taskQueue.offer(handle);
+                        taskQueue.offer(task);
                     }
                     return;
                 }
@@ -455,15 +529,24 @@ public final class MiliTickRegionScheduler {
                 // 执行 tick — runTick() 内部会调用 setTickingRegion() 设置上下文
                 final boolean reschedule = handle.runTick();
 
-                // 如果需要继续调度，重新提交到 worker 队列
+                // R2-08: 执行完成后归还 RUNNING→IDLE
+                task.state.tryMarkIdle();
+
+                // 如果需要继续调度，重新提交到 worker 队列（submitRegion 内部做 IDLE→QUEUED CAS）
                 if (reschedule && !halted.get() && !handle.isMarkedAsNonSchedulable()) {
                     // C-06 修复：更新下次允许 tick 时间
                     if (handle.region != null) {
                         handle.nextAllowedTickTimeMillis = System.currentTimeMillis() + (1000L / TICK_RATE);
                     }
                     submitRegion(handle);
+                } else if (!halted.get()) {
+                    // 任务生命周期结束（不再 reschedule），清理 REGISTRY 防止内存泄漏
+                    REGISTRY.remove(handle, task);
                 }
             } catch (Throwable thr) {
+                // R2-08: 异常时也要归还 RUNNING→IDLE 并清理 REGISTRY
+                task.state.tryMarkIdle();
+                REGISTRY.remove(handle, task);
                 // Region 失败处理
                 final TickRegions.TickRegionData regionData = handle.region;
                 final String regionInfo = regionData != null ? "#" + regionData.id : "global";
