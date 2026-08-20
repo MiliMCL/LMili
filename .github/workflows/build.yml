@@ -89,25 +89,13 @@ jobs:
             **/paperweight/**
             **/caches/paperweight/**
 
-      - name: Purge corrupted Gradle caches
-        run: |
-          set -eux
-          # After cache restore, purge any corrupted JARs that cause
-          # "zip END header not found" during Kotlin DSL accessor generation
-          rm -rf ~/.gradle/caches/jars-*
-          rm -rf ~/.gradle/caches/transforms-*
-          rm -rf ~/.gradle/caches/modules-*/files-*
-          rm -rf ~/.gradle/caches/modules-*/metadata-*
-          # Also clean the project-level Gradle cache
-          rm -rf .gradle/caches
-
       - name: Apply All Patches (generate paper-api + paper-server + folia-server)
         run: |
           set -eux
           # Run full applyAllPatches to ensure correct task chain for upstream checkout.
           # This regenerates everything including lmili-server/src/minecraft/.
-          # --stacktrace included so a repeat 'zip END header not found' exposes the exact corrupted file
-          ./gradlew applyAllPatches --no-configuration-cache --stacktrace
+          # --refresh-dependencies forces re-download to avoid corrupted cached JARs
+          ./gradlew applyAllPatches --no-configuration-cache --stacktrace --refresh-dependencies
 
       - name: Restore Committed Sources
         run: |
