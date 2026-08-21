@@ -26,10 +26,10 @@ region threading model:
    AtomicBoolean for lock-free reads. The tryPush and executeTask methods
    still use synchronized for structural modifications.
 
-diff --git a/src/minecraft/java/io/papermc/paper/threadedregions/TickRegionScheduler.java b/src/minecraft/java/io/papermc/paper/threadedregions/TickRegionScheduler.java
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
---- a/src/minecraft/java/io/papermc/paper/threadedregions/TickRegionScheduler.java
-+++ b/src/minecraft/java/io/papermc/paper/threadedregions/TickRegionScheduler.java
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 @@ -17,6 +17,8 @@ import net.minecraft.server.MinecraftServer;
  import net.minecraft.server.level.ServerLevel;
  import net.minecraft.world.level.ChunkPos;
@@ -214,10 +214,10 @@ index 0000000000000000000000000000000000000000..00000000000000000000000000000000
 +            return null;
          }
 
-diff --git a/src/minecraft/java/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/src/minecraft/java/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
---- a/src/minecraft/java/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
-+++ b/src/minecraft/java/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+--- a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
++++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 @@ -10,6 +10,7 @@ import java.lang.management.ManagementFactory;
  import java.util.ArrayList;
  import java.util.LinkedHashSet;
@@ -272,10 +272,10 @@ index 0000000000000000000000000000000000000000..00000000000000000000000000000000
      }
  }
 
-diff --git a/src/minecraft/java/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/src/minecraft/java/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
 index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
---- a/src/minecraft/java/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
-+++ b/src/minecraft/java/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
+--- a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
++++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
 @@ -20,6 +20,7 @@ import java.lang.invoke.VarHandle;
  import java.util.ArrayDeque;
  import java.util.Iterator;
@@ -362,3 +362,4 @@ index 0000000000000000000000000000000000000000..00000000000000000000000000000000
 +                if (this.isDestroyed.get()) {
                      throw new IllegalStateException("Attempting to poll from dead queue");
                  }
+

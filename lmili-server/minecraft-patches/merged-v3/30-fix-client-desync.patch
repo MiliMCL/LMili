@@ -25,10 +25,10 @@ executeSinglePacket(). This ensures that when a region wakes up to
 process packets, the entire queue is emptied immediately, keeping the
 client and server in sync.
 
-diff --git a/src/minecraft/java/io/papermc/paper/threadedregions/TickRegions.java b/src/minecraft/java/io/papermc/paper/threadedregions/TickRegions.java
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
 index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
---- a/src/minecraft/java/io/papermc/paper/threadedregions/TickRegions.java
-+++ b/src/minecraft/java/io/papermc/paper/threadedregions/TickRegions.java
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
 @@ -266,8 +266,17 @@ public final class TickRegions {
                  if (!TickThread.isTickThreadFor(player)) {
                      continue;
@@ -50,3 +50,4 @@ index 0000000000000000000000000000000000000000..00000000000000000000000000000000
              }
  
              if (!hasPacketsNew) {
+

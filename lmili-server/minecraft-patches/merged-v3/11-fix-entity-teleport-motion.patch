@@ -23,10 +23,10 @@ when the teleport task runs.
 Additionally, a documentation comment is added to teleportSyncSameRegion()
 to clarify that null velocity preserves the entity's current delta movement.
 
-diff --git a/src/minecraft/java/io/papermc/paper/threadedregions/TeleportUtils.java b/src/minecraft/java/io/papermc/paper/threadedregions/TeleportUtils.java
+diff --git a/io/papermc/paper/threadedregions/TeleportUtils.java b/io/papermc/paper/threadedregions/TeleportUtils.java
 index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
---- a/src/minecraft/java/io/papermc/paper/threadedregions/TeleportUtils.java
-+++ b/src/minecraft/java/io/papermc/paper/threadedregions/TeleportUtils.java
+--- a/io/papermc/paper/threadedregions/TeleportUtils.java
++++ b/io/papermc/paper/threadedregions/TeleportUtils.java
 @@ -40,9 +40,14 @@ public final class TeleportUtils
                              }
                              return;
@@ -46,10 +46,10 @@ index 0000000000000000000000000000000000000000..00000000000000000000000000000000
                      },
                      (final Entity retired) -> {
                          if (onComplete != null) {
-diff --git a/src/minecraft/java/net/minecraft/world/entity/Entity.java b/src/minecraft/java/net/minecraft/world/entity/Entity.java
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
 index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
---- a/src/minecraft/java/net/minecraft/world/entity/Entity.java
-+++ b/src/minecraft/java/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
 @@ -4450,7 +4450,12 @@ public abstract class Entity
          if (pitch != null) {
              this.setXRot(pitch.floatValue());
@@ -65,3 +65,4 @@ index 0000000000000000000000000000000000000000..00000000000000000000000000000000
          this.snapTo(pos.x, pos.y, pos.z);
          this.setOldPosAndRot();
          this.resetStoredPositions();
+

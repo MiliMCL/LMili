@@ -243,9 +243,48 @@ diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/pape
      public RegionizedWorldData(final ServerLevel world, final TickRegions.TickRegionData regionData) {
 
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+
 --- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-@@ -60,7 +60,7 @@
+@@ -1,32 +1,23 @@
+ package io.papermc.paper.threadedregions;
+ 
+-import ca.spottedleaf.concurrentutil.numa.OSNuma;
+-import ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool;
++import ca.spottedleaf.common.time.Schedule;
++import ca.spottedleaf.common.time.TickData;
++import ca.spottedleaf.common.time.TickTime;
++import ca.spottedleaf.common.util.TimeUtil;
+ import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
+-import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
+-import ca.spottedleaf.concurrentutil.scheduler.StealingScheduledThreadPool;
+-import ca.spottedleaf.concurrentutil.util.TimeUtil;
+-import ca.spottedleaf.moonrise.common.time.Schedule;
+-import ca.spottedleaf.moonrise.common.time.TickData;
+-import ca.spottedleaf.moonrise.common.time.TickTime;
+-import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
+ import ca.spottedleaf.moonrise.common.util.TickThread;
+ import com.mojang.logging.LogUtils;
+-import io.papermc.paper.util.TraceUtil;
+-import it.unimi.dsi.fastutil.ints.Int2IntLinkedOpenHashMap;
+ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.world.level.ChunkPos;
+ import org.slf4j.Logger;
+ import java.lang.management.ManagementFactory;
+ import java.lang.management.ThreadMXBean;
+-import java.util.concurrent.ThreadFactory;
+ import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.atomic.AtomicBoolean;
+-import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.function.BooleanSupplier;
+ 
+-public final class TickRegionScheduler {
++public class TickRegionScheduler {
+ 
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private static final ThreadMXBean THREAD_MX_BEAN = ManagementFactory.getThreadMXBean();
+@@ -41,7 +32,7 @@ public final class TickRegionScheduler {
      }
  
      public static final int TICK_RATE = 20;
@@ -254,18 +293,379 @@ diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/pape
      // Folia start - watchdog
      public static final FoliaWatchdogThread WATCHDOG_THREAD = new FoliaWatchdogThread();
      static {
+@@ -49,87 +40,45 @@ public final class TickRegionScheduler {
+     }
+     // Folia end - watchdog
+ 
+-    private final Scheduler scheduler;
++    // Mili start - unified scheduler (Folia scheduler removed)
++    private final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler;
++    // Mili end
+ 
+-    public static enum SchedulerType {
+-        EDF,
+-        WORK_STEALING;
+-    }
+-
+-    public TickRegionScheduler(final SchedulerType schedulerType, final int initialThreads) {
+-        final ThreadFactory threadFactory = new ThreadFactory() {
+-            private final AtomicInteger idGenerator = new AtomicInteger();
+-            // on Linux, thread affinity is copied from the parent thread - but we do not want that, so we need
+-            // to adjust the thread affinity of child threads
+-            // the group allows the numa instance to accurately collect the child threads
+-            private final ThreadGroup threadGroup = new ThreadGroup("Folia Region Scheduler ThreadGroup");
+-
+-            @Override
+-            public Thread newThread(final Runnable run) {
+-                final Thread ret = new TickThreadRunner(this.threadGroup, run, "Folia Region Scheduler Thread #" + this.idGenerator.getAndIncrement());
+-                ret.setUncaughtExceptionHandler(TickRegionScheduler.this::uncaughtException);
+-                return ret;
+-            }
+-        };
+-
+-        switch (schedulerType) {
+-            case EDF: {
+-                this.scheduler = new EDFSchedulerThreadPool(initialThreads, threadFactory);
+-                break;
+-            }
+-            case WORK_STEALING: {
+-                this.scheduler = new StealingScheduledThreadPool(
+-                        threadFactory, MoonriseConstants.NUMA_ENABLE ? OSNuma.getNativeInstance() : OSNuma.NoOp.INSTANCE
+-                );
+-                ((StealingScheduledThreadPool)this.scheduler).setFlags(StealingScheduledThreadPool.FLAG_SCHEDULE_EVENLY);
+-                break;
+-            }
+-            default: {
+-                throw new IllegalStateException("Unknown scheduler type: " + schedulerType);
+-            }
+-        }
++    /**
++     * Mili 构造器 —— 使用 MiliTickRegionScheduler 替代 Folia 的 Scheduler。
++     *
++     * @param miliScheduler Mili 调度器实例
++     */
++    protected TickRegionScheduler(final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler) {
++        this.miliScheduler = miliScheduler;
+     }
+ 
+     public void start() {
+-        if (this.scheduler instanceof EDFSchedulerThreadPool edfSchedulerThreadPool) {
+-            edfSchedulerThreadPool.start();
+-        }
++        this.miliScheduler.start();
+     }
+ 
+     public void setThreads(final int threads) {
+-        if (this.scheduler instanceof StealingScheduledThreadPool stealingScheduledThreadPool) {
+-            final Int2IntLinkedOpenHashMap threadAllocation;
+-            final long stealThresholdNS = TimeUnit.MILLISECONDS.toNanos(3L);
+-            final long taskTimeSliceNS = TimeUnit.MILLISECONDS.toNanos(2L);
+-
+-            if (!MoonriseConstants.NUMA_ENABLE) {
+-                threadAllocation = new Int2IntLinkedOpenHashMap();
+-                threadAllocation.put(0, threads);
+-
+-                LOGGER.info("Folia is using " + threads + " tick threads");
+-            } else {
+-                final int nodes = stealingScheduledThreadPool.getNuma().getTotalNumaNodes();
+-
+-                final int threadsPerNode = Math.max(1, threads / nodes);
+-
+-                threadAllocation = new Int2IntLinkedOpenHashMap(nodes);
+-                for (int i = 0; i < nodes; ++i) {
+-                    threadAllocation.put(i, threadsPerNode);
+-                }
+-
+-                LOGGER.info("Folia is using " + threadsPerNode + " tick threads per NUMA node, with " + nodes + " NUMA nodes detected");
+-            }
+-
+-            stealingScheduledThreadPool.setThreadAllocation(threadAllocation, stealThresholdNS, taskTimeSliceNS);
+-        }
++        this.miliScheduler.setThreads(threads);
+     }
+ 
+     public int getTotalThreadCount() {
+-        return this.scheduler.getAliveThreads().length;
++        return this.miliScheduler.getTotalThreadCount();
+     }
+ 
+     private static void setTickingRegion(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
+         final Thread currThread = Thread.currentThread();
++        // Mili start - support MiliTickThread
++        if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread miliThread) {
++            // 与 TickThreadRunner 相同的逻辑：设置 region 和 worldData
++            miliThread.currentTickingRegion = region;
++            if (region != null) {
++                miliThread.currentTickingWorldRegionizedData = region.regioniser.world.worldRegionData.get();
++            } else {
++                miliThread.currentTickingWorldRegionizedData = null;
++            }
++            return;
++        }
++        // Mili end
+         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
+             throw new IllegalStateException("Must be tick thread runner");
+         }
+@@ -154,6 +103,12 @@ public final class TickRegionScheduler {
+ 
+     private static void setTickTask(final SchedulableTick task) {
+         final Thread currThread = Thread.currentThread();
++        // Mili start - support MiliTickThread
++        if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread) {
++            // MiliTickThread 不需要设置 tickTask
++            return;
++        }
++        // Mili end
+         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
+             throw new IllegalStateException("Must be tick thread runner");
+         }
+@@ -172,10 +127,15 @@ public final class TickRegionScheduler {
+      */
+     public static ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> getCurrentRegion() {
+         final Thread currThread = Thread.currentThread();
+-        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
+-            return RegionShutdownThread.getRegion();
++        if (currThread instanceof TickThreadRunner tickThreadRunner) {
++            return tickThreadRunner.currentTickingRegion;
+         }
+-        return tickThreadRunner.currentTickingRegion;
++        // Mili start - support MiliTickThread for new scheduler
++        if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread miliThread) {
++            return miliThread.currentTickingRegion;
++        }
++        // Mili end
++        return RegionShutdownThread.getRegion();
+     }
+ 
+     /**
+@@ -185,10 +145,20 @@ public final class TickRegionScheduler {
+      */
+     public static RegionizedWorldData getCurrentRegionizedWorldData() {
+         final Thread currThread = Thread.currentThread();
+-        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
+-            return RegionShutdownThread.getWorldData();
++        if (currThread instanceof TickThreadRunner tickThreadRunner) {
++            return tickThreadRunner.currentTickingWorldRegionizedData;
+         }
+-        return tickThreadRunner.currentTickingWorldRegionizedData;
++        // Mili start - support MiliTickThread for new scheduler
++        if (currThread instanceof fun.bm.mili.lmili.thread.scheduler.MiliTickThread miliThread) {
++            return miliThread.currentTickingWorldRegionizedData;
++        }
++        // fallback for virtual threads in RegionTickPool
++        final io.papermc.paper.threadedregions.RegionizedWorldData miliFallback = fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent();
++        if (miliFallback != null) {
++            return miliFallback;
++        }
++        // Mili end
++        return RegionShutdownThread.getWorldData();
+     }
+ 
+     /**
+@@ -220,7 +190,7 @@ public final class TickRegionScheduler {
+      */
+     public void scheduleRegion(final RegionScheduleHandle region) {
+         region.scheduler = this;
+-        this.scheduler.schedule(region);
++        this.miliScheduler.scheduleRegion(region);
+     }
+ 
+     /**
+@@ -228,48 +198,33 @@ public final class TickRegionScheduler {
+      * execution, then it will be cancelled after.
+      */
+     public void descheduleRegion(final RegionScheduleHandle region) {
+-        // To avoid acquiring any of the locks the scheduler may be using, we
+-        // simply cancel the next action.
+-        region.markNonSchedulable();
++        this.miliScheduler.descheduleRegion(region);
+     }
+ 
+     public boolean halt(final boolean sync, final long maxWaitNS) {
+-        this.scheduler.halt();
++        this.miliScheduler.halt();
+         if (!sync) {
+-            return this.scheduler.getAliveThreads().length == 0;
++            return this.miliScheduler.isHalted();
+         }
+-
+-        return this.scheduler.join(maxWaitNS == 0L ? 0L : Math.max(1L, TimeUnit.NANOSECONDS.toMillis(maxWaitNS)));
++        return this.miliScheduler.join(maxWaitNS == 0L ? 0L : TimeUnit.NANOSECONDS.toMillis(maxWaitNS));
+     }
+ 
+     void dumpAliveThreadTraces(final String reason) {
+-        for (final Thread thread : this.scheduler.getAliveThreads()) {
+-            if (thread.isAlive()) {
+-                TraceUtil.dumpTraceForThread(thread, reason);
+-            }
+-        }
++        this.miliScheduler.dumpAliveThreadTraces(reason);
+     }
+ 
+     public void setHasTasks(final RegionScheduleHandle region) {
+-        this.scheduler.notifyTasks(region);
++        this.miliScheduler.setHasTasks(region);
+     }
+ 
+     private void uncaughtException(final Thread thread, final Throwable thr) {
+         LOGGER.error("Uncaught exception in tick thread \"" + thread.getName() + "\"", thr);
+-
+-        // prevent further ticks from occurring
+-        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
+-        this.scheduler.halt();
+-
++        this.miliScheduler.halt();
+         MinecraftServer.getServer().stopServer();
+     }
+ 
+     private void regionFailed(final RegionScheduleHandle handle, final boolean executingTasks, final Throwable thr) {
+-        // when a region fails, we need to shut down the server gracefully
+-
+-        // prevent further ticks from occurring
+-        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
+-        this.scheduler.halt();
++        this.miliScheduler.halt();
+ 
+         final ChunkPos center = handle.region == null ? null : handle.region.region.getCenterChunk();
+         final ServerLevel world = handle.region == null ? null : handle.region.world;
+@@ -317,6 +272,10 @@ public final class TickRegionScheduler {
+ 
+         private TickRegionScheduler scheduler;
+ 
++        // C-06 修复：next-tick gate —— 下次允许 tick 的最早时间（毫秒）
++        // 防止 region 在允许时间之前被重复 tick
++        public volatile long nextAllowedTickTimeMillis = 0L;
++
+         public RegionScheduleHandle(final TickRegions.TickRegionData region, final long firstStart) {
+             this.currentTick = 0L;
+             this.lastTickStart = TimeUtil.DEADLINE_NOT_SET;
 
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -208,6 +208,7 @@
+@@ -1,8 +1,8 @@
+ package io.papermc.paper.threadedregions;
+ 
++import ca.spottedleaf.common.time.TickTime;
++import ca.spottedleaf.common.util.TimeUtil;
+ import ca.spottedleaf.concurrentutil.numa.OSNuma;
+-import ca.spottedleaf.concurrentutil.util.TimeUtil;
+-import ca.spottedleaf.moonrise.common.time.TickTime;
+ import ca.spottedleaf.moonrise.common.util.TickThread;
+ import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
+ import com.mojang.logging.LogUtils;
+@@ -70,8 +70,12 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         gridExponent = Math.max(0, gridExponent);
+         gridExponent = Math.min(31, gridExponent);
+         regionShift = gridExponent;
+-        scheduler = new TickRegionScheduler(config.scheduler, tickThreads);
+-        LOGGER.info("Initialised " + config.scheduler + " Folia scheduler with initial " + tickThreads + " target thread(s)");
++        // Mili start - use new MiliTickRegionScheduler instead of Folia's scheduler
++        final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler =
++                new fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler(tickThreads);
++        scheduler = new TickRegionScheduler(miliScheduler);
++        LOGGER.info("Initialised MiliTickRegionScheduler with " + tickThreads + " worker thread(s)");
++        // Mili end
+     }
+ 
+     public static void start() {
+@@ -81,8 +85,26 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         started = true;
+         scheduler.setThreads(getTickThreads(GlobalConfiguration.get().threadedRegions));
+         scheduler.start();
++        // Mili start - init RegionTickPool after scheduler is started
++        try {
++            fun.bm.mili.lmili.thread.regiontick.RegionTickBootstrap.init();
++        } catch (Throwable throwable) {
++            LOGGER.error("[Mili] Failed to init RegionTickPool", throwable);
++        }
++        // Mili end
+      }
+ 
++    // Mili start - shutdown hook
++    public static void shutdown() {
++        try {
++            fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher dispatcher = fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
++            if (dispatcher != null) dispatcher.shutdown();
++        } catch (Throwable throwable) {
++            LOGGER.error("[Mili] Error during RegionTickPool shutdown", throwable);
++        }
++    }
++    // Mili end
++
+     @Override
+     public TickRegionData createNewData(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+         return new TickRegionData(region);
+@@ -156,6 +178,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         private final AtomicInteger entityCount = new AtomicInteger();
+         private final AtomicInteger playerCount = new AtomicInteger();
+         private final AtomicInteger chunkCount = new AtomicInteger();
++        public final fun.bm.mili.lmili.api.RegionStats regionStatsAPI = new fun.bm.mili.lmili.api.impl.RegionStatsImpl(this); // Lmili - Tickregion API
+ 
+         public int getEntityCount() {
+             return this.entityCount.get();
+@@ -205,8 +228,10 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          private final RegionStats regionStats;
  
          private final AtomicBoolean hasPackets = new AtomicBoolean(false);
 +        public long lastSavedTime = 0L; // Leaves - last saved time
  
          public volatile ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler; // Folia - profiler
-         public final fun.bm.mili.lmili.api.TickRegionData tickRegionDataAPI = new fun.bm.mili.lmili.api.impl.TickRegionDataImpl(this); // Luminol - Tickregion API
++        public final fun.bm.mili.lmili.api.TickRegionData tickRegionDataAPI = new fun.bm.mili.lmili.api.impl.TickRegionDataImpl(this); // Lmili - Tickregion API
+ 
+         private TickRegionData(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+             this.region = region;
+@@ -241,8 +266,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+                 if (!TickThread.isTickThreadFor(player)) {
+                     continue;
+                 }
+-                if (packetProcessor.executeSinglePacket()) {
+-                    hasPacketsNew |= packetProcessor.hasPackets();
++                // Draining all queued packets instead of just one to prevent client
++                // desync when multiple packets are queued during high-traffic periods.
++                // This is Folia issue 196: packets being processed one at a time
++                // caused the client tick end marker to be delayed by up to one tick.
++                packetProcessor.processQueuedPackets();
++            }
++
++            for (final ServerPlayer player : worldData.getLocalPlayers()) {
++                if (player.getBukkitEntity().packetProcessor.hasPackets()) {
++                    hasPacketsNew = true;
++                    break;
+                 }
+             }
+ 
+@@ -300,6 +334,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+             return ret;
+         }
+ 
++        // Mili start - public accessor for cross-region data lookup (used by CrossRegionHelper)
++        /**
++         * Public accessor to retrieve or create regionized data for this region.
++         * Used by CrossRegionHelper to resolve the target region's RegionizedWorldData
++         * when dispatching cross-region events (e.g. redstone signals).
++         */
++        public <T> T getOrCreateRegionizedDataPublic(final RegionizedData<T> regionizedData) {
++            return this.getOrCreateRegionizedData(regionizedData);
++        }
++        // Mili end
++
+         @Override
+         public void split(final ThreadedRegionizer<TickRegionData, TickRegionSectionData> regioniser,
+                           final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData>> into,
+@@ -482,7 +527,11 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
+             final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler(); // Folia - profiler
+             profiler.startTick(); try { // Folia - profiler
++            // Mili: tickServer runs the normal pipeline (drainTasks, tickPackets, tickChildren, tickConnections).
++            // The parallel dispatch is hooked inside ServerLevel#tick via mili$tickRegion, so that
++            // the per-region tickConnections / chunk task draining still happen on this thread.
+             MinecraftServer.getServer().tickServer(startTime, scheduledEnd, TimeUnit.MILLISECONDS.toMillis(10L), this.region);
++            // Mili end
+             } finally { profiler.stopTick(); } // Folia - profiler
+         }
+ 
 
 diff --git a/net/minecraft/commands/CommandSourceStack.java b/net/minecraft/commands/CommandSourceStack.java
 --- a/net/minecraft/commands/CommandSourceStack.java

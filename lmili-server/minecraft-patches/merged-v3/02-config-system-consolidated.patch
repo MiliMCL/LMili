@@ -136,38 +136,6 @@ diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/pape
                  }
                  tick.lastPrint = now;
 
-diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
---- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
-+++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-@@ -66,7 +66,26 @@
- 
-             @Override
-             public Thread newThread(final Runnable run) {
--                final Thread ret = new TickThreadRunner(this.threadGroup, run, "Folia Region Scheduler Thread #" + this.idGenerator.getAndIncrement());
-+                // Luminol start - cpu affinity
-+                final Runnable actualRun;
-+                if (fun.bm.mili.lmili.config.modules.optimizations.CpuAffinityConfig.cpuAffinityEnabled) {
-+                    actualRun = new Runnable() {
-+                        private boolean affinitySet = false;
-+
-+                        @Override
-+                        public void run() {
-+                            if (!this.affinitySet) {
-+                                this.affinitySet = true;
-+                                net.openhft.affinity.Affinity.setAffinity(fun.bm.mili.lmili.config.modules.optimizations.CpuAffinityConfig.tickRegionAffinityBitSet);
-+                            }
-+                            run.run();
-+                        }
-+                    };
-+                } else {
-+                    actualRun = run;
-+                }
-+                // Luminol end - cpu affinity
-+                final Thread ret = new TickThreadRunner(this.threadGroup, actualRun, "Folia Region Scheduler Thread #" + this.idGenerator.getAndIncrement());
-                 ret.setUncaughtExceptionHandler(TickRegionScheduler.this::uncaughtException);
-                 return ret;
-             }
-
 diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
 --- a/net/minecraft/commands/Commands.java
 +++ b/net/minecraft/commands/Commands.java

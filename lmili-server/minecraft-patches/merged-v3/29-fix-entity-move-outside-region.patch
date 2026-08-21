@@ -35,10 +35,10 @@ only fires on the tick thread (TickThread.isTickThread()) so that
 cross-region teleport tasks -- which run on the destination region's tick
 thread -- are not affected.
 
-diff --git a/src/minecraft/java/net/minecraft/world/entity/Entity.java b/src/minecraft/java/net/minecraft/world/entity/Entity.java
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
 index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
---- a/src/minecraft/java/net/minecraft/world/entity/Entity.java
-+++ b/src/minecraft/java/net/minecraft/world/entity/Entity.java
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
 @@ -6117,6 +6117,19 @@ public abstract class Entity
          }
          // Paper end - Block invalid positions and bounding box
@@ -58,3 +58,4 @@ index 0000000000000000000000000000000000000000..00000000000000000000000000000000
              synchronized (this.posLock) { // Paper - detailed watchdog information
                  this.position = new Vec3(x, y, z);
              } // Paper - detailed watchdog information
+
