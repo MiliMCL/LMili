@@ -7,7 +7,7 @@ Subject: [PATCH] Remove SchedulerType reference (Mili scheduler)
 diff --git a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
 --- a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
 +++ b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
-@@ -403,7 +403,7 @@
+@@ -410,7 +410,7 @@
  
          public int threads = -1;
          public int gridExponent = 4;
