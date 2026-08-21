@@ -6,6 +6,11 @@ import fun.bm.mili.lmili.config.flags.ConfigInfo;
 import fun.bm.mili.lmili.config.flags.HotReloadUnsupported;
 import fun.bm.mili.lmili.enums.EnumConfigCategory;
 
+/**
+ * @deprecated 已废弃，被 RegionTickPool（Mili 统一调度器）完全替代。
+ * 此配置保留仅为向后兼容，所有选项已无效。
+ */
+@Deprecated
 @ConfigClassInfo(category = EnumConfigCategory.EXPERIMENT, name = "region_balancer")
 public class RegionBalancerConfig implements IConfigModule {
     @HotReloadUnsupported

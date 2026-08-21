@@ -28,7 +28,7 @@ public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiont
     private static final long SLOW_CHUNK_TICK_MS = 10;
     // 严重慢 chunk 阈值 —— 超过此值可能说明区块内有大量实体或复杂红石
     private static final long SEVERE_SLOW_CHUNK_TICK_MS = 50;
-    // 单个 slice 的时间预算（毫秒）—— 超过此值将跳过剩余 chunk 的随机 tick 阶段
+    // 单个 slice 的时间预算（毫秒）—— 超过此值将记录警告（但不跳过，确保红石安全）
     private static final long SLICE_TIME_BUDGET_MS = 45;
 
     private volatile int tickSpeed;
@@ -60,17 +60,19 @@ public final class FoliaTickExecutor implements fun.bm.mili.lmili.thread.regiont
             LevelChunk chunk = AsyncChunkAccessor.getLoadedChunk(level, chunkPos);
             if (chunk == null) continue;
 
-            // Mili start - 时间预算检查：如果已超过预算上限，跳过剩余 chunk 的 tick
+            // Mili start - 时间预算检查：记录警告但不跳过 chunk tick
+            // 重要：不能跳过 chunk tick，否则会破坏红石和生电机制
+            // 红石时序、作物生长、流体流动等都依赖于一致的 chunk tick 行为
             long elapsedSliceMs = (System.nanoTime() - sliceStartNanos) / 1_000_000;
             if (elapsedSliceMs >= SLICE_TIME_BUDGET_MS) {
                 if (!budgetExceeded) {
                     LOGGER.warn("[FoliaTickExecutor] Slice time budget exceeded ({}ms) in region #{} — " +
-                                    "skipping tick for remaining {} chunks",
+                                    "continuing tick for remaining {} chunks (redstone safety mode)",
                             elapsedSliceMs, context.regionId, sliceSize - i);
                     budgetExceeded = true;
                 }
-                // 跳过剩余 chunk 的 tick，避免改变游戏行为
-                continue;
+                // 不跳过剩余 chunk 的 tick，确保红石和生电机制正常工作
+                // continue; // 已禁用：跳过会破坏红石时序和生电机制
             }
             // Mili end
 

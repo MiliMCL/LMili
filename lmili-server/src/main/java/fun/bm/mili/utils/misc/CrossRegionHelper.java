@@ -212,7 +212,21 @@ public class CrossRegionHelper {
         RegionizedWorldData srcRegion = level.getCurrentWorldData();
         if (srcRegion == null) return;
 
-        RegionizedWorldData tgtRegion = level.getCurrentWorldData();
+        // Mili fix: tgtRegion must be resolved from the neighbor block's chunk,
+        // NOT from the current thread (which is the source region).
+        // The old code used level.getCurrentWorldData() for both src and tgt,
+        // making srcRegion == tgtRegion always true, so cross-region redstone
+        // signals were NEVER dispatched.
+        //
+        // Correct approach: use the regioniser to find the region owning the
+        // neighbor chunk, then retrieve its RegionizedWorldData.
+        final int neighborChunkX = neighbor.getX() >> 4;
+        final int neighborChunkZ = neighbor.getZ() >> 4;
+        var neighborRegion = level.regioniser.getRegionAtUnsynchronised(neighborChunkX, neighborChunkZ);
+        if (neighborRegion == null) return; // neighbor region not found
+
+        RegionizedWorldData tgtRegion = neighborRegion.getData()
+                .getOrCreateRegionizedDataPublic(level.worldRegionData);
         if (tgtRegion == null) return;
         if (srcRegion == tgtRegion) return; // not cross-region, skip
 
@@ -224,10 +238,23 @@ public class CrossRegionHelper {
         if (!CrossRegionHelperConfig.enabled || source == null ||
                 target == null || damageSource == null) return;
 
-        RegionizedWorldData srcRegion = source.level().getCurrentWorldData();
-        RegionizedWorldData tgtRegion = target.level().getCurrentWorldData();
+        // Mili fix: srcRegion comes from the current thread (caller's region).
+        // tgtRegion must be resolved from the target entity's chunk position,
+        // NOT from getCurrentWorldData() which always returns the caller's region.
+        ServerLevel srcLevel = (ServerLevel) source.level();
+        ServerLevel tgtLevel = (ServerLevel) target.level();
 
-        if (srcRegion == null || tgtRegion == null) return;
+        RegionizedWorldData srcRegion = srcLevel.getCurrentWorldData();
+        if (srcRegion == null) return;
+
+        int tgtChunkX = target.blockPosition().getX() >> 4;
+        int tgtChunkZ = target.blockPosition().getZ() >> 4;
+        var tgtRegionObj = tgtLevel.regioniser.getRegionAtUnsynchronised(tgtChunkX, tgtChunkZ);
+        if (tgtRegionObj == null) return;
+
+        RegionizedWorldData tgtRegion = tgtRegionObj.getData()
+                .getOrCreateRegionizedDataPublic(tgtLevel.worldRegionData);
+        if (tgtRegion == null) return;
         if (srcRegion == tgtRegion) return;
 
         submit(new EntityDamageSync(source.getUUID(), target.getUUID(),

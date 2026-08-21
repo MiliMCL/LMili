@@ -11,7 +11,10 @@ import java.util.concurrent.atomic.AtomicLongArray;
  * Region load monitor.
  * Tracks per-region tick duration using a sliding window to compute average load.
  * Thread-safe: all operations are lock-free (atomic arrays).
+ *
+ * @deprecated 已废弃，被 {@link fun.bm.mili.lmili.thread.regiontick.RegionDiagnostics} 完全替代。
  */
+@Deprecated
 public class RegionLoadMonitor {
 
     /**

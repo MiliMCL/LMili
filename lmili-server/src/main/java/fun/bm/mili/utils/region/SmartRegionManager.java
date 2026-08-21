@@ -12,6 +12,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * @deprecated 已废弃，被 {@link fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher} 完全替代。
+ * RegionTickPool 提供了更好的性能和更简洁的架构。此类保留仅为向后兼容。
+ */
+@Deprecated
 public final class SmartRegionManager {
 
     private SmartRegionManager() {}

@@ -334,6 +334,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
             return ret;
         }
 
+        // Mili start - public accessor for cross-region data lookup (used by CrossRegionHelper)
+        /**
+         * Public accessor to retrieve or create regionized data for this region.
+         * Used by CrossRegionHelper to resolve the target region's RegionizedWorldData
+         * when dispatching cross-region events (e.g. redstone signals).
+         */
+        public <T> T getOrCreateRegionizedDataPublic(final RegionizedData<T> regionizedData) {
+            return this.getOrCreateRegionizedData(regionizedData);
+        }
+        // Mili end
+
         @Override
         public void split(final ThreadedRegionizer<TickRegionData, TickRegionSectionData> regioniser,
                           final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData>> into,

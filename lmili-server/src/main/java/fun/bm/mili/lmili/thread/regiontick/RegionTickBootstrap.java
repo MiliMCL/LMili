@@ -3,7 +3,6 @@ package fun.bm.mili.lmili.thread.regiontick;
 import com.mojang.logging.LogUtils;
 import fun.bm.mili.api.Mili;
 import fun.bm.mili.api.internal.PublicSchedulerAdapter;
-import fun.bm.mili.config.modules.experiment.RegionTickPoolConfig;
 import fun.bm.mili.lmili.thread.scheduler.MiliSchedulerBuilder;
 import org.slf4j.Logger;
 
@@ -19,11 +18,6 @@ public final class RegionTickBootstrap {
 
     public static synchronized void init() {
         if (initialized) return;
-        if (!RegionTickPoolConfig.enabled) {
-            LOGGER.debug("[RegionTickPool] Not enabled, skipping");
-            return;
-        }
-        disableConflicting();
         try {
             RegionTickDispatcher.init();
             // 创建新调度器（使用 MiliSchedulerBuilder）
@@ -61,11 +55,4 @@ public final class RegionTickBootstrap {
     }
 
     public static boolean isInitialized() { return initialized; }
-
-    private static void disableConflicting() {
-        if (fun.bm.mili.config.modules.experiment.RegionBalancerConfig.enabled) {
-            LOGGER.info("[RegionTickPool] Disabling RegionBalancer (RegionTickPool is its successor)");
-            fun.bm.mili.config.modules.experiment.RegionBalancerConfig.enabled = false;
-        }
-    }
 }

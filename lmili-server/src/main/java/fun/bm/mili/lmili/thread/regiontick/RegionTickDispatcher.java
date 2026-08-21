@@ -87,7 +87,7 @@ public final class RegionTickDispatcher {
      * Returns true if the tick dispatcher is initialized and ready.
      */
     public static boolean isRunning() {
-        return instance != null && RegionTickPoolConfig.enabled;
+        return instance != null;
     }
 
     public boolean isVirtualThreadMode() {

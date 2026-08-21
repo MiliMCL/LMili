@@ -6,6 +6,8 @@
 
 LMili（米粒）是一个基于 **Paper → Folia** fork 链的 Minecraft 26.2 服务端核心。项目目标是成为一个**纯粹的 Folia**：不引入生电/红石机制修改与客户端协议魔改，专注于在 Folia 区域多线程调度模型之上提供**更多 API、稳定性修复与 bug 修复**，以及通用的性能优化。
 
+**核心架构变更**：LMili **完全移除了 Folia 原有的 EDF/WorkStealing 调度器**，使用自研的 Mili 调度器作为唯一调度后端。并行 chunk tick（RegionTickPool）已永久启用，无需配置开关。
+
 ### 继承链
 
 ```
@@ -114,19 +116,26 @@ Mili/
 
 ## 核心特性
 
-### 1. RegionTickPool — 独立 tick 调度增强
+### 1. Mili 统一调度器 — 替代 Folia 调度器
 
-这是 LMili 最核心的架构创新。将 Folia "每区域独占一线程"的模型替换为**共享 worker 池 + 优先级调度**，显著减少大量空闲 region 时的 CPU 占用。
+LMili **完全移除了 Folia 原有的 EDF/WorkStealing 调度器**，使用自研的 Mili 调度器作为唯一调度后端。这不仅是性能优化，更是架构层面的统一：所有 region tick、chunk tick、entity tick 都通过同一套调度系统执行。
+
+**为什么移除 Folia 调度器**：
+- Folia 的 EDF 调度器每个 region 独占一个线程，大量空闲 region 时 CPU 占用高
+- Folia 的 WorkStealing 调度器缺乏阻塞任务隔离，carrier thread 可能被阻塞操作 pinning
+- 两套调度器并存增加了代码复杂度和维护成本
+- Mili 调度器已通过完整审计，具备生产环境稳定性
 
 **技术组成**：
 
 | 组件 | 作用 |
 |------|------|
-| Virtual Thread 后端 | 基于 JDK 25 虚拟线程，以同步风格编写异步逻辑，`awaitCrossRegion` 跨区挂起不阻塞平台线程 |
-| DAG 并行调度 | `DagExecutionEngine` 非阻塞回调驱动，`CompiledDag` 不可变编译后 DAG，`ConflictGraph` 稀疏冲突图替代 O(n²) 矩阵 |
-| Work-Stealing 负载均衡 | `WorkStealingCoordinator` 全局工作窃取，自动平衡各 region 负载 |
-| 阻塞操作隔离 | `BlockingTaskIsolation` 专用平台线程池 + 信号量限流，防止 carrier pinning |
-| 对象池复用 | `ExecutionContext` + `ObjectPool` ThreadLocal 池，热路径零分配 |
+| MiliTickRegionScheduler | Folia API 适配层，将 `scheduleRegion()` 委派给 MiliScheduler |
+| MiliScheduler + WorkStealingCoordinator | 统一 Worker Pool，全局工作窃取负载均衡 |
+| VirtualThreadPool | 基于 JDK 25 虚拟线程，以同步风格编写异步逻辑 |
+| BlockingTaskIsolation | 专用平台线程池 + ExecutionToken 转移，防止 carrier pinning |
+| RegionTickDispatcher | 并行 chunk tick 调度器（永久启用） |
+| DagExecutionEngine | 非阻塞 DAG 执行引擎，支持系统级并行 |
 
 **执行模式**根据区域 chunk 数量自动选择：
 - 小 region（chunk 数 < 阈值）：单线程同步执行（无调度开销）
@@ -136,21 +145,26 @@ Mili/
 **线程模型**：
 
 ```
-RegionTickDispatcher
-    └── MiliScheduler.submit(RegionTask)
-            └── WorkStealingCoordinator.submit(task)
-                    └── RegionQueue ──(work-stealing)──▶ VirtualThreadPool (virtual threads)
-                                                                    └── Carrier Threads → CPU Cores
+TickRegionScheduler (Folia API 适配)
+    └── MiliTickRegionScheduler.scheduleRegion(handle)
+            └── MiliScheduler.submit(RegionTask)
+                    └── WorkStealingCoordinator.submit(task)
+                            └── RegionQueue ──(work-stealing)──▶ SchedulerWorker (MiliTickThread)
+                                                                            └── ServerLevel.mili$tickRegion()
+                                                                                    ├── RegionTickDispatcher.dispatchTick()  ← 并行 chunk tick
+                                                                                    └── EntityTickDispatcher.dispatch()      ← 同步 entity tick
 ```
 
 **调度器核心源码结构**（54 个文件）：
 
 ```
 lmili/thread/
-├── regiontick/                    # Region Tick 系统
+├── regiontick/                    # Region Tick 系统（并行 chunk tick）
 │   ├── RegionTickBootstrap.java   # 启动入口
 │   ├── RegionTickDispatcher.java  # region tick 分发器
 │   ├── RegionTickExecutor.java    # 执行器接口
+│   ├── ChunkTickDispatcher.java   # chunk tick 分派（3 种模式）
+│   ├── EntityTickDispatcher.java  # entity tick 分派
 │   ├── dag/                       # DAG 依赖图
 │   │   ├── SystemGraph.java       # 系统依赖图
 │   │   ├── CompiledDag.java       # 编译后 DAG（不可变）
@@ -163,8 +177,9 @@ lmili/thread/
 │   └── suspend/                   # 挂起支持
 │       └── MiliThreadFactory.java # 虚拟线程工厂
 └── scheduler/                     # 调度器系统
-    ├── MiliSchedulerImpl.java     # 主实现（487 行）
-    ├── MiliSchedulerBuilder.java  # Builder 构建（129 行）
+    ├── MiliTickRegionScheduler.java # Folia API 适配器
+    ├── MiliSchedulerImpl.java     # 主实现
+    ├── MiliSchedulerBuilder.java  # Builder 构建
     ├── api/                       # 调度器接口
     │   ├── MiliScheduler.java
     │   ├── RegionTask.java
@@ -185,10 +200,10 @@ lmili/thread/
 
 | 修复项 | 说明 |
 |--------|------|
-| Region Balancer | 共享线程池 + 优先级队列替代 Folia 每区域独占线程，动态负载均衡（RegionTickPool 前身） |
+| Region Balancer | 共享线程池 + 优先级队列（已废弃，被 RegionTickPool 完全替代） |
 | Region Load Monitor | 无锁滑动窗口统计区域 tick 耗时 |
 | Adaptive TPS Manager | 根据实时负载动态调整 TPS |
-| Cross-Region Helper | 类型化跨区事件队列（实体伤害、方块通知等） |
+| Cross-Region Helper | 类型化跨区事件队列（红石信号、实体伤害、方块通知等） |
 | RegionTaskIdRegistry | 全局 UUID 注册中心，防止跨区块任务 ID 碰撞导致崩溃 |
 | 全局实体计数器 | 按区域聚合 mob 数量，避免 O(entities) 扫描 |
 | 线程安全加固 | 全局 `catch(Exception)` → `catch(Throwable)`，防止 OOM/StackOverflow 导致调度器线程静默死亡 |

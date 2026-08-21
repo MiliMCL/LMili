@@ -1,6 +1,8 @@
 package io.papermc.paper.threadedregions.commands;
 
 import ca.spottedleaf.common.time.TickData;
+import fun.bm.mili.lmili.i18n.I18nManager;
+import fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
@@ -29,15 +31,25 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
-// Lmili start - Improved Server Health Report
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
 import java.lang.management.RuntimeMXBean;
 import org.jetbrains.annotations.NotNull;
-// Lmili end
 
+/**
+ * /tps 命令 —— 显示 Mili 服务器健康状态。
+ *
+ * <p>适配 Mili 统一调度器，显示：
+ * <ul>
+ *   <li>服务器概览（运行时间、内存、玩家）</li>
+ *   <li>Mili 调度器状态（任务、区域、Work-Stealing）</li>
+ *   <li>RegionTickPool 状态（chunk tick、超时）</li>
+ *   <li>最低 TPS 区域（可点击传送）</li>
+ * </ul>
+ */
 public final class CommandServerHealth extends Command {
 
     private static final ThreadLocal<DecimalFormat> TWO_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
@@ -53,8 +65,11 @@ public final class CommandServerHealth extends Command {
     private static final TextColor HEADER = TextColor.color(79, 164, 240);
     private static final TextColor PRIMARY = TextColor.color(48, 145, 237);
     private static final TextColor SECONDARY = TextColor.color(104, 177, 240);
-    private static final TextColor INFORMATION = TextColor.color(180, 220, 255); // Lmili start - Improved Server Health Report
+    private static final TextColor INFORMATION = TextColor.color(180, 220, 255);
     private static final TextColor LIST = TextColor.color(33, 97, 188);
+    private static final TextColor SUCCESS = TextColor.color(80, 200, 120);
+    private static final TextColor WARNING = TextColor.color(255, 200, 0);
+    private static final TextColor DANGER = TextColor.color(255, 80, 80);
 
     public CommandServerHealth() {
         super("tps");
@@ -67,24 +82,24 @@ public final class CommandServerHealth extends Command {
                                               final boolean newline) {
         return Component.text()
                 .append(Component.text(prefix, PRIMARY, TextDecoration.BOLD))
-                .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), CommandUtil.getUtilisationColourRegion(util)))
-                .append(Component.text("% util", PRIMARY))
+                .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), getUtilColor(util)))
+                .append(Component.text("% " + I18nManager.get("tps.region.util"), PRIMARY))
                 .append(Component.text(" | ", SECONDARY))
-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), CommandUtil.getColourForMSPT(mspt)))
-                .append(Component.text(" mspt", PRIMARY))
+                .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), getMsptColor(mspt)))
+                .append(Component.text(" " + I18nManager.get("tps.region.mspt"), PRIMARY))
                 .append(Component.text(" | ", SECONDARY))
-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), CommandUtil.getColourForTPS(tps)))
-                .append(Component.text(" TPS" + (newline ? "\n" : ""), PRIMARY))
+                .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), getTpsColor(tps)))
+                .append(Component.text(" " + I18nManager.get("tps.region.tps") + (newline ? "\n" : ""), PRIMARY))
                 .build();
     }
 
     private static Component formatRegionStats(final TickRegions.RegionStats stats, final boolean newline) {
         return Component.text()
-                .append(Component.text("Chunks: ", PRIMARY))
+                .append(Component.text(I18nManager.get("tps.region.chunks") + ": ", PRIMARY))
                 .append(Component.text(NO_DECIMAL_PLACES.get().format((long)stats.getChunkCount()), INFORMATION))
-                .append(Component.text("  Players: ", PRIMARY))
+                .append(Component.text("  " + I18nManager.get("tps.region.players") + ": ", PRIMARY))
                 .append(Component.text(NO_DECIMAL_PLACES.get().format((long)stats.getPlayerCount()), INFORMATION))
-                .append(Component.text("  Entities: ", PRIMARY))
+                .append(Component.text("  " + I18nManager.get("tps.region.entities") + ": ", PRIMARY))
                 .append(Component.text(NO_DECIMAL_PLACES.get().format((long)stats.getEntityCount()) + (newline ? "\n" : ""), INFORMATION))
                 .build();
     }
@@ -93,7 +108,7 @@ public final class CommandServerHealth extends Command {
         final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
                 TickRegionScheduler.getCurrentRegion();
         if (region == null) {
-            sender.sendMessage(Component.text("You are not in a region currently", NamedTextColor.RED));
+            sender.sendMessage(Component.text(I18nManager.get("tps.error.not.in.region"), NamedTextColor.RED));
             return true;
         }
 
@@ -118,7 +133,7 @@ public final class CommandServerHealth extends Command {
         final String location = world.getWorld().getName() + " (" + centerBlockX + ", " + centerBlockZ + ")";
 
         final Component line = Component.text()
-                .append(Component.text("Region around block ", PRIMARY))
+                .append(Component.text(I18nManager.get("tps.region.around.block") + " ", PRIMARY))
                 .append(Component.text(location, INFORMATION))
                 .append(Component.text(":\n", PRIMARY))
 
@@ -140,11 +155,12 @@ public final class CommandServerHealth extends Command {
             try {
                 lowestRegionsCount = Integer.parseInt(args[1]);
             } catch (final NumberFormatException ex) {
-                sender.sendMessage(Component.text("Highest utilisation count '" + args[1] + "' must be an integer", NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("tps.error.invalid.count", args[1]), NamedTextColor.RED));
                 return true;
             }
         }
 
+        // 收集所有 region
         final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions =
                 new ArrayList<>();
 
@@ -153,6 +169,7 @@ public final class CommandServerHealth extends Command {
             world.regioniser.computeForAllRegions(regions::add);
         }
 
+        // 计算 TPS 统计
         final double minTps;
         final double medianTps;
         final double maxTps;
@@ -165,18 +182,19 @@ public final class CommandServerHealth extends Command {
         final long currTime = System.nanoTime();
         final TickData.TickReportData globalTickReport = RegionizedServer.getGlobalTickData().getTickReport15s(currTime);
 
+        // 内存信息
         final MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
         final MemoryUsage heapUsage = memoryBean.getHeapMemoryUsage();
         final long usedMemory = heapUsage.getUsed() / (1024 * 1024);
         final long maxMemory = heapUsage.getMax() / (1024 * 1024);
-
         final double memPercent = (double) usedMemory / maxMemory * 100.0;
-        final TextColor memColor = memPercent < 60 ? CommandUtil.getUtilisationColourRegion(0.0) : (memPercent < 85 ? NamedTextColor.YELLOW : NamedTextColor.RED);
 
+        // 运行时间
         final RuntimeMXBean runtimeBean = ManagementFactory.getRuntimeMXBean();
         final long uptime = runtimeBean.getUptime();
         final String uptimeStr = formatUptime(uptime);
 
+        // 收集每个 region 的 TPS
         for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
             final TickData.TickReportData report = region.getData().getRegionSchedulingHandle().getTickReport15s(currTime);
             tpsByRegion.add(report == null ? 20.0 : report.tpsData().segmentAll().average());
@@ -184,12 +202,16 @@ public final class CommandServerHealth extends Command {
             totalUtil += (report == null ? 0.0 : report.utilisation());
         }
 
+        // Mili 调度器统计
+        final RegionTickDispatcher dispatcher = RegionTickDispatcher.getInstance();
+        final Map<String, Object> schedulerStats = dispatcher != null ? dispatcher.getStats() : Map.of();
+
         final double genRate = ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask.genRate(currTime);
         final double loadRate = ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask.loadRate(currTime);
 
         totalUtil += globalTickReport.utilisation();
-        final TextColor utilisationColor = CommandUtil.getUtilisationColourRegion(totalUtil / (double)maxThreadCount);
 
+        // 排序 region 按负载
         tpsByRegion.sort(null);
         if (!tpsByRegion.isEmpty()) {
             minTps = tpsByRegion.getDouble(0);
@@ -204,15 +226,16 @@ public final class CommandServerHealth extends Command {
             minTps = medianTps = maxTps = 20.0;
         }
 
+        // 按负载排序 region
         final List<ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>>
-                regionsBelowThreshold = new ArrayList<>();
+                regionsByLoad = new ArrayList<>();
 
         for (int i = 0, len = regions.size(); i < len; ++i) {
             final TickData.TickReportData report = reportsByRegion.get(i);
-            regionsBelowThreshold.add(new ObjectObjectImmutablePair<>(regions.get(i), report));
+            regionsByLoad.add(new ObjectObjectImmutablePair<>(regions.get(i), report));
         }
 
-        regionsBelowThreshold.sort((p1, p2) -> {
+        regionsByLoad.sort((p1, p2) -> {
             final TickData.TickReportData report1 = p1.right();
             final TickData.TickReportData report2 = p2.right();
             final double util1 = report1 == null ? 0.0 : report1.utilisation();
@@ -220,6 +243,7 @@ public final class CommandServerHealth extends Command {
             return Double.compare(util2, util1);
         });
 
+        // 统计区块和实体
         long totalChunks = 0;
         long totalEntities = 0;
 
@@ -229,14 +253,15 @@ public final class CommandServerHealth extends Command {
             totalEntities += stats.getEntityCount();
         }
 
+        // 构建最低 TPS 区域列表
         final TextComponent.Builder lowestRegionsBuilder = Component.text();
 
         if (sender instanceof Player) {
-            lowestRegionsBuilder.append(Component.text(" Click to teleport\n", SECONDARY));
+            lowestRegionsBuilder.append(Component.text(" " + I18nManager.get("tps.server.click.to.teleport") + "\n", SECONDARY));
         }
-        for (int i = 0, len = Math.min(lowestRegionsCount, regionsBelowThreshold.size()); i < len; ++i) {
+        for (int i = 0, len = Math.min(lowestRegionsCount, regionsByLoad.size()); i < len; ++i) {
             final ObjectObjectImmutablePair<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, TickData.TickReportData>
-                    pair = regionsBelowThreshold.get(i);
+                    pair = regionsByLoad.get(i);
 
             final TickData.TickReportData report = pair.right();
             final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
@@ -259,96 +284,125 @@ public final class CommandServerHealth extends Command {
 
             final Component line = Component.text()
                     .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                    .append(Component.text("Region at ", PRIMARY))
+                    .append(Component.text(I18nManager.get("tps.region.at") + " ", PRIMARY))
                     .append(Component.text(location, INFORMATION))
                     .append(Component.text(":\n", PRIMARY))
 
                     .append(Component.text("    ", PRIMARY))
-                    .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), CommandUtil.getUtilisationColourRegion(util)))
-                    .append(Component.text("% util", PRIMARY))
+                    .append(Component.text(ONE_DECIMAL_PLACES.get().format(util * 100.0), getUtilColor(util)))
+                    .append(Component.text("% " + I18nManager.get("tps.region.util"), PRIMARY))
                     .append(Component.text(" | ", SECONDARY))
-                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), CommandUtil.getColourForMSPT(mspt)))
-                    .append(Component.text(" mspt", PRIMARY))
+                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt), getMsptColor(mspt)))
+                    .append(Component.text(" " + I18nManager.get("tps.region.mspt"), PRIMARY))
                     .append(Component.text(" | ", SECONDARY))
-                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), CommandUtil.getColourForTPS(tps)))
-                    .append(Component.text(" TPS\n", PRIMARY))
+                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps), getTpsColor(tps)))
+                    .append(Component.text(" " + I18nManager.get("tps.region.tps") + "\n", PRIMARY))
 
                     .append(Component.text("    ", PRIMARY))
                     .append(formatRegionStats(region.getData().getRegionStats(), (i + 1) != len))
                     .build()
 
                     .clickEvent(ClickEvent.clickEvent(ClickEvent.Action.RUN_COMMAND, Payload.string("/minecraft:execute as @s in " + world.getWorld().getKey().toString() + " run tp " + centerBlockX + ".5 " + yLoc + " " + centerBlockZ + ".5")))
-                    .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, Component.text("Click to teleport to " + location, SECONDARY)));
+                    .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, Component.text(I18nManager.get("tps.server.click.to.teleport") + " " + location, SECONDARY)));
 
             lowestRegionsBuilder.append(line);
         }
 
+        // 构建完整消息
         sender.sendMessage(
                 Component.text()
-                        .append(Component.text("Server Health Report", HEADER, TextDecoration.BOLD))
-                        .append(Component.text(" (Uptime: ", SECONDARY))
-                        .append(Component.text(uptimeStr, utilisationColor))
+                        // 标题
+                        .append(Component.text(I18nManager.get("tps.server.health.report"), HEADER, TextDecoration.BOLD))
+                        .append(Component.text(" (" + I18nManager.get("tps.server.uptime") + ": ", SECONDARY))
+                        .append(Component.text(uptimeStr, getUtilColor(totalUtil / (double)maxThreadCount)))
                         .append(Component.text(")\n", SECONDARY))
 
+                        // 在线玩家
                         .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                        .append(Component.text("Online Players: ", PRIMARY))
+                        .append(Component.text(I18nManager.get("tps.server.online.players") + ": ", PRIMARY))
                         .append(Component.text(Bukkit.getOnlinePlayers().size(), INFORMATION))
                         .append(Component.newline())
 
-
+                        // 区域和区块统计
                         .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                        .append(Component.text("Total regions: ", PRIMARY))
+                        .append(Component.text(I18nManager.get("tps.server.total.regions") + ": ", PRIMARY))
                         .append(Component.text(regions.size(), INFORMATION))
                         .append(Component.text(", ", PRIMARY))
-                        .append(Component.text("Total Chunks: ", PRIMARY))
+                        .append(Component.text(I18nManager.get("tps.server.total.chunks") + ": ", PRIMARY))
                         .append(Component.text(NO_DECIMAL_PLACES.get().format(totalChunks), INFORMATION))
                         .append(Component.text(", ", PRIMARY))
-                        .append(Component.text("Total Entities: ", PRIMARY))
+                        .append(Component.text(I18nManager.get("tps.server.total.entities") + ": ", PRIMARY))
                         .append(Component.text(NO_DECIMAL_PLACES.get().format(totalEntities) + "\n", INFORMATION))
 
+                        // 负载率
                         .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                        .append(Component.text("Utilisation: ", PRIMARY))
-                        .append(Component.text(ONE_DECIMAL_PLACES.get().format(totalUtil * 100.0), utilisationColor))
-                        .append(Component.text("%", PRIMARY))
-                        .append(Component.text(" / ", SECONDARY))
+                        .append(Component.text(I18nManager.get("tps.server.utilisation") + ": ", PRIMARY))
+                        .append(Component.text(ONE_DECIMAL_PLACES.get().format(totalUtil * 100.0), getUtilColor(totalUtil / (double)maxThreadCount)))
+                        .append(Component.text("% / ", SECONDARY))
                         .append(Component.text(ONE_DECIMAL_PLACES.get().format(maxThreadCount * 100.0), INFORMATION))
                         .append(Component.text("%\n", PRIMARY))
 
+                        // Mili 调度器状态
                         .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                        .append(Component.text("Load rate: ", PRIMARY))
-                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(loadRate), INFORMATION))
-                        .append(Component.text(", ", PRIMARY))
-                        .append(Component.text("Gen rate: ", PRIMARY))
-                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(genRate) + "\n", INFORMATION))
-
-                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                        .append(Component.text("Memory: ", PRIMARY))
-                        .append(Component.text(NO_DECIMAL_PLACES.get().format(usedMemory), memColor))
-                        .append(Component.text(" MB", memColor))
-                        .append(Component.text(" / ", SECONDARY))
-                        .append(Component.text(NO_DECIMAL_PLACES.get().format(maxMemory), INFORMATION))
-                        .append(Component.text(" MB", INFORMATION))
-                        .append(Component.text(" (", SECONDARY))
-                        .append(Component.text(ONE_DECIMAL_PLACES.get().format(memPercent) + "%", memColor))
-                        .append(Component.text(")", SECONDARY))
+                        .append(Component.text(I18nManager.get("tps.server.mili.scheduler") + ": ", PRIMARY))
+                        .append(Component.text(I18nManager.get("tps.server.active.regions") + "=", SECONDARY))
+                        .append(Component.text(String.valueOf(schedulerStats.getOrDefault("active_regions", "?")), INFORMATION))
+                        .append(Component.text(", ", SECONDARY))
+                        .append(Component.text(I18nManager.get("tps.server.worker.count") + "=", SECONDARY))
+                        .append(Component.text(String.valueOf(schedulerStats.getOrDefault("worker_count", "?")), INFORMATION))
+                        .append(Component.text(", ", SECONDARY))
+                        .append(Component.text(I18nManager.get("tps.server.dag.systems") + "=", SECONDARY))
+                        .append(Component.text(String.valueOf(schedulerStats.getOrDefault("dag_systems", "?")), INFORMATION))
                         .append(Component.newline())
 
+                        // RegionTickPool 状态
                         .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                        .append(Component.text("Lowest Region TPS: ", PRIMARY))
-                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps) + "\n", CommandUtil.getColourForTPS(minTps)))
+                        .append(Component.text(I18nManager.get("tps.server.region.tick.pool") + ": ", PRIMARY))
+                        .append(Component.text(I18nManager.get("tps.server.total.ticks") + "=", SECONDARY))
+                        .append(Component.text(String.valueOf(schedulerStats.getOrDefault("total_ticks_dispatched", "?")), INFORMATION))
+                        .append(Component.text(", ", SECONDARY))
+                        .append(Component.text(I18nManager.get("tps.server.tick.errors") + "=", SECONDARY))
+                        .append(Component.text(String.valueOf(schedulerStats.getOrDefault("total_tick_errors", "?")), INFORMATION))
+                        .append(Component.text(", ", SECONDARY))
+                        .append(Component.text(I18nManager.get("tps.server.tick.timeouts") + "=", SECONDARY))
+                        .append(Component.text(String.valueOf(schedulerStats.getOrDefault("chunk_tick_timeouts", "?")), INFORMATION))
+                        .append(Component.newline())
+
+                        // 区块加载速率
+                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                        .append(Component.text(I18nManager.get("tps.server.load.rate") + ": ", PRIMARY))
+                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(loadRate), INFORMATION))
+                        .append(Component.text(", ", PRIMARY))
+                        .append(Component.text(I18nManager.get("tps.server.gen.rate") + ": ", PRIMARY))
+                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(genRate) + "\n", INFORMATION))
+
+                        // 内存
+                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                        .append(Component.text(I18nManager.get("tps.server.memory") + ": ", PRIMARY))
+                        .append(Component.text(NO_DECIMAL_PLACES.get().format(usedMemory), getMemoryColor(memPercent)))
+                        .append(Component.text(" " + I18nManager.get("tps.memory.mb"), getMemoryColor(memPercent)))
+                        .append(Component.text(" / ", SECONDARY))
+                        .append(Component.text(NO_DECIMAL_PLACES.get().format(maxMemory), INFORMATION))
+                        .append(Component.text(" " + I18nManager.get("tps.memory.mb"), INFORMATION))
+                        .append(Component.text(" (", SECONDARY))
+                        .append(Component.text(I18nManager.get("tps.memory.percent", ONE_DECIMAL_PLACES.get().format(memPercent)), getMemoryColor(memPercent)))
+                        .append(Component.text(")\n", SECONDARY))
+
+                        // TPS 统计
+                        .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                        .append(Component.text(I18nManager.get("tps.server.lowest.region.tps") + ": ", PRIMARY))
+                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps) + "\n", getTpsColor(minTps)))
 
                         .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                        .append(Component.text("Median Region TPS: ", PRIMARY))
-                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(medianTps) + "\n", CommandUtil.getColourForTPS(medianTps)))
+                        .append(Component.text(I18nManager.get("tps.server.median.region.tps") + ": ", PRIMARY))
+                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(medianTps) + "\n", getTpsColor(medianTps)))
 
                         .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                        .append(Component.text("Highest Region TPS: ", PRIMARY))
-                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(maxTps) + "\n", CommandUtil.getColourForTPS(maxTps)))
+                        .append(Component.text(I18nManager.get("tps.server.highest.region.tps") + ": ", PRIMARY))
+                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(maxTps) + "\n", getTpsColor(maxTps)))
 
-                        .append(Component.text("Highest ", HEADER, TextDecoration.BOLD))
-                        .append(Component.text(Integer.toString(lowestRegionsCount), INFORMATION, TextDecoration.BOLD))
-                        .append(Component.text(" utilisation regions\n", HEADER, TextDecoration.BOLD))
-
+                        // 最低 TPS 区域
+                        .append(Component.text(I18nManager.get("tps.server.highest.utilisation.regions", Integer.toString(lowestRegionsCount)), HEADER, TextDecoration.BOLD))
                         .append(lowestRegionsBuilder.build())
                         .build()
         );
@@ -371,13 +425,13 @@ public final class CommandServerHealth extends Command {
             }
             case "region": {
                 if (!(sender instanceof Entity)) {
-                    sender.sendMessage(Component.text("Cannot see current region information as console", NamedTextColor.RED));
+                    sender.sendMessage(Component.text(I18nManager.get("tps.error.console.region"), NamedTextColor.RED));
                     return true;
                 }
                 return executeRegion(sender, commandLabel, args);
             }
             default: {
-                sender.sendMessage(Component.text("Type '" + args[0] + "' must be one of: [server, region]", NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("tps.error.invalid.type", args[0]), NamedTextColor.RED));
                 return true;
             }
         }
@@ -401,7 +455,6 @@ public final class CommandServerHealth extends Command {
         return new ArrayList<>();
     }
 
-    // Lmili start - Improved Server Health Report
     private static @NotNull String formatUptime(long uptimeMillis) {
         long days = TimeUnit.MILLISECONDS.toDays(uptimeMillis);
         long hours = TimeUnit.MILLISECONDS.toHours(uptimeMillis) % 24;
@@ -409,12 +462,36 @@ public final class CommandServerHealth extends Command {
         long seconds = TimeUnit.MILLISECONDS.toSeconds(uptimeMillis) % 60;
 
         StringBuilder sb = new StringBuilder();
-        if (days > 0) sb.append(days).append("d ");
-        if (hours > 0) sb.append(hours).append("h ");
-        if (minutes > 0) sb.append(minutes).append("m ");
-        sb.append(seconds).append("s");
+        if (days > 0) sb.append(I18nManager.get("tps.time.days", days));
+        if (hours > 0) sb.append(" ").append(I18nManager.get("tps.time.hours", hours));
+        if (minutes > 0) sb.append(" ").append(I18nManager.get("tps.time.minutes", minutes));
+        sb.append(" ").append(I18nManager.get("tps.time.seconds", seconds));
 
         return sb.toString();
     }
-    // Lmili end
+
+    // 颜色辅助方法
+    private static TextColor getTpsColor(double tps) {
+        if (tps >= 19.0) return SUCCESS;
+        if (tps >= 15.0) return WARNING;
+        return DANGER;
+    }
+
+    private static TextColor getMsptColor(double mspt) {
+        if (mspt <= 30.0) return SUCCESS;
+        if (mspt <= 45.0) return WARNING;
+        return DANGER;
+    }
+
+    private static TextColor getUtilColor(double util) {
+        if (util <= 0.7) return SUCCESS;
+        if (util <= 0.9) return WARNING;
+        return DANGER;
+    }
+
+    private static TextColor getMemoryColor(double percent) {
+        if (percent < 60) return SUCCESS;
+        if (percent < 85) return WARNING;
+        return DANGER;
+    }
 }

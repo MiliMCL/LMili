@@ -6,17 +6,13 @@ import fun.bm.mili.lmili.config.flags.ConfigInfo;
 import fun.bm.mili.lmili.config.flags.HotReloadUnsupported;
 import fun.bm.mili.lmili.enums.EnumConfigCategory;
 
+/**
+ * RegionTickPool 配置 —— Mili 统一调度器的并行 chunk tick 子系统。
+ *
+ * <p>RegionTickPool 已永久启用，无需配置开关。以下参数仅用于微调性能。
+ */
 @ConfigClassInfo(category = EnumConfigCategory.EXPERIMENT, name = "region_tick_pool")
 public class RegionTickPoolConfig implements IConfigModule {
-
-    @HotReloadUnsupported
-    @ConfigInfo(name = "enabled", comments = """
-            启用 RegionTickPool —— Mili 独立并行 chunk tick 框架。
-            将每个 region 的 chunk tick 工作拆分给一批 worker 线程共同执行，
-            替代 Folia 原有的串行 chunk tick 模型。
-            启用后 RegionBalancer 将自动禁用。
-            注意：需要充分测试后才建议用于生产环境""")
-    public static boolean enabled = false;
 
     @HotReloadUnsupported
     @ConfigInfo(name = "worker-count", comments = """
@@ -43,7 +39,7 @@ public class RegionTickPoolConfig implements IConfigModule {
     @ConfigInfo(name = "min-workers-per-region", comments = """
             每个 region 最少保留的 worker 线程数。
             确保多 region 并发时，每个 region 都能获得足够的并行度，
-            不会因为贪心分配导致某些 region 被“饿死”。
+            不会因为贪心分配导致某些 region 被"饿死"。
             默认为 2，最小为 1。""")
     public static int minWorkersPerRegion = 2;
 
@@ -63,17 +59,6 @@ public class RegionTickPoolConfig implements IConfigModule {
             必须小于 Folia watchdog 超时（默认 5000ms），建议预留至少 1s 余量。
             默认 4000ms。""")
     public static long virtualThreadTimeoutMs = 4000;
-
-    // Mili start - new scheduler is now always active, flag removed
-    // @HotReloadUnsupported
-    // @ConfigInfo(name = "use-new-scheduler", comments = """
-    //         启用新调度系统（重构版）。
-    //         启用后将使用 MiliScheduler + WorkStealingCoordinator 新架构替代原有调度逻辑。
-    //         新架构优势：非阻塞 DAG 执行、work-stealing 负载均衡、阻塞操作隔离。
-    //         此为灰度开关，启用前请充分测试。
-    //         默认 false（使用旧版稳定实现）。""")
-    // public static boolean useNewScheduler = false;
-    // Mili end - new scheduler is now always active
 
     public static int getWorkerCount() {
         int cores = Runtime.getRuntime().availableProcessors();

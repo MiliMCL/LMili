@@ -18,7 +18,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * <b>Design invariant:</b> this class does NOT touch game state.  It only
  * schedules {@code Runnable} tasks that wrap the original Folia tick logic.
  * All game logic continues to run on the region's own thread context.
+ *
+ * @deprecated 已废弃，被 {@link fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher} 完全替代。
+ * RegionTickPool 提供了更好的性能和更简洁的架构。此类保留仅为向后兼容。
  */
+@Deprecated
 public final class RegionBalancer {
 
     private RegionBalancer() {}

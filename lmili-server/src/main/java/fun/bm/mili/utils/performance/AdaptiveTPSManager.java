@@ -17,7 +17,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>修复负载公式：高负载时应缩短间隔（加速 tick），而非延长</li>
  *   <li>使用 max 负载而非 avg，避免热点被平均值掩盖</li>
  * </ul>
+ *
+ * @deprecated 已废弃，依赖 RegionBalancer 的负载监控。Mili 调度器内置了自适应延迟机制。
  */
+@Deprecated
 public class AdaptiveTPSManager {
 
     private static final AtomicBoolean running = new AtomicBoolean(false);

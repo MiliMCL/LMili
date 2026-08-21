@@ -4,26 +4,17 @@ import ca.spottedleaf.common.time.Schedule;
 import ca.spottedleaf.common.time.TickData;
 import ca.spottedleaf.common.time.TickTime;
 import ca.spottedleaf.common.util.TimeUtil;
-import ca.spottedleaf.concurrentutil.numa.OSNuma;
-import ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool;
 import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
-import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
-import ca.spottedleaf.concurrentutil.scheduler.StealingScheduledThreadPool;
-import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import com.mojang.logging.LogUtils;
-import io.papermc.paper.util.TraceUtil;
-import it.unimi.dsi.fastutil.ints.Int2IntLinkedOpenHashMap;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import org.slf4j.Logger;
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
 public class TickRegionScheduler {
@@ -49,134 +40,29 @@ public class TickRegionScheduler {
     }
     // Folia end - watchdog
 
-    // Mili start - support new scheduler
+    // Mili start - unified scheduler (Folia scheduler removed)
     private final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler;
     // Mili end
 
-    private final Scheduler scheduler;
-
-    public static enum SchedulerType {
-        EDF,
-        WORK_STEALING;
-    }
-
     /**
-     * Mili 构造器 —— 使用新的 MiliTickRegionScheduler 替代 Folia 的 Scheduler。
+     * Mili 构造器 —— 使用 MiliTickRegionScheduler 替代 Folia 的 Scheduler。
      *
      * @param miliScheduler Mili 调度器实例
      */
     protected TickRegionScheduler(final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler) {
         this.miliScheduler = miliScheduler;
-        this.scheduler = null; // 不使用 Folia 的 Scheduler
-    }
-
-    public TickRegionScheduler(final SchedulerType schedulerType, final int initialThreads) {
-        this.miliScheduler = null; // 使用 Folia 的 Scheduler
-        final ThreadFactory threadFactory = new ThreadFactory() {
-            private final AtomicInteger idGenerator = new AtomicInteger();
-            // on Linux, thread affinity is copied from the parent thread - but we do not want that, so we need
-            // to adjust the thread affinity of child threads
-            // the group allows the numa instance to accurately collect the child threads
-            private final ThreadGroup threadGroup = new ThreadGroup("Folia Region Scheduler ThreadGroup");
-
-            @Override
-            public Thread newThread(final Runnable run) {
-                // Lmili start - cpu affinity
-                final Runnable actualRun;
-                if (fun.bm.mili.config.modules.optimizations.CpuAffinityConfig.cpuAffinityEnabled) {
-                    actualRun = new Runnable() {
-                        private boolean affinitySet = false;
-
-                        @Override
-                        public void run() {
-                            if (!this.affinitySet) {
-                                this.affinitySet = true;
-                                net.openhft.affinity.Affinity.setAffinity(fun.bm.mili.config.modules.optimizations.CpuAffinityConfig.tickRegionAffinityBitSet);
-                            }
-                            run.run();
-                        }
-                    };
-                } else {
-                    actualRun = run;
-                }
-                // Lmili end - cpu affinity
-                final Thread ret = new TickThreadRunner(this.threadGroup, actualRun, "Folia Region Scheduler Thread #" + this.idGenerator.getAndIncrement());
-                ret.setUncaughtExceptionHandler(TickRegionScheduler.this::uncaughtException);
-                return ret;
-            }
-        };
-
-        switch (schedulerType) {
-            case EDF: {
-                this.scheduler = new EDFSchedulerThreadPool(initialThreads, threadFactory);
-                break;
-            }
-            case WORK_STEALING: {
-                this.scheduler = new StealingScheduledThreadPool(
-                        threadFactory, MoonriseConstants.NUMA_ENABLE ? OSNuma.getNativeInstance() : OSNuma.NoOp.INSTANCE
-                );
-                ((StealingScheduledThreadPool)this.scheduler).setFlags(StealingScheduledThreadPool.FLAG_SCHEDULE_EVENLY);
-                break;
-            }
-            default: {
-                throw new IllegalStateException("Unknown scheduler type: " + schedulerType);
-            }
-        }
     }
 
     public void start() {
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            this.miliScheduler.start();
-            return;
-        }
-        // Mili end
-        if (this.scheduler instanceof EDFSchedulerThreadPool edfSchedulerThreadPool) {
-            edfSchedulerThreadPool.start();
-        }
+        this.miliScheduler.start();
     }
 
     public void setThreads(final int threads) {
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            this.miliScheduler.setThreads(threads);
-            return;
-        }
-        // Mili end
-        if (this.scheduler instanceof StealingScheduledThreadPool stealingScheduledThreadPool) {
-            final Int2IntLinkedOpenHashMap threadAllocation;
-            final long stealThresholdNS = TimeUnit.MILLISECONDS.toNanos(3L);
-            final long taskTimeSliceNS = TimeUnit.MILLISECONDS.toNanos(2L);
-
-            if (!MoonriseConstants.NUMA_ENABLE) {
-                threadAllocation = new Int2IntLinkedOpenHashMap();
-                threadAllocation.put(0, threads);
-
-                LOGGER.info("Folia is using " + threads + " tick threads");
-            } else {
-                final int nodes = stealingScheduledThreadPool.getNuma().getTotalNumaNodes();
-
-                final int threadsPerNode = Math.max(1, threads / nodes);
-
-                threadAllocation = new Int2IntLinkedOpenHashMap(nodes);
-                for (int i = 0; i < nodes; ++i) {
-                    threadAllocation.put(i, threadsPerNode);
-                }
-
-                LOGGER.info("Folia is using " + threadsPerNode + " tick threads per NUMA node, with " + nodes + " NUMA nodes detected");
-            }
-
-            stealingScheduledThreadPool.setThreadAllocation(threadAllocation, stealThresholdNS, taskTimeSliceNS);
-        }
+        this.miliScheduler.setThreads(threads);
     }
 
     public int getTotalThreadCount() {
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            return this.miliScheduler.getTotalThreadCount();
-        }
-        // Mili end
-        return this.scheduler.getAliveThreads().length;
+        return this.miliScheduler.getTotalThreadCount();
     }
 
     private static void setTickingRegion(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
@@ -303,15 +189,8 @@ public class TickRegionScheduler {
      * @throws IllegalStateException If the region is already scheduled or is ticking
      */
     public void scheduleRegion(final RegionScheduleHandle region) {
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            region.scheduler = this;
-            this.miliScheduler.scheduleRegion(region);
-            return;
-        }
-        // Mili end
         region.scheduler = this;
-        this.scheduler.schedule(region);
+        this.miliScheduler.scheduleRegion(region);
     }
 
     /**
@@ -319,87 +198,33 @@ public class TickRegionScheduler {
      * execution, then it will be cancelled after.
      */
     public void descheduleRegion(final RegionScheduleHandle region) {
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            this.miliScheduler.descheduleRegion(region);
-            return;
-        }
-        // Mili end
-        // To avoid acquiring any of the locks the scheduler may be using, we
-        // simply cancel the next action.
-        region.markNonSchedulable();
+        this.miliScheduler.descheduleRegion(region);
     }
 
     public boolean halt(final boolean sync, final long maxWaitNS) {
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            this.miliScheduler.halt();
-            if (!sync) {
-                return this.miliScheduler.isHalted();
-            }
-            return this.miliScheduler.join(maxWaitNS == 0L ? 0L : TimeUnit.NANOSECONDS.toMillis(maxWaitNS));
-        }
-        // Mili end
-        this.scheduler.halt();
+        this.miliScheduler.halt();
         if (!sync) {
-            return this.scheduler.getAliveThreads().length == 0;
+            return this.miliScheduler.isHalted();
         }
-
-        return this.scheduler.join(maxWaitNS == 0L ? 0L : Math.max(1L, TimeUnit.NANOSECONDS.toMillis(maxWaitNS)));
+        return this.miliScheduler.join(maxWaitNS == 0L ? 0L : TimeUnit.NANOSECONDS.toMillis(maxWaitNS));
     }
 
     void dumpAliveThreadTraces(final String reason) {
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            this.miliScheduler.dumpAliveThreadTraces(reason);
-            return;
-        }
-        // Mili end
-        for (final Thread thread : this.scheduler.getAliveThreads()) {
-            if (thread.isAlive()) {
-                TraceUtil.dumpTraceForThread(thread, reason);
-            }
-        }
+        this.miliScheduler.dumpAliveThreadTraces(reason);
     }
 
     public void setHasTasks(final RegionScheduleHandle region) {
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            this.miliScheduler.setHasTasks(region);
-            return;
-        }
-        // Mili end
-        this.scheduler.notifyTasks(region);
+        this.miliScheduler.setHasTasks(region);
     }
 
     private void uncaughtException(final Thread thread, final Throwable thr) {
         LOGGER.error("Uncaught exception in tick thread \"" + thread.getName() + "\"", thr);
-
-        // prevent further ticks from occurring
-        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            this.miliScheduler.halt();
-        } else {
-            this.scheduler.halt();
-        }
-        // Mili end
-
+        this.miliScheduler.halt();
         MinecraftServer.getServer().stopServer();
     }
 
     private void regionFailed(final RegionScheduleHandle handle, final boolean executingTasks, final Throwable thr) {
-        // when a region fails, we need to shut down the server gracefully
-
-        // prevent further ticks from occurring
-        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
-        // Mili start - delegate to new scheduler
-        if (this.miliScheduler != null) {
-            this.miliScheduler.halt();
-        } else {
-            this.scheduler.halt();
-        }
-        // Mili end
+        this.miliScheduler.halt();
 
         final ChunkPos center = handle.region == null ? null : handle.region.region.getCenterChunk();
         final ServerLevel world = handle.region == null ? null : handle.region.world;
