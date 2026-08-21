@@ -266,8 +266,17 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
                 if (!TickThread.isTickThreadFor(player)) {
                     continue;
                 }
-                if (packetProcessor.executeSinglePacket()) {
-                    hasPacketsNew |= packetProcessor.hasPackets();
+                // Draining all queued packets instead of just one to prevent client
+                // desync when multiple packets are queued during high-traffic periods.
+                // This is Folia issue 196: packets being processed one at a time
+                // caused the client tick end marker to be delayed by up to one tick.
+                packetProcessor.processQueuedPackets();
+            }
+
+            for (final ServerPlayer player : worldData.getLocalPlayers()) {
+                if (player.getBukkitEntity().packetProcessor.hasPackets()) {
+                    hasPacketsNew = true;
+                    break;
                 }
             }
 

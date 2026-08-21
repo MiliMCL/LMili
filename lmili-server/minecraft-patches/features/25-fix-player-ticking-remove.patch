@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Fri, 5 Sep 2025 10:00:00 +0800
+Subject: [PATCH] Fix player ticking after disconnection / during entity removal
+
+Issue #327: Issue with removing player | Ticking player entity.
+
+In Folia's region threading model, when a player disconnects on the network
+thread, ServerPlayer.disconnect() is called which sets disconnected = true
+and ejects passengers, but the player entity remains ticked by its owning
+region thread until PlayerList.remove() completes the entity removal later
+in the same call chain. During this window between disconnect() and
+removePlayerImmediately(), the region thread continues to tick the player
+entity, leading to:
+
+1. NullPointerException or IllegalStateException from accessing a closed
+   connection via tickClientLoadTimeout() or send() calls in tick()/doTick().
+2. Erroneous Bukkit event triggers (CriteriaTriggers.TICK, LOCATION) firing
+   for a player who is no longer in the game.
+3. Concurrent modification of game state (containers, stats, attributes)
+   from both the network thread (disconnect cleanup) and the region thread
+   (tick execution).
+
+The fix adds hasDisconnected() guards at the entry points of both
+ServerPlayer.tick() and ServerPlayer.doTick() so that once the network
+thread has marked the player as disconnected, the region thread stops
+ticking it. The final entity removal is still handled by PlayerList.remove()
+which calls removePlayerImmediately() -> entity.remove().
+
+Additionally, the ServerLevel.ticking iteration already checks isRemoved()
+before calling tickNonPassenger, but that only catches full entity removal
+- not the intermediate disconnected state. These guards close the gap for
+the brief period between disconnect() and remove().
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -892,6 +892,12 @@ public class ServerPlayer extends net.minecraft.world.entity.player.Player {
+     @Override
+     public void tick() {
++        // Mili fix #327: Skip ticking player if disconnected.
++        // In Folia's region threading model, disconnect() is called on the network thread
++        // before PlayerList.remove() removes the entity from the ticking list. During this
++        // gap, the region thread continues ticking the player. Guard against accessing
++        // closed connections or firing events for disconnected players.
++        if (this.hasDisconnected()) return;
+         // Lmili start - Status bars
+         this.statusBarList.tick();
+         // Lmili end - Status bars
+@@ -1015,6 +1021,13 @@ public class ServerPlayer extends net.minecraft.world.entity.player.Player {
+     public void doTick() {
++        // Mili fix #327: Skip ticking player if disconnected.
++        // Same guard as in tick(): once the network thread has called disconnect(),
++        // the region thread should not continue processing food data, stats, or sending
++        // packets (connection.send) on a closed connection. PlayerList.remove() handles
++        // the eventual entity removal and scheduling cleanup.
++        if (this.hasDisconnected()) return;
+         try {
+             if (this.valid && (!this.isSpectator() || !this.touchingUnloadedChunk())) { // Paper - don't tick dead players that are not in the world currently (pending respawn)
+                 super.tick();

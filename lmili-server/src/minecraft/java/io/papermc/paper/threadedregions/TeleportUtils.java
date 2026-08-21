@@ -40,10 +40,14 @@ public final class TeleportUtils {
                             }
                             return;
                         }
-                        (useFromRootVehicle ? realFrom.getRootVehicle() : realFrom).teleportAsync(
-                            ((CraftWorld)loc.getWorld()).getHandle(), pos, null, null, null,
+                        // Lmili start - Preserve entity motion (delta movement) during teleport (fix #441)
+                        final Entity entityToTeleport = useFromRootVehicle ? realFrom.getRootVehicle() : realFrom;
+                        final Vec3 motion = entityToTeleport.getDeltaMovement();
+                        entityToTeleport.teleportAsync(
+                            ((CraftWorld)loc.getWorld()).getHandle(), pos, null, null, motion,
                             cause, teleportFlags, onComplete
                         );
+                        // Lmili end - Preserve entity motion (delta movement) during teleport (fix #441)
                     },
                     (final Entity retired) -> {
                         if (onComplete != null) {

@@ -18,6 +18,8 @@ import java.io.InputStream;
 import java.util.List;
 
 public class NullPlugin extends PluginBase {
+    public static final NullPlugin INSTANCE = new NullPlugin();
+
     private final String pluginName;
     private boolean enabled = true;
     private PluginDescriptionFile pdf;

@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Thu, 4 Sep 2025 15:00:00 +0800
+Subject: [PATCH] Fix locatorBar gamerule not taking effect: cached value never updated
+
+Issue #370: /gamerule locatorBar true does not work in 1.21.8.
+
+Root Cause:
+ServerWaypointManager caches the locatorBarEnabled value at construction time
+from the gamerule. When the gamerule is changed via /gamerule, the
+MinecraftServer.onGameRuleChanged() method is invoked, but the line that
+updates the cached waypointManager.locatorBarEnabled field was commented out
+(marked "Lmili - Restore waypoints"). As a result:
+
+1. The stale cached value persists in ServerWaypointManager
+2. updateWaypoint() and remakeConnections() early-return when locatorBarEnabled
+   is false, making the subsequent updatePlayer() calls no-ops
+3. The gamerule value changes server-side but the waypoint manager never
+   sees the updated state, so the client never receives locator bar data
+
+This patch restores the cached value update so the waypoint manager
+recognizes the gamerule change immediately.
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -3158,7 +3158,7 @@
+         } else if (rule == GameRules.LOCATOR_BAR) {
+             // this.getAllLevels().forEach(level -> { // Paper - per-world game rules
+                 ServerWaypointManager waypointManager = level.getWaypointManager(); // Lmili - Restore waypoints
+-                //waypointManager.locatorBarEnabled = (Boolean) value; // Paper - optimize ServerWaypointManager with locator bar disabled // Lmili - Restore waypoints
++                waypointManager.locatorBarEnabled = (Boolean) value; // Paper - optimize ServerWaypointManager with locator bar disabled
+                 if ((Boolean)value) {
+                     level.players().forEach(waypointManager::updatePlayer);
+                 } else {

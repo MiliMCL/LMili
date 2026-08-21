@@ -3471,10 +3471,18 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
             ServerLevel.this.debugSynchronizers.dropEntity(entity);
             // CraftBukkit start
             entity.valid = false;
-            // Folia - region threading - TODO THIS SHIT
+            // Mili fix - #406: schedule onEntityRemove on each player's region thread
+            // to avoid concurrent modification of invertedVisibilityEntities
+            // (non-thread-safe HashMap) when the removal thread differs from
+            // the player's own region thread.
             if (!(entity instanceof ServerPlayer) && entity.getRemovalReason() != net.minecraft.world.entity.Entity.RemovalReason.CHANGED_DIMENSION) {
-                for (ServerPlayer player : ServerLevel.this.server.getPlayerList().getPlayers()) { // Paper - call onEntityRemove for all online players
-                    player.getBukkitEntity().onEntityRemove(entity);
+                for (ServerPlayer player : ServerLevel.this.server.getPlayerList().getPlayers()) {
+                    final ServerPlayer targetPlayer = player;
+                    final net.minecraft.world.entity.Entity removedEntity = entity;
+                    targetPlayer.getBukkitEntity().taskScheduler.schedule(
+                        (Entity p) -> targetPlayer.getBukkitEntity().onEntityRemove(removedEntity),
+                        null, 1L
+                    );
                 }
             }
             // CraftBukkit end

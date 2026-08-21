@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Sat, 3 Jan 2026 14:35:56 +0800
+Subject: [PATCH] Fix PlayerTeleportEvent not firing for teleportAsync
+
+Issue #490: PlayerTeleportEvent does not fire for most teleports.
+
+In Folia's region threading model, the vanilla Entity.teleport() and
+ServerPlayer.teleport() both throw UnsupportedOperationException, so all
+teleports must go through Entity.teleportAsync().  However, teleportAsync()
+only fired a custom EntityTeleportAsyncEvent and never the standard Bukkit
+PlayerTeleportEvent.  As a result, plugins listening for PlayerTeleportEvent
+(cancel-based protection, logging, etc.) never received the event for
+cross-region, cross-dimension, or spectate teleports.
+
+This patch fires PlayerTeleportEvent inside teleportAsync() when the entity
+is a ServerPlayer, with full support for cancellation and destination
+modification — matching the behavior of the disabled vanilla path.
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4588,6 +4588,41 @@ public abstract class Entity
+                 destinationLoc
+         );
+ 
++        // Paper start - Fire PlayerTeleportEvent for players in teleportAsync
++        if (this instanceof net.minecraft.server.level.ServerPlayer player) {
++            org.bukkit.Location from = this.getBukkitEntity().getLocation();
++            org.bukkit.event.player.PlayerTeleportEvent teleportEvent
++                = new org.bukkit.event.player.PlayerTeleportEvent(
++                    player.getBukkitEntity(), from, destinationLoc, cause
++                );
++            teleportEvent.callEvent();
++            if (teleportEvent.isCancelled()) {
++                if (teleportComplete != null) {
++                    teleportComplete.accept(null);
++                }
++                return false;
++            }
++            org.bukkit.Location to = teleportEvent.getTo();
++            if (!to.equals(destinationLoc)) {
++                // Plugin modified the destination — update level, position, yaw, pitch
++                destination = ((org.bukkit.craftbukkit.CraftWorld) to.getWorld()).getHandle();
++                pos = new Vec3(to.getX(), to.getY(), to.getZ());
++                if (!Float.isNaN(to.getYaw())) {
++                    yaw = Float.valueOf(to.getYaw());
++                }
++                if (!Float.isNaN(to.getPitch())) {
++                    pitch = Float.valueOf(to.getPitch());
++                }
++                // Recompute destinationLoc so the EntityTeleportAsyncEvent below
++                // reflects the updated destination
++                destinationLoc = to;
++            }
++        }
++        // Paper end - Fire PlayerTeleportEvent for players in teleportAsync
++
+         wrapped.callEvent();
+         // Lmili end
+ 

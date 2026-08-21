@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Thu, 4 Sep 2025 14:00:00 +0800
+Subject: [PATCH] Fix fishing bobber despawning when player changes dimension
+
+Issue #435: Fishing bobber despawns when player changes dimension
+(Overworld -> Nether).
+
+In Folia's region threading model, when a player changes dimension the
+player entity is removed from the old level and added to a new one.  The
+FishingHook entity remains in the original level.  On the next tick the
+hook's shouldStopFishing() runs the region-thread check
+TickThread.isTickThreadFor(owner) which now returns false because the
+owner is on a different region thread.  This causes the hook to discard
+itself, and the same check in retrieve() means that a player who right-
+clicks with a fishing rod in the new dimension also kills the bobber.
+
+This patch short-circuits both tick() and retrieve() when the owner is
+in a different level, keeping the bobber alive so the player can reel it
+in after returning to the original dimension.
+
+diff --git a/net/minecraft/world/entity/projectile/FishingHook.java b/net/minecraft/world/entity/projectile/FishingHook.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/world/entity/projectile/FishingHook.java
++++ b/net/minecraft/world/entity/projectile/FishingHook.java
+@@ -170,6 +170,13 @@ public class FishingHook extends Projectile {
+         Player owner = this.getPlayerOwner();
+         if (owner == null) {
+             this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
++        // Folia start - region threading - allow dimension change
++        } else if (owner.level() != this.level()) {
++            // owner changed dimension (e.g. entered/left a nether portal);
++            // keep the bobber alive in its current world so the owner can
++            // reel it back in after returning; do not discard here
++            return;
++        // Folia end - region threading - allow dimension change
+         } else if (this.level().isClientSide() || !this.shouldStopFishing(owner)) {
+             if (this.onGround()) {
+                 this.life++;
+@@ -505,6 +512,12 @@ public class FishingHook extends Projectile {
+     public int retrieve(final ItemStack rod, final net.minecraft.world.InteractionHand hand) {
+         // Paper end - Add hand parameter to PlayerFishEvent
+         Player owner = this.getPlayerOwner();
++        // Folia start - region threading - allow dimension change
++        if (owner != null && owner.level() != this.level()) {
++            // owner is in a different dimension; do not discard the bobber
++            return 0;
++        }
++        // Folia end - region threading - allow dimension change
+         if (!this.level().isClientSide() && owner != null && !this.shouldStopFishing(owner)) {
+             int dmg = 0;
+             if (this.hookedIn != null) {

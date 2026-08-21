@@ -222,7 +222,7 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
                         if (newOwner != null) {
                             newOwner.resetFallDistance();
                             newOwner.resetCurrentImpulseContext();
-                            newOwner.hurtServer(player.level(), this.damageSources().enderPearl().eventEntityDamager(this), 5.0F); // CraftBukkit // Paper - fix DamageSource API
+                            newOwner.hurtServer(player.level(), this.damageSources().enderPearl().eventEntityDamager(player), 5.0F); // CraftBukkit // Paper - fix DamageSource API
                         }
 
                         this.playSound(level, teleportPos);
@@ -264,8 +264,7 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
             int previousChunkZ = SectionPos.blockToSectionCoord(this.position().z());
             Entity owner = this.owner != null ? findOwnerIncludingDeadPlayer(serverLevel, this.owner.getUUID()) : null;
             if (owner instanceof ServerPlayer serverPlayer
-                // && !owner.isAlive() // Lmili - Fix misbehaved ender pearls when player switched dimension
-                && (owner.getBukkitEntity().taskScheduler.isRetired() || serverPlayer.getHealth() <= 0.0D) // Lmili - Fix misbehaved ender pearls when player switched dimension
+                && serverPlayer.isDeadOrDying()
                 && !serverPlayer.wonGame
                 && serverPlayer.level().getGameRules().get(GameRules.ENDER_PEARLS_VANISH_ON_DEATH)) {
                 this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause

@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Thu, 4 Sep 2025 14:00:00 +0800
+Subject: [PATCH] Fix setRespawnLocation clearing player's spawn point
+
+Issue #337: setRespawnLocation clears player's spawn point.
+
+In Folia's region threading model, when a player respawns and their bed
+is obstructed (missing), the server calls setRespawnPosition(null, false,
+Cause.PLAYER_RESPAWN) to clear the spawn location. However, the current
+implementation fires a PlayerSpawnChangeEvent with Cause.RESET, which
+allows plugins to cancel the event and prevent the spawn from being
+cleared. This is incorrect because the spawn clearing is a server-
+initiated action (the bed is missing), not a player-initiated one.
+
+The fix ensures that when Cause.PLAYER_RESPAWN is used, the spawn is
+always cleared regardless of the PlayerSpawnChangeEvent cancellation.
+This is done by skipping the PlayerSpawnChangeEvent when the cause is
+PLAYER_RESPAWN, since this cause is only used for server-initiated spawn
+clearing (e.g., when a bed is obstructed or destroyed).
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -3193,17 +3193,24 @@ public class ServerPlayer extends net.minecraft.world.entity.player.Player {
+         spawnLoc.setYaw(respawnConfig.respawnData().yaw());
+         spawnLoc.setPitch(respawnConfig.respawnData().pitch());
+     }
+-    org.bukkit.event.player.PlayerSpawnChangeEvent dumbEvent = new org.bukkit.event.player.PlayerSpawnChangeEvent(
+-        this.getBukkitEntity(),
+-        spawnLoc,
+-        respawnConfig != null && respawnConfig.forced(),
+-        cause == com.destroystokyo.paper.event.player.PlayerSetSpawnEvent.Cause.PLAYER_RESPAWN
+-            ? org.bukkit.event.player.PlayerSpawnChangeEvent.Cause.RESET
+-            : org.bukkit.event.player.PlayerSpawnChangeEvent.Cause.valueOf(cause.name())
+-    );
+-    dumbEvent.callEvent();
++    // Folia start - Fix setRespawnLocation clearing player's spawn point
++    // When Cause.PLAYER_RESPAWN is used, this is a server-initiated spawn
++    // clearing (e.g., bed is obstructed), so we should not fire
++    // PlayerSpawnChangeEvent which could be cancelled by plugins.
++    boolean isServerInitiatedClear = cause == com.destroystokyo.paper.event.player.PlayerSetSpawnEvent.Cause.PLAYER_RESPAWN;
++    org.bukkit.event.player.PlayerSpawnChangeEvent dumbEvent = null;
++    if (!isServerInitiatedClear) {
++        dumbEvent = new org.bukkit.event.player.PlayerSpawnChangeEvent(
++            this.getBukkitEntity(),
++            spawnLoc,
++            respawnConfig != null && respawnConfig.forced(),
++            org.bukkit.event.player.PlayerSpawnChangeEvent.Cause.valueOf(cause.name())
++        );
++        dumbEvent.callEvent();
++    }
++    // Folia end - Fix setRespawnLocation clearing player's spawn point
+ 
+     com.destroystokyo.paper.event.player.PlayerSetSpawnEvent event = new com.destroystokyo.paper.event.player.PlayerSetSpawnEvent(
+         this.getBukkitEntity(),
+         cause,
+-        dumbEvent.getNewSpawn(),
+-        dumbEvent.isForced(),
++        // Folia start - Fix setRespawnLocation clearing player's spawn point
++        isServerInitiatedClear ? spawnLoc : dumbEvent.getNewSpawn(),
++        isServerInitiatedClear ? (respawnConfig != null && respawnConfig.forced()) : dumbEvent.isForced(),
++        // Folia end - Fix setRespawnLocation clearing player's spawn point
+         actuallyDisplayInChat,
+         actuallyDisplayInChat ? io.papermc.paper.adventure.PaperAdventure.asAdventure(SPAWN_SET_MESSAGE) : null
+     );
+-    event.setCancelled(dumbEvent.isCancelled());
++    // Folia start - Fix setRespawnLocation clearing player's spawn point
++    if (dumbEvent != null) {
++        event.setCancelled(dumbEvent.isCancelled());
++    }
++    // Folia end - Fix setRespawnLocation clearing player's spawn point
+     if (!event.callEvent()) {
+         return false;
+     }

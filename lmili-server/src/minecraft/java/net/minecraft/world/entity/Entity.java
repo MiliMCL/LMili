@@ -4450,9 +4450,14 @@ public abstract class Entity
         if (pitch != null) {
             this.setXRot(pitch.floatValue());
         }
+        // Lmili start - Fix #441: Preserve entity motion (delta movement) during teleport.
+        // When velocity is null, the entity's current delta movement is preserved.
+        // When velocity is non-null, the entity's delta movement is set to the given value.
+        // This ensures teleporting an entity does not lose its motion state.
         if (velocity != null) {
             this.setDeltaMovement(velocity);
         }
+        // Lmili end - Fix #441
         this.snapTo(pos.x, pos.y, pos.z);
         this.setOldPosAndRot();
         this.resetStoredPositions();

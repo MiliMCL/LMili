@@ -170,6 +170,13 @@ public class FishingHook extends Projectile {
         Player owner = this.getPlayerOwner();
         if (owner == null) {
             this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
+        // Folia start - region threading - allow dimension change
+        } else if (owner.level() != this.level()) {
+            // owner changed dimension (e.g. entered/left a nether portal);
+            // keep the bobber alive in its current world so the owner can
+            // reel it back in after returning; do not discard here
+            return;
+        // Folia end - region threading - allow dimension change
         } else if (this.level().isClientSide() || !this.shouldStopFishing(owner)) {
             if (this.onGround()) {
                 this.life++;
@@ -505,6 +512,12 @@ public class FishingHook extends Projectile {
     public int retrieve(final ItemStack rod, final net.minecraft.world.InteractionHand hand) {
         // Paper end - Add hand parameter to PlayerFishEvent
         Player owner = this.getPlayerOwner();
+        // Folia start - region threading - allow dimension change
+        if (owner != null && owner.level() != this.level()) {
+            // owner is in a different dimension; do not discard the bobber
+            return 0;
+        }
+        // Folia end - region threading - allow dimension change
         if (!this.level().isClientSide() && owner != null && !this.shouldStopFishing(owner)) {
             int dmg = 0;
             if (this.hookedIn != null) {

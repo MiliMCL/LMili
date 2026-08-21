@@ -50,12 +50,15 @@ import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull;
 import net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.WindCharge;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LevelEvent;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
+import org.bukkit.craftbukkit.event.CraftEventFactory;
 import org.jspecify.annotations.Nullable;
 
 public class WitherBoss extends Monster implements RangedAttackMob {
@@ -602,6 +605,31 @@ public class WitherBoss extends Monster implements RangedAttackMob {
     public boolean canBeAffected(final MobEffectInstance newEffect) {
         return (!newEffect.is(MobEffects.WITHER) || !this.level().paperConfig().entities.mobEffects.immuneToWitherEffect.wither) && super.canBeAffected(newEffect);
     }
+
+    // Paper start - Fix wither rose drop across dimensions
+    @Override
+    public boolean killedEntity(final ServerLevel level, final LivingEntity entity, final DamageSource source) {
+        if (level.getGameRules().get(GameRules.MOB_GRIEFING)) {
+            BlockPos pos = entity.blockPosition();
+            BlockState state = Blocks.WITHER_ROSE.defaultBlockState();
+            if (level.getBlockState(pos).isAir() && state.canSurvive(level, pos)) {
+                CraftEventFactory.handleBlockFormEvent(level, pos, state, Block.UPDATE_ALL, entity);
+                return true;
+            } else {
+                ItemEntity itemEntity = new ItemEntity(level, entity.getX(), entity.getY(), entity.getZ(), new ItemStack(Items.WITHER_ROSE));
+                // CraftBukkit start
+                org.bukkit.event.entity.EntityDropItemEvent event = new org.bukkit.event.entity.EntityDropItemEvent(entity.getBukkitEntity(), (org.bukkit.entity.Item) itemEntity.getBukkitEntity());
+                if (!event.callEvent()) {
+                    return true;
+                }
+                // CraftBukkit end
+                level.addFreshEntity(itemEntity);
+                return true;
+            }
+        }
+        return false;
+    }
+    // Paper end - Fix wither rose drop across dimensions
 
     private class WitherDoNothingGoal extends Goal {
         public WitherDoNothingGoal() {

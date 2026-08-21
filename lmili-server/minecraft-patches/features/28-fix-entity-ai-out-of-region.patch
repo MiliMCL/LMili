@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Thu, 11 Sep 2025 10:00:00 +0800
+Subject: [PATCH] Fix entity AI accessing out of region block, throwing exception
+
+Issue #203: Entity AI accessing out of region block, throwing exception.
+
+In Folia's region threading model, entity AI pathfinding can access blocks
+outside the current tick region, throwing exceptions. The pathfinding process
+creates a PathNavigationRegion with a radius around the mob's position that
+can extend beyond the current tick region. When WalkNodeEvaluator calls
+PathfindingContext.getPathTypeFromState(), it reads block data through the
+PathNavigationRegion without verifying tick region ownership. This allows
+the pathfinder to access blocks from another region's thread, causing
+IllegalStateException or other concurrency-related crashes.
+
+The fix adds a tick region ownership check in PathfindingContext.getPathTypeFromState()
+before accessing block state. If the position is not owned by the current tick
+region, it returns PathType.BLOCKED to prevent the pathfinder from using blocks
+it cannot safely access. This is the central choke point for all pathfinding
+block access, so the check here covers all pathfinder implementations (ground,
+flying, amphibious, water-bound, wall-climber).
+
+Additionally, the fix adds a tick region check in PathNavigationRegion.getBlockStateIfLoaded()
+to provide a second layer of defense for any code that accesses block states
+directly through the region during pathfinding.
+
+diff --git a/lmili-server/src/minecraft/java/net/minecraft/world/level/PathNavigationRegion.java b/lmili-server/src/minecraft/java/net/minecraft/world/level/PathNavigationRegion.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/lmili-server/src/minecraft/java/net/minecraft/world/level/PathNavigationRegion.java
++++ b/lmili-server/src/minecraft/java/net/minecraft/world/level/PathNavigationRegion.java
+@@ -97,6 +97,14 @@ public class PathNavigationRegion implements CollisionGetter {
+     @Nullable
+     @Override
+     public final BlockState getBlockStateIfLoaded(BlockPos pos) {
++        // Folia start - fix entity AI out of region block access
++        // Pathfinding may create a region that spans tick region boundaries.
++        // If the position is not owned by the current tick thread, return null
++        // to prevent cross-thread block access.
++        if (this.level instanceof net.minecraft.server.level.ServerLevel serverLevel && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, pos)) {
++            return null;
++        }
++        // Folia end - fix entity AI out of region block access
+         ChunkAccess chunk = getChunkIfLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+         return chunk == null ? null : chunk.getBlockState(pos);
+     }
+diff --git a/lmili-server/src/minecraft/java/net/minecraft/world/level/pathfinder/PathfindingContext.java b/lmili-server/src/minecraft/java/net/minecraft/world/level/pathfinder/PathfindingContext.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/lmili-server/src/minecraft/java/net/minecraft/world/level/pathfinder/PathfindingContext.java
++++ b/lmili-server/src/minecraft/java/net/minecraft/world/level/pathfinder/PathfindingContext.java
+@@ -24,9 +24,18 @@ public class PathfindingContext {
+     }
+
+     public PathType getPathTypeFromState(final int x, final int y, int z) {
+         BlockPos pos = this.mutablePos.set(x, y, z);
+-        return this.cache == null ? WalkNodeEvaluator.getPathTypeFromState(this.level, pos) : this.cache.getOrCompute(this.level, pos);
++        // Folia start - fix entity AI out of region block access
++        // The pathfinder may query blocks outside the current tick region when
++        // the PathNavigationRegion radius extends across region boundaries.
++        // Check tick region ownership before accessing block state to prevent
++        // cross-thread access exceptions.
++        if (this.level instanceof net.minecraft.server.level.ServerLevel serverLevel && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, pos)) {
++            return PathType.BLOCKED;
++        }
++        // Folia end - fix entity AI out of region block access
++        return this.cache == null ? WalkNodeEvaluator.getPathTypeFromState(this.level, pos) : this.cache.getOrCompute(this.level, pos);
+     }
+
+     public BlockState getBlockState(final BlockPos pos) {
+--
+2.39.2.windows.1

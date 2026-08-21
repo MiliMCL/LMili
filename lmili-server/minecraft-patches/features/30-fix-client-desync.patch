@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Tue, 6 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Fix client desync caused by delayed packet processing
+
+Issue #196: Client desync in relation to server-ticking.
+
+In Folia's region threading model, packets arriving on the network thread
+are scheduled for processing on the next tick of the entity's region via
+PacketUtils.ensureRunningOnSameThread(). The existing drainOnePacket()
+method in TickRegionData only processed ONE packet per player per call.
+When multiple packets queued up during high-traffic periods (combat, fast
+movement, etc.), they were spread across multiple intermediate tick cycles,
+each potentially delayed by the canContinue time budget check.
+
+This caused the ServerboundClientTickEndPacket to be processed up to one
+tick late, which in turn caused:
+  - Incorrect receivedMovementThisTick flag state
+  - Wrong knownMovement vector calculations
+  - Client-server state desync visible as position corrections
+
+The fix changes drainOnePacket() to drain ALL queued packets for each
+player in a single pass, using processQueuedPackets() instead of
+executeSinglePacket(). This ensures that when a region wakes up to
+process packets, the entire queue is emptied immediately, keeping the
+client and server in sync.
+
+diff --git a/src/minecraft/java/io/papermc/paper/threadedregions/TickRegions.java b/src/minecraft/java/io/papermc/paper/threadedregions/TickRegions.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/src/minecraft/java/io/papermc/paper/threadedregions/TickRegions.java
++++ b/src/minecraft/java/io/papermc/paper/threadedregions/TickRegions.java
+@@ -266,8 +266,17 @@ public final class TickRegions {
+                 if (!TickThread.isTickThreadFor(player)) {
+                     continue;
+                 }
+-                if (packetProcessor.executeSinglePacket()) {
+-                    hasPacketsNew |= packetProcessor.hasPackets();
++                // Draining all queued packets instead of just one to prevent client
++                // desync when multiple packets are queued during high-traffic periods.
++                // This is Folia issue #196: packets being processed one at a time
++                // caused the client tick end marker to be delayed by up to one tick.
++                packetProcessor.processQueuedPackets();
++            }
++
++            for (final ServerPlayer player : worldData.getLocalPlayers()) {
++                if (player.getBukkitEntity().packetProcessor.hasPackets()) {
++                    hasPacketsNew = true;
++                    break;
+                 }
+             }
+ 
+             if (!hasPacketsNew) {

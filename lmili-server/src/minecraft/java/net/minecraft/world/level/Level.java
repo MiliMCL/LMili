@@ -214,6 +214,11 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
 
     @Override
     public final <T extends Entity> List<T> getEntitiesOfClass(final Class<T> entityClass, final AABB boundingBox, final Predicate<? super T> predicate) {
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, boundingBox, "Cannot getEntities asynchronously"); // Folia - region threading
+        }
+        // Mili end
         Profiler.get().incrementCounter("getEntities");
         final List<T> ret = new java.util.ArrayList<>();
 
@@ -224,6 +229,11 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
 
     @Override
     public final List<Entity> moonrise$getHardCollidingEntities(final Entity entity, final AABB box, final Predicate<? super Entity> predicate) {
+        // Mili start - skip tick thread check for virtual threads
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, box, "Cannot getEntities asynchronously"); // Folia - region threading
+        }
+        // Mili end
         Profiler.get().incrementCounter("getEntities");
         final List<Entity> ret = new java.util.ArrayList<>();
 

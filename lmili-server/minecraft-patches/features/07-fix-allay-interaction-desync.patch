@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Fix Allay interaction desync on rejected interaction
+
+When two Allays are leashed together and moving, right-clicking an Allay
+can cause client inventory/equipment desynchronization. The root cause is
+that in handleInteract, the target interaction is guarded by:
+
+  target != null && TickThread.isTickThreadFor(target) && ...
+
+When this condition is false (e.g., the target is on a different tick
+thread region), the packet is silently ignored without sending any
+corrective inventory/equipment packets. The client may have already
+predicted the interaction (consuming an item or updating equipment),
+resulting in a visual desync that persists until the player opens/closes
+their inventory.
+
+This patch adds a resync path for the rejected interaction case:
+1. Resend the player's authoritative inventory/container state.
+2. If the target is a LivingEntity (Allay, horse, etc.), schedule an
+   equipment resync on the target entity's own region to ensure thread
+   safety.
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -3044,6 +3044,28 @@
+ 				}
+ 			}
+ 			// Paper start - PlayerUseUnknownEntityEvent
++			// Paper start - Fix Allay interaction desync on rejected interaction
++			else if (target != null) {
++				// The target exists but the interaction was rejected (wrong tick thread or outside world border).
++				// The client may have predicted the interaction and updated its local state, so we must
++				// resend the authoritative player inventory and target equipment to correct any desync.
++				InteractionHand resyncHand = packet.hand();
++				if (io.papermc.paper.util.MCUtil.clientPredictsInteraction(ServerGamePacketListenerImpl.this.player, target, ServerGamePacketListenerImpl.this.player.getItemInHand(resyncHand))) {
++					ServerGamePacketListenerImpl.this.player.containerMenu.sendAllDataToRemote();
++				} else {
++					ServerGamePacketListenerImpl.this.player.containerMenu.forceHeldSlot(resyncHand);
++				}
++				if (target instanceof LivingEntity) {
++					final Entity finalTarget = target;
++					target.getBukkitEntity().taskScheduler.schedule(
++						(Entity p) -> {
++							if (!finalTarget.isRemoved()) {
++								ServerGamePacketListenerImpl.this.send(new net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket(
++									finalTarget.getId(), java.util.Arrays.stream(net.minecraft.world.entity.EquipmentSlot.values())
++									.map((slot) -> com.mojang.datafixers.util.Pair.of(slot, ((LivingEntity) finalTarget).getItemBySlot(slot).copy()))
++									.collect(Collectors.toList()), true));
++							}
++						},
++						null, 0L
++					);
++				}
++			}
++			// Paper end - Fix Allay interaction desync on rejected interaction
+ 			else if (target == null) {
+ 				CraftEventFactory.callPlayerUseUnknownEntityEvent(ServerGamePacketListenerImpl.this.player, packet.entityId(), false, packet.hand(), packet.location());
+ 			}

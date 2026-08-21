@@ -217,20 +217,29 @@ public class RedStoneWireBlock extends Block {
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockState currState; blockPos.setWithOffset(pos, direction); // Folia - block updates in unloaded chunks
             RedstoneSide value = state.getValue(PROPERTY_BY_DIRECTION.get(direction));
-            if (value != RedstoneSide.NONE && (currState = (level instanceof net.minecraft.server.level.ServerLevel serverLevel && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, blockPos, 25) ? null : level.getBlockStateIfLoaded(blockPos))) != null && !currState.is(this)) { // Folia - block updates in unloaded chunks
+            if (value != RedstoneSide.NONE && (currState = (level instanceof net.minecraft.server.level.ServerLevel serverLevel && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, blockPos, 25) ? null : level.getBlockStateIfLoaded(blockPos))) != null && !currState.is(this)) { // Folia - block updates in unloaded chunks; fix cross-thread entity access
                 blockPos.move(Direction.DOWN);
-                BlockState blockStateDown = level.getBlockState(blockPos);
-                if (blockStateDown.is(this)) {
-                    BlockPos neighborPos = blockPos.relative(direction.getOpposite());
-                    level.neighborShapeChanged(direction.getOpposite(), blockPos, neighborPos, level.getBlockState(neighborPos), updateFlags, updateLimit);
+                // Folia start - fix cross-thread entity access: check thread ownership for below position
+                if (level instanceof net.minecraft.server.level.ServerLevel serverLevelDown && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevelDown, blockPos, 25)) {
+                    BlockState blockStateDown = level.getBlockStateIfLoaded(blockPos);
+                    if (blockStateDown != null && blockStateDown.is(this)) {
+                        BlockPos neighborPos = blockPos.relative(direction.getOpposite());
+                        BlockState neighborState = level.getBlockStateIfLoaded(neighborPos);
+                        if (neighborState != null) level.neighborShapeChanged(direction.getOpposite(), blockPos, neighborPos, neighborState, updateFlags, updateLimit);
+                    }
                 }
-
+                // Folia end - fix cross-thread entity access
                 blockPos.setWithOffset(pos, direction).move(Direction.UP);
-                BlockState blockStateUp = level.getBlockState(blockPos);
-                if (blockStateUp.is(this)) {
-                    BlockPos neighborPos = blockPos.relative(direction.getOpposite());
-                    level.neighborShapeChanged(direction.getOpposite(), blockPos, neighborPos, level.getBlockState(neighborPos), updateFlags, updateLimit);
+                // Folia start - fix cross-thread entity access: check thread ownership for above position
+                if (level instanceof net.minecraft.server.level.ServerLevel serverLevelUp && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevelUp, blockPos, 25)) {
+                    BlockState blockStateUp = level.getBlockStateIfLoaded(blockPos);
+                    if (blockStateUp != null && blockStateUp.is(this)) {
+                        BlockPos neighborPos = blockPos.relative(direction.getOpposite());
+                        BlockState neighborState = level.getBlockStateIfLoaded(neighborPos);
+                        if (neighborState != null) level.neighborShapeChanged(direction.getOpposite(), blockPos, neighborPos, neighborState, updateFlags, updateLimit);
+                    }
                 }
+                // Folia end - fix cross-thread entity access
             }
         }
     }

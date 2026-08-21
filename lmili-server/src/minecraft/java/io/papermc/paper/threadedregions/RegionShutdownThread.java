@@ -151,6 +151,13 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
 
     @Override
     public final void run() {
+        // Fix for issue #353: Region ticker disables before plugins, disallowing plugin cleanups in the world.
+        // The scheduler halt has already been initiated (non-blocking) by the initial stopServer() call
+        // from the main thread. We must call stopServer() here - which disables plugins - BEFORE waiting
+        // for the scheduler to fully terminate. This ensures plugins can still perform world cleanup
+        // operations while regions are in the process of halting (but not yet fully halted).
+        MinecraftServer.getServer().stopServer(); // stop part 1: most logic, kicking players, plugins, etc
+
         // await scheduler termination
         LOGGER.info("Awaiting scheduler termination for 60s...");
         if (TickRegions.getScheduler().halt(true, TimeUnit.SECONDS.toNanos(60L))) {
@@ -159,8 +166,6 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
             LOGGER.warn("Scheduler did not terminate within 60s, proceeding with shutdown anyways");
             TickRegions.getScheduler().dumpAliveThreadTraces("Did not shut down in time");
         }
-
-        MinecraftServer.getServer().stopServer(); // stop part 1: most logic, kicking players, plugins, etc
         // halt all chunk systems first so that any in-progress chunk generation stops
         LOGGER.info("Halting chunk systems...");
         for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
