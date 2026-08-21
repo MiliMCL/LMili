@@ -124,9 +124,9 @@ public final class RegionTickDispatcher {
     /**
      * 分派 region tick 任务 —— 主入口。
      */
-    public void dispatchTick(@NotNull final RegionTickContext context, final long tickCount) {
+    public void dispatchTick(@NotNull final RegionTickContext context) {
         if (this.shutdown.get()) return;
-        chunkDispatcher.dispatch(context, tickCount);
+        chunkDispatcher.dispatch(context);
     }
 
     /**

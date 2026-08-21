@@ -1,6 +1,8 @@
 package fun.bm.mili.lmili.thread.regiontick;
 
 import com.mojang.logging.LogUtils;
+import fun.bm.mili.lmili.thread.runtime.AdaptiveSlicer;
+import fun.bm.mili.lmili.thread.runtime.SliceCostCalculator;
 import fun.bm.mili.lmili.thread.runtime.generation.TickGeneration;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import io.papermc.paper.threadedregions.TickRegions;
@@ -51,6 +53,10 @@ public final class ChunkTickDispatcher {
     private final AsyncCatcherManager asyncCatcherManager;
     private final RegionDiagnostics diagnostics;
 
+    // P1: Adaptive Slicer 用于动态 slice 大小调整
+    private final AdaptiveSlicer adaptiveSlicer;
+    private final ConcurrentHashMap<Long, AdaptiveSlicer.RegionAdaptiveSlicer> regionSlicers = new ConcurrentHashMap<>();
+
     // 并行 chunk tick 追踪
     private final ConcurrentHashMap<Long, CompletableFuture<Void>> pendingChunkFutures = new ConcurrentHashMap<>();
 
@@ -68,6 +74,7 @@ public final class ChunkTickDispatcher {
         this.sliceSize = sliceSize;
         this.asyncCatcherManager = asyncCatcherManager;
         this.diagnostics = diagnostics;
+        this.adaptiveSlicer = new AdaptiveSlicer();
     }
 
     /**
@@ -159,11 +166,19 @@ public final class ChunkTickDispatcher {
      *   <li>单个 slice 失败不影响其他 slice</li>
      *   <li>旧 Generation 的迟到完成不会影响新 Generation</li>
      * </ul>
+     *
+     * <h3>P1 Adaptive Slicing</h3>
+     * <p>根据 {@link AdaptiveSlicer} 动态计算 slice 大小，
+     * 目标约 2-4ms estimated work/slice。
      */
     private void dispatchParallelVirtual(@NotNull final RegionTickContext context, final long[] chunkArray) {
         final long regionId = context.regionId;
         int total = chunkArray.length;
-        int sliceCount = Math.max(1, (total + sliceSize - 1) / sliceSize);
+
+        // P1: 使用 Adaptive Slicer 动态计算 slice 大小
+        int dynamicSliceSize = calculateDynamicSliceSize(regionId, total);
+        int actualSliceSize = Math.max(1, Math.min(sliceSize, dynamicSliceSize));
+        int sliceCount = Math.max(1, (total + actualSliceSize - 1) / actualSliceSize);
 
         long deadline = System.nanoTime() + TICK_INTERVAL_NANOS;
         TickGeneration gen = context.tryBeginTick(sliceCount, deadline);
@@ -191,15 +206,17 @@ public final class ChunkTickDispatcher {
         try {
             // 提交所有 slice 任务
             for (int i = 0; i < sliceCount; i++) {
-                int from = i * sliceSize;
-                int to = Math.min(from + sliceSize, total);
+                int from = i * actualSliceSize;
+                int to = Math.min(from + actualSliceSize, total);
                 long[] sliceArray = java.util.Arrays.copyOfRange(chunkArray, from, to);
                 RegionTickSlice slice = new RegionTickSlice(context, sliceArray, i, generationId);
                 final int sliceIndex = i;
+                final int chunksInSlice = to - from;
 
                 sliceFutures[i] = CompletableFuture.runAsync(() -> {
                     // 在虚拟线程中设置 region data 回退
                     RegionDataThreadLocal.setCurrent(regionData);
+                    long sliceStartNanos = System.nanoTime();
                     try {
                         RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
                         if (executor != null) {
@@ -211,6 +228,9 @@ public final class ChunkTickDispatcher {
                         context.failSlice(generationId, throwable);
                     } finally {
                         RegionDataThreadLocal.clear();
+                        // P1: 记录 slice 执行时间用于 Adaptive Slicing
+                        long sliceElapsedNanos = System.nanoTime() - sliceStartNanos;
+                        recordSliceExecution(regionId, chunksInSlice, sliceElapsedNanos);
                         context.arriveSlice(generationId);
                     }
                 }, poolManager.getExecutor());
@@ -258,6 +278,10 @@ public final class ChunkTickDispatcher {
      *   <li>单个 slice 失败不影响其他 slice</li>
      *   <li>旧 Generation 的迟到完成不会影响新 Generation</li>
      * </ul>
+     *
+     * <h3>P1 Adaptive Slicing</h3>
+     * <p>根据 {@link AdaptiveSlicer} 动态计算 slice 大小，
+     * 目标约 2-4ms estimated work/slice。
      */
     private void dispatchParallelPlatform(@NotNull final RegionTickContext context, final long[] chunkArray) {
         RegionTickWorker[] workers = poolManager.getWorkers();
@@ -272,8 +296,18 @@ public final class ChunkTickDispatcher {
             return;
         }
 
+        final long regionId = context.regionId;
+        int total = chunkArray.length;
+
+        // P1: 使用 Adaptive Slicer 动态计算 slice 大小
+        int dynamicSliceSize = calculateDynamicSliceSize(regionId, total);
+        int actualSliceSize = Math.max(1, Math.min(sliceSize, dynamicSliceSize));
+
+        RegionTickSlice[] slices = RegionTickSlice.fromChunkArray(context, chunkArray, actualSliceSize, 0);
+        int sliceCount = slices.length;
+
         long deadline = System.nanoTime() + TICK_INTERVAL_NANOS;
-        TickGeneration gen = context.tryBeginTick(1, deadline);
+        TickGeneration gen = context.tryBeginTick(sliceCount, deadline);
         if (gen == null) {
             LOGGER.debug("[RegionTickPool] Region #{} platform tick skipped — already ticking",
                     context.regionId);
@@ -282,14 +316,8 @@ public final class ChunkTickDispatcher {
 
         final long generationId = gen.generationId();
 
-        RegionTickSlice[] slices = RegionTickSlice.fromChunkArray(context, chunkArray, sliceSize, generationId);
-        int sliceCount = slices.length;
-
-        // 重新创建正确 sliceCount 的 Generation
-        Gen correctedGen = context.tryBeginTick(sliceCount, deadline);
-        if (correctedGen == null) {
-            // 已经开始了，继续使用之前的 generation
-        }
+        // 使用正确的 generationId 重新创建 slices
+        slices = RegionTickSlice.fromChunkArray(context, chunkArray, actualSliceSize, generationId);
 
         try {
             // 贪心负载均衡分发给 workers
@@ -380,5 +408,39 @@ public final class ChunkTickDispatcher {
      */
     public int getTotalTimeouts() {
         return totalTimeouts.get();
+    }
+
+    // ---- P1: Adaptive Slicing 支持 ----
+
+    /**
+     * 获取指定 Region 的 AdaptiveSlicer。
+     */
+    public AdaptiveSlicer.RegionAdaptiveSlicer getRegionSlicer(long regionId) {
+        return regionSlicers.computeIfAbsent(regionId,
+                id -> new AdaptiveSlicer.RegionAdaptiveSlicer(id, 0.1));
+    }
+
+    /**
+     * 计算动态 slice 大小（基于历史执行时间）。
+     *
+     * @param regionId     Region ID
+     * @param totalChunks  总 chunk 数
+     * @return 推荐的每个 slice 的 chunk 数量
+     */
+    public int calculateDynamicSliceSize(long regionId, int totalChunks) {
+        AdaptiveSlicer.RegionAdaptiveSlicer slicer = getRegionSlicer(regionId);
+        return slicer.getChunksPerSlice();
+    }
+
+    /**
+     * 记录一次 slice 的执行时间，用于更新预测。
+     *
+     * @param regionId        Region ID
+     * @param chunksInSlice   本次 slice 包含的 chunk 数
+     * @param executionNanos  实际执行时间（纳秒）
+     */
+    public void recordSliceExecution(long regionId, int chunksInSlice, long executionNanos) {
+        AdaptiveSlicer.RegionAdaptiveSlicer slicer = getRegionSlicer(regionId);
+        slicer.recordSliceExecution(chunksInSlice, executionNanos / 1_000_000.0);
     }
 }
