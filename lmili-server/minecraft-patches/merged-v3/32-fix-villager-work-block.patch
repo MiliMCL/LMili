@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Thu, 4 Mar 2026 14:00:00 +0800
+Subject: [PATCH] Fix Villager work block identification issues in Folia region threading
+
+Issue #127: Villagers identify work block problems.
+
+In Folia's region threading model, villager AI behaviors that handle work block
+(job site/POI) identification can access POI data across region boundaries. The
+PoiManager enforces thread ownership via TickThread.ensureTickThread() in its
+get/getOrLoad/getOrCreate methods. When a villager near a region boundary tries
+to search for, validate, or acquire a POI in an adjacent region, the thread
+check throws IllegalStateException, causing villagers to fail to identify their
+work blocks properly.
+
+This fix addresses three code paths:
+
+1. AcquirePoi: The POI search (PoiAccess.findNearestPoiPositions) performs a
+   BFS over chunk sections around the villager. When the search radius extends
+   into an adjacent region, PoiManager.getOrLoad() throws. The fix adds a tick
+   region ownership check before the search, and filters out any POI positions
+   that are not owned by the current tick thread.
+
+2. ValidateNearbyPoi: This behavior checks if a stored POI still exists by
+   calling poiLevel.getPoiManager().exists(). When the POI is in a different
+   tick region, this call throws. The fix adds a tick region check and skips
+   validation if the POI is not accessible from the current thread.
+
+3. AssignProfessionFromJobSite: This behavior looks up the POI type at a
+   position to determine the villager's profession. When the POI is in a
+   different tick region, the getType() call throws. The fix adds a tick
+   region check before the lookup.
+
+diff --git a/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/AcquirePoi.java b/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
++++ bl/mili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
+@@ -94,7 +94,16 @@ public class AcquirePoi {
+                         };
+                         // Paper start - optimise POI searches
+                         java.util.List<Pair<Holder<PoiType>, BlockPos>> poiPositionsRaw = new java.util.ArrayList<>();
+-                        ca.spottedleaf.moonrise.patches.poi_lookup.PoiAccess.findNearestPoiPositions(poiManager, poiType, cacheTest, body.blockPosition(), SCAN_RANGE, Double.MAX_VALUE, PoiManager.Occupancy.HAS_SPACE, ca.spottedleaf.moonrise.patches.poi_lookup.PoiAccess.LOAD_FOR_SEARCHING, 5, poiPositionsRaw);
++                        // Folia start - fix villager work block identification
++                        // Only search for POIs if the current tick thread owns the villager's position.
++                        // The BFS in findNearestPoiPositions may cross region boundaries, causing
++                        // TickThread.ensureTickThread() to throw when accessing PoiManager off-region.
++                        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, body.blockPosition())) {
++                            ca.spottedleaf.moonrise.patches.poi_lookup.PoiAccess.findNearestPoiPositions(poiManager, poiType, cacheTest, body.blockPosition(), SCAN_RANGE, Double.MAX_VALUE, PoiManager.Occupancy.HAS_SPACE, ca.spottedleaf.moonrise.patches.poi_lookup.PoiAccess.LOAD_FOR_SEARCHING, 5, poiPositionsRaw);
++                        }
++                        // Folia end - fix villager work block identification
++
+                         Set<Pair<Holder<PoiType>, BlockPos>> poiPositions = new java.util.HashSet<>(poiPositionsRaw.size());
+                         for (Pair<Holder<PoiType>, BlockPos> pair : poiPositionsRaw) {
+                             if (validPoi.test(level, pair.getSecond())) {
+@@ -106,7 +115,16 @@ public class AcquirePoi {
+                         Path path = findPathToPois(body, poiPositions);
+                         if (path != null && path.canReach()) {
+                             BlockPos targetPos = path.getTarget();
+-                            poiManager.getType(targetPos).ifPresent(type -> {
++                            // Folia start - fix villager work block identification
++                            // Filter out POIs that are not owned by the current tick thread.
++                            // getType() calls getOrLoad() which has TickThread.ensureTickThread() check
++                            // that throws when the POI is in a different region.
++                            if (level instanceof net.minecraft.server.level.ServerLevel targetLevel && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(targetLevel, targetPos)) {
++                                // POI is in a different region; skip it to avoid cross-thread access
++                                return true;
++                            }
++                            // Folia end - fix villager work block identification
++                            poiManager.getType(targetPos).ifPresent(type -> { // Folia - fix villager work block identification
+                                 poiManager.take(poiType, (t, poiPos) -> poiPos.equals(targetPos), targetPos, 1);
+                                 toAcquire.set(GlobalPos.of(level.dimension(), targetPos));
+                                 onPoiAcquisitionEvent.ifPresent(event -> level.broadcastEntityEvent(body, event));
+@@ -114,7 +132,7 @@ public class AcquirePoi {
+                                 level.debugSynchronizers().updatePoi(targetPos);
+                             });
+                         } else {
+-                            for (Pair<Holder<PoiType>, BlockPos> p : poiPositions) {
++                            for (Pair<Holder<PoiType>, BlockPos> p : poiPositions) { // Folia - fix villager work block identification
+                                 batchCache.computeIfAbsent(p.getSecond().asLong(), key -> new AcquirePoi.JitteredLinearRetry(random, timestamp));
+                             }
+                         }
+diff --git a/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java b/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java
++++ b/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java
+@@ -25,7 +25,17 @@ public class ValidateNearbyPoi {
+             GlobalPos globalPos = i.get(memory);
+             BlockPos pos = globalPos.pos();
+             if (level.dimension() == globalPos.dimension() && pos.closerToCenterThan(body.position(), MAX_DISTANCE)) {
+-                ServerLevel poiLevel = level.getServer().getLevel(globalPos.dimension());
++                // Folia start - fix villager work block identification
++                // Check tick region ownership before accessing POI data.
++                // If the POI is in a different tick region, skip validation to avoid
++                // TickThread.ensureTickThread() exceptions. The POI will be validated
++                // later when the villager moves to the correct region.
++                if (level instanceof net.minecraft.server.level.ServerLevel serverLevel && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, pos)) {
++                    return true;
++                }
++                // Folia end - fix villager work block identification
++
++                ServerLevel poiLevel = level.getServer().getLevel(globalPos.dimension()); // Folia - fix villager work block identification
+                 if (poiLevel == null || !poiLevel.getPoiManager().exists(pos, poiType)) {
+                     memory.erase();
+                 } else if (bedIsOccupied(poiLevel, pos, body)) {
+diff --git a/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java b/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
++++ b/lmili-server/src/minecraft/java/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
+@@ -32,8 +32,18 @@ public class AssignProfessionFromJobSite {
+ 
+                         MinecraftServer server = level.getServer();
+-                        Optional.ofNullable(server.getLevel(pos.dimension()))
+-                            .flatMap(l -> l.getPoiManager().getType(pos.pos()))
++                        // Folia start - fix villager work block identification
++                        // Check tick region ownership before accessing POI data.
++                        // getType() calls getOrLoad() which has TickThread.ensureTickThread() check
++                        // that throws when the POI is in a different region.
++                        Optional<net.minecraft.server.level.ServerLevel> posLevel = Optional.ofNullable(server.getLevel(pos.dimension()));
++                        if (posLevel.isPresent() && level instanceof net.minecraft.server.level.ServerLevel serverLevel
++                            && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, pos.pos())) {
++                            posLevel = Optional.empty();
++                        }
++                        posLevel
++                            .flatMap(l -> l.getPoiManager().getType(pos.pos()))
++                        // Folia end - fix villager work block identification
+                             .flatMap(
+                                 poiType -> BuiltInRegistries.VILLAGER_PROFESSION
+                                     .listElements()
+--
+2.39.2.windows.1

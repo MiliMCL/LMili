@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Tue, 6 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Fix entity moves to position outside of region
+
+Issue #199: Entity moves to position outside of region, throwing exception.
+
+In Folia's region threading model, an entity must never have its position
+set to coordinates outside the region it currently belongs to. If this
+happens the engine throws IllegalStateException from TickThread.mainThread
+checks, which crashes the tick thread and can lead to entity corruption
+or server instability.
+
+The existing guard (added by Luminol/Lmili) inside Entity.move() only
+covers the move() code path and is gated behind
+FoliaEntityMovingFixConfig.enabled which defaults to false.  Several
+other code paths still call setPosRaw() / setPos() / snapTo() without
+any region validation:
+
+  - Entity.setPosRaw()  -- the lowest-level position setter, used by
+    snapTo(), teleportSetPosition(), absMoveTo() and many other callers
+  - Entity Entity.noPhysics path inside move() also bypasses the earlier
+    guard when the config flag is off
+
+This patch adds a region-boundary check directly inside setPosRaw() so
+that EVERY position update is validated, regardless of which API method
+was used to trigger it.  When a violation is detected an
+EntityMoveOutOfRegionException is thrown; this exception is already
+handled in Level.guardEntityTick() which schedules an async teleport to
+the target region so the entity continues ticking safely on the correct
+thread.
+
+The new check is intentionally placed inside the posChanged block and
+only fires on the tick thread (TickThread.isTickThread()) so that
+cross-region teleport tasks -- which run on the destination region's tick
+thread -- are not affected.
+
+diff --git a/src/minecraft/java/net/minecraft/world/entity/Entity.java b/src/minecraft/java/net/minecraft/world/entity/Entity.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/src/minecraft/java/net/minecraft/world/entity/Entity.java
++++ b/src/minecraft/java/net/minecraft/world/entity/Entity.java
+@@ -6117,6 +6117,19 @@ public abstract class Entity
+         }
+         // Paper end - Block invalid positions and bounding box
+         boolean posChanged = this.position.x != x || this.position.y != y || this.position.z != z;
+         if (posChanged) { // Folia - region threading
++            // Lmili start - Fix #199: Entity moves to position outside of region
++            // This check covers ALL code paths (move, snapTo, teleportSetPosition,
++            // absMoveTo, etc.) because they all funnel through setPosRaw.
++            if (this.level != null && !this.isRemoved()) {
++                if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) {
++                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, new Vec3(x, y, z))) {
++                        throw new fun.bm.mili.lmili.utils.EntityMoveOutOfRegionException(this, new Vec3(x - this.position.x, y - this.position.y, z - this.position.z), MoverType.SELF);
++                    }
++                }
++            }
++            // Lmili end - Fix #199
+             synchronized (this.posLock) { // Paper - detailed watchdog information
+                 this.position = new Vec3(x, y, z);
+             } // Paper - detailed watchdog information

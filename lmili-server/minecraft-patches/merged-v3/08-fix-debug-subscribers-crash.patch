@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Fix ServerDebugSubscribers ConcurrentModificationException
+
+Fix issue #472: Server crash when using debug functionality under Folia's
+region threading model. The tick() method modified HashMap/ArrayList
+while broadcastToAll() iterated over them from region threads.
+
+Fix: Use ConcurrentHashMap with CopyOnWriteArrayList values and atomic
+map swap in tick() for lock-free reads from region threads.
+
+diff --git a/net/minecraft/util/debug/ServerDebugSubscribers.java b/net/minecraft/util/debug/ServerDebugSubscribers.java
+--- a/net/minecraft/util/debug/ServerDebugSubscribers.java
++++ b/net/minecraft/util/debug/ServerDebugSubscribers.java
+@@ -1,56 +1,60 @@
+ package net.minecraft.util.debug;
+ 
+-import java.util.ArrayList;
+-import java.util.HashMap;
+-import java.util.List;
+-import java.util.Map;
+-import java.util.Set;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.CopyOnWriteArrayList;
+ import net.minecraft.SharedConstants;
+ import net.minecraft.network.protocol.Packet;
+ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.server.players.NameAndId;
+ 
+ public class ServerDebugSubscribers {
+     private final MinecraftServer server;
+-    private final Map<DebugSubscription<?>, List<ServerPlayer>> enabledSubscriptions = new HashMap<>();
++    private volatile Map<DebugSubscription<?>, List<ServerPlayer>> enabledSubscriptions = new ConcurrentHashMap<>(); // Mili - volatile for atomic swap, ConcurrentHashMap for thread safety
+ 
+     public ServerDebugSubscribers(final MinecraftServer server) {
+         this.server = server;
+     }
+ 
+     private List<ServerPlayer> getSubscribersFor(final DebugSubscription<?> subscription) {
+         return this.enabledSubscriptions.getOrDefault(subscription, List.of());
+     }
+ 
+     public void tick() {
+-        this.enabledSubscriptions.values().forEach(List::clear);
++        // Mili start - build a new map and atomically swap to avoid ConcurrentModificationException
++        // under Folia's region threading model. Readers (broadcastToAll) see either the old or new
++        // map, never a partially-modified one.
++        Map<DebugSubscription<?>, List<ServerPlayer>> newSubscriptions = new ConcurrentHashMap<>();
+ 
+         for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
+             for (DebugSubscription<?> subscription : player.debugSubscriptions()) {
+-                this.enabledSubscriptions.computeIfAbsent(subscription, s -> new ArrayList<>()).add(player);
++                newSubscriptions.computeIfAbsent(subscription, s -> new CopyOnWriteArrayList<>()).add(player);
+             }
+         }
+ 
+-        this.enabledSubscriptions.values().removeIf(List::isEmpty);
++        this.enabledSubscriptions = newSubscriptions;
++        // Mili end
+     }
+ 
+     public void broadcastToAll(final DebugSubscription<?> subscription, final Packet<?> packet) {
+         for (ServerPlayer player : this.getSubscribersFor(subscription)) {
+             player.connection.send(packet);
+         }
+     }
+ 
+     public Set<DebugSubscription<?>> enabledSubscriptions() {
+         return Set.copyOf(this.enabledSubscriptions.keySet());
+     }
+ 
+     public boolean hasAnySubscriberFor(final DebugSubscription<?> subscription) {
+         return !this.getSubscribersFor(subscription).isEmpty();
+     }
+ 
+     public boolean hasRequiredPermissions(final ServerPlayer player) {
+         NameAndId nameAndId = player.nameAndId();
+         return SharedConstants.IS_RUNNING_IN_IDE && this.server.isSingleplayerOwner(nameAndId) || this.server.getPlayerList().isOp(nameAndId);
+     }
+ }

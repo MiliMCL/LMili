@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Sat, 3 Jan 2026 14:35:56 +0800
+Subject: [PATCH] Fix EntityDamageByEntityEvent damager for ender pearl teleport
+
+Issue #438: EntityDamageByEntityEvent has incorrect damager instance
+when player uses ender pearls.
+
+In the non-Folia teleport path, the DamageSource for the 5.0F teleport
+damage used eventEntityDamager(this) where "this" is the
+ThrownEnderpearl projectile.  Bukkit resolves the event damager as
+eventEntityDamager() if non-null, so plugins saw the ender pearl
+entity as the attacker instead of the player who threw it.
+
+The Folia-region-threading path already used eventEntityDamager(player),
+which is the correct behavior.  This patch aligns the non-Folia path
+to use the same player reference.
+
+diff --git a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+@@ -221,7 +221,7 @@
+                         // CraftBukkit end - moved up
+                         if (newOwner != null) {
+                             newOwner.resetFallDistance();
+                             newOwner.resetCurrentImpulseContext();
+-                            newOwner.hurtServer(player.level(), this.damageSources().enderPearl().eventEntityDamager(this), 5.0F); // CraftBukkit // Paper - fix DamageSource API
++                            newOwner.hurtServer(player.level(), this.damageSources().enderPearl().eventEntityDamager(player), 5.0F); // CraftBukkit // Paper - fix DamageSource API
+                         }
+
+                         this.playSound(level, teleportPos);

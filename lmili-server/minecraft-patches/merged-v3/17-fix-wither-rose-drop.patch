@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Thu, 4 Sep 2025 15:00:00 +0800
+Subject: [PATCH] Fix wither rose not dropping when wither skull passes through portal
+
+Issue #388: Wither roses do not drop from mobs if wither's skull has flown
+through a portal.
+
+Root Cause:
+When a WitherSkull passes through a Nether/End portal and kills a mob in
+another dimension, the WitherBoss (in the original dimension) is the causing
+entity of the damage. In LivingEntity.die(), getKillCredit() is called to
+determine the killer. However, getKillCredit() uses
+TickThread.isTickThreadFor() to verify thread ownership, which fails when
+the WitherBoss is in a different region/thread (different dimension). This
+causes getKillCredit() to return null, and createWitherRose(null) does
+nothing because null instanceof WitherBoss is false.
+
+This patch fixes the issue by:
+1. Overriding killedEntity() in WitherBoss to directly handle the wither
+   rose drop at the victim's location, bypassing the getKillCredit() call
+   that fails across dimensions
+2. Using the ServerLevel parameter from killedEntity() which is the
+   victim's level, ensuring the rose drops in the correct dimension
+3. Respecting the MOB_GRIEFING game rule
+4. Handling both block placement (when possible) and item drop (fallback)
+5. Firing appropriate CraftBukkit events for plugin compatibility
+
+diff --git a/net/minecraft/world/entity/boss/wither/WitherBoss.java b/net/minecraft/world/entity/boss/wither/WitherBoss.java
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000000 100644
+--- a/net/minecraft/world/entity/boss/wither/WitherBoss.java
++++ b/net/minecraft/world/entity/boss/wither/WitherBoss.java
+@@ -49,6 +49,7 @@
+ import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull;
+ import net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.WindCharge;
+ import net.minecraft.world.item.Items;
++import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.LevelEvent;
+@@ -56,6 +57,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import org.bukkit.craftbukkit.event.CraftEventFactory;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class WitherBoss extends Monster implements RangedAttackMob {
+@@ -603,6 +605,31 @@
+         return (!newEffect.is(MobEffects.WITHER) || !this.level().paperConfig().entities.mobEffects.immuneToWitherEffect.wither) && super.canBeAffected(newEffect);
+     }
+ 
++    // Paper start - Fix wither rose drop across dimensions
++    @Override
++    public boolean killedEntity(final ServerLevel level, final LivingEntity entity, final DamageSource source) {
++        if (level.getGameRules().get(GameRules.MOB_GRIEFING)) {
++            BlockPos pos = entity.blockPosition();
++            BlockState state = Blocks.WITHER_ROSE.defaultBlockState();
++            if (level.getBlockState(pos).isAir() && state.canSurvive(level, pos)) {
++                CraftEventFactory.handleBlockFormEvent(level, pos, state, Block.UPDATE_ALL, entity);
++                return true;
++            } else {
++                ItemEntity itemEntity = new ItemEntity(level, entity.getX(), entity.getY(), entity.getZ(), new ItemStack(Items.WITHER_ROSE));
++                // CraftBukkit start
++                org.bukkit.event.entity.EntityDropItemEvent event = new org.bukkit.event.entity.EntityDropItemEvent(entity.getBukkitEntity(), (org.bukkit.entity.Item) itemEntity.getBukkitEntity());
++                if (!event.callEvent()) {
++                    return true;
++                }
++                // CraftBukkit end
++                level.addFreshEntity(itemEntity);
++                return true;
++            }
++        }
++        return false;
++    }
++    // Paper end - Fix wither rose drop across dimensions
++
+     private class WitherDoNothingGoal extends Goal {
+         public WitherDoNothingGoal() {
+             this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.JUMP, Goal.Flag.LOOK));

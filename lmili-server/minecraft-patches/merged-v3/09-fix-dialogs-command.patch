@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xucy10 <xucy0609@gmail.com>
+Date: Mon, 01 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Fix dialogs command
+
+Uncomment DialogCommand.register to enable the /dialog show and /dialog clear
+commands. The dialog system only sends packets to players and does not require
+region-threaded operations, so it is safe to re-enable.
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -208,7 +208,7 @@
+         DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO // Lmili - Add back read-only datapack command
+         //DebugCommand.register(this.dispatcher); // Folia - region threading - TODO
+         DefaultGameModeCommands.register(this.dispatcher);
+-        //DialogCommand.register(this.dispatcher, context); // Folia - region threading - TODO
++        DialogCommand.register(this.dispatcher, context); // Folia - region threading - TODO // Lmili - Fix dialogs command
+         DifficultyCommand.register(this.dispatcher);
+         EffectCommands.register(this.dispatcher, context);
+         EmoteCommands.register(this.dispatcher);
+--
