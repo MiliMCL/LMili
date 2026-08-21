@@ -62,9 +62,43 @@ Minecraft（原版）
 
 ## 核心特性
 
+### Parallel Simulation Runtime — 并行模拟运行时
+
+LMili 最新的架构创新。从 Folia 并行 Tick 优化核心演进为完整的并行模拟运行时，提供严格并发语义、生命周期管理、依赖调度和动态负载均衡。
+
+#### P0: Tick Generation 生命周期
+
+- **状态机**：CREATED → RUNNING → DEADLINE_EXCEEDED → DRAINING → COMPLETED/CANCELLED
+- **Generation ID 单调递增**：任务必须捕获创建时的 generation
+- **Late Completion 隔离**：旧 generation 任务无法影响新 generation
+- **超时 ≠ 任务停止**：cancel(true) 是 interrupt request 仅此而已
+- **Draining 状态**：已进入 draining 的任务仍可完成，但新任务无法提交
+
+#### P1: Unified Scheduler Runtime
+
+- **统一任务抽象** `RuntimeTask`：所有任务统一接口，包含 taskId、regionId、generationId、deadline、priority、state
+- **Work Stealing with LocalDeque**：LIFO 本地执行 + FIFO 窃取，使用 `AtomicStampedReference` 防止 ABA 问题
+- **Deadline Scheduler**：`deadline = previousDeadline + tickIntervalNanos`，防止 Tick 漂移
+- **Dynamic Slice Cost**：加权计算 entity/blockEntity/scheduledTick 数量，EWMA 预测
+- **Adaptive Slicing**：目标 ~2-4ms estimated work per slice（非固定 chunks/slice）
+- **Worker Utilization 可观测**：忙碌/空闲时间、窃取统计、队列深度追踪
+
+#### P2: Dependency-aware Tick DAG
+
+- **Region 所有权系统**：每个对象必须有明确 Owner，非 Owner 线程不得直接修改 Region state
+- **跨 Region 消息**：通过 `CrossRegionMessage` + `RegionMailbox` 实现安全通信
+- **并行冲突检测器**：7 种冲突类型检测（CROSS_REGION_ACCESS、SHARED_OBJECT_ACCESS 等）
+- **运行时全指标**：TPS、MSPT、P50/P95/P99、Queue Size、Worker Utilization、Steal Count、Late Completion Count
+
+#### P3: Entity Parallel Simulation
+
+- **分阶段 Entity Tick**：AI → Movement → Sensors → Collision → Brain → Commit
+- **Entity 依赖图**：表达实体间碰撞、骑乘、攻击等依赖关系
+- **拓扑排序执行**：保证依赖关系前提下最大化并行度
+
 ### RegionTickPool — 独立 tick 调度增强
 
-LMili 最核心的架构创新。将 Folia "每区域独占一线程"的模型替换为**共享 worker 池 + 优先级调度**，显著减少大量空闲 region 时的 CPU 占用。
+LMili 经典的架构创新。将 Folia "每区域独占一线章"的模型替换为**共享 worker 池 + 优先级调度**，显著减少大量空闲 region 时的 CPU 占用。
 
 - **Virtual Thread 后端**：基于 JDK 25 虚拟线程，以同步风格编写异步逻辑，`awaitCrossRegion` 跨区挂起不阻塞平台线程
 - **DAG 并行调度**：`DagExecutionEngine` 非阻塞回调驱动，`CompiledDag` 不可变编译后 DAG，`ConflictGraph` 稀疏冲突图替代 O(n²) 矩阵
@@ -228,15 +262,22 @@ Mili/
 │       ├── utils/             #   工具类（并发数据结构、网络优化、内存管理）
 │       ├── villager/          #   村民优化器（lobotomize + 智能补货）
 │       └── lmili/             #   核心实现子树
-│           ├── thread/        #     调度器核心（39 个文件）
-│           │   ├── regiontick/  #   RegionTick 调度实现
-│           │   │   ├── dag/       #   DAG 依赖图（SystemGraph、ConflictGraph、CompiledDag）
-│           │   │   ├── executor/  #   执行器（DagExecutionEngine、ModernDagTickExecutor）
-│           │   │   └── suspend/   #   虚拟线程工厂
-│           │   └── scheduler/   #   新调度系统（MiliScheduler、WorkStealing、VirtualThread）
-│           │       ├── api/      #   公共接口（MiliScheduler、TaskHandle、EntityScheduler）
-│           │       ├── execute/  #   执行组件（VirtualThreadPool、RegionQueue、BlockingTaskIsolation）
-│           │       └── internal/ #   内部实现（ObjectPool、PerformanceMetrics、ExecutionContext）
+│           ├── thread/        #     调度器核心
+│           │   ├── regiontick/  #     RegionTick 调度实现
+│           │   │   ├── dag/       #     DAG 依赖图（SystemGraph、ConflictGraph、CompiledDag）
+│           │   │   ├── executor/  #     执行器（DagExecutionEngine、ModernDagTickExecutor）
+│           │   │   └── suspend/   #     虚拟线程工厂
+│           │   ├── scheduler/   #     新调度系统（MiliScheduler、WorkStealing、VirtualThread）
+│           │   │   ├── api/      #     公共接口（MiliScheduler、TaskHandle、EntityScheduler）
+│           │   │   ├── execute/  #     执行组件（VirtualThreadPool、RegionQueue、BlockingTaskIsolation）
+│           │   │   └── internal/ #     内部实现（ObjectPool、PerformanceMetrics、ExecutionContext）
+│           │   └── runtime/     #     Parallel Simulation Runtime（P0-P4）
+│           │       ├── generation/ #   Tick Generation 生命周期
+│           │       ├── ownership/  #   Region 所有权系统
+│           │       ├── message/    #   跨 Region 消息与邮箱
+│           │       ├── conflict/   #   并行冲突检测器
+│           │       ├── metrics/    #   运行时指标收集
+│           │       └── entity/     #   Entity 并行模拟
 │           ├── config/        #     ConfigManager + 50+ 配置模块
 │           ├── functions/     #     状态栏功能（TPS/Region/Memory Bar）
 │           ├── commands/      #     /lmiconfig、/lmibar 命令
@@ -258,12 +299,32 @@ RegionTickBootstrap.init()
     │       .build() → MiliSchedulerImpl
     └── Mili.registerScheduler(adapter)    ← 注册公共 API
 
+Parallel Simulation Runtime（P0-P4）:
+UnifiedRuntime
+    ├── DeadlineScheduler         ← 无 Tick 漂移调度
+    ├── SchedulerWorker[]         ← Worker 池
+    │   ├── WorkStealingDeque    ← 本地 LIFO + 窃取 FIFO
+    │   └── WorkerUtilization    ← 利用率追踪
+    ├── AdaptiveSlicer           ← 动态 slice 大小（~2-4ms）
+    ├── SliceCostCalculator      ← 成本预测（EWMA）
+    ├── RegionOwnership          ← Region 所有权系统
+    ├── RegionMailbox            ← 跨 Region 消息邮箱
+    ├── ParallelConflictDetector ← 并行冲突检测
+    └── RuntimeMetrics           ← 运行时全指标
+
 线程模型：
 RegionTickDispatcher
     └── MiliScheduler.submit(RegionTask)
             └── WorkStealingCoordinator.submit(task)
                     └── RegionQueue ──(work-stealing)──▶ VirtualThreadPool (virtual threads)
                                                                     └── Carrier Threads → CPU Cores
+
+Parallel Runtime:
+            submit(RuntimeTask)
+                    └── UnifiedRuntime
+                            └── selectWorker() → WorkStealingDeque.push()
+                                                    └── Worker.execute()
+                                                            └── (idle) → steal from others
 ```
 
 ---
@@ -281,7 +342,7 @@ Mili 提供 TOML 配置文件（纯 Java night-config 解析实现）：
 | 类别 | 说明 | 代表模块 |
 |------|------|----------|
 | `function` | 游戏机制与实用功能 | `LanguageConfig`、`TpsBarConfig`、`RegionBarConfig`、`MembarConfig`、`ReplayAPIConfig`、`BytebufProtocolConfig`、`VillagerTradeConfig`、`TechnicalSurvivalModeConfig`、`RedStoneConfig`、`PlayerHeatmapConfig`、`PerformanceMonitorConfig`、`ContainerExpansionConfig`、`AsyncKeepaliveConfig`、`SecureSeedConfig`、`RegionFormatConfig`、`PortalRateLimiterConfig`、`TripwireBehaviorConfig` |
-| `experiment` | 实验性性能/并发功能 | **`RegionTickPoolConfig`**（核心调度增强）、`RegionBalancerConfig`、`CrossRegionHelperConfig`、`GlobalEntitiesCounter`、`EntityDamageSourceTraceConfig`、`DisableEntityCatchConfig`、`DisableAsyncCatcherConfig` |
+| `experiment` | 并发功能 | `RegionBalancerConfig`、`CrossRegionHelperConfig`、`GlobalEntitiesCounter`、`EntityDamageSourceTraceConfig`、`DisableEntityCatchConfig`、`DisableAsyncCatcherConfig` |
 | `optimizations` | 性能优化 | `NetworkOptimizerConfig`、`ChunkSystemConfig`、`VillagerOptimizerConfig`、`AsyncPathfindingConfig`、`DynamicViewDistanceConfig`、`EntityDirtyTrackingConfig`、`EntityDensityHeatmapConfig`、`ChunkDeltaCompressionConfig`、`CrossDimensionTeleportQueueConfig`、`CpuAffinityConfig`、`SIMDConfig`、`LeavesSleepingBlockEntityConfig`、`ProjectileChunkReduceConfig`、`PetalReduceSensorWorkConfig`、`OptimizedDragonRespawnConfig`、`LobotomizeVillageConfig`、`KaiijuEntityLimiterConfig`、`GaleVariableEntityWakeupConfig`、`EntityGoalSelectorInactiveTickConfig`、`AsyncProtocolChangeConfig` |
 | `fixes` | 崩溃/行为修复 | `CollisionBehaviorConfig`、`PortalLinkFixConfig`、`VanillaRandomSourceConfig`、`UnsafeTeleportationConfig`、`PreventIncorrectTeleportAsyncConfig`、`PathfindingFixesConfig`、`POIRangeFixes`、`LongCommandSupportConfig`、`ItemMultitaskConfig`、`ForceCleanupEntityBrainMemoryConfig`、`FoliaEntityMovingFixConfig` |
 | `misc` | 杂项 | `AutoUpdateConfig`、`BStatsConfig`、`ServerModNameConfig`、`FoliaWatchdogConfig`、`UsernameCheckConfig`、`SentryConfig`、`SavePortalTicketsConfig`、`PublickeyVerifyConfig`、`PaperPacketLimiterConfig`、`InorderChatConfig`、`DisableWarningConfig`、`OldMCConfig`、`LeavesPacketEventConfig`、`DisableCheckConfig` |
