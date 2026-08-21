@@ -842,7 +842,6 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
             if (dispatcher != null) {
                 fun.bm.mili.lmili.thread.regiontick.RegionTickContext context =
                         dispatcher.getOrCreateContext(region);
-                context.setCurrentTick(region.getCurrentTick());
                 context.refreshOwnedChunks(region.region.getOwnedChunks());
                 this.mili$tickRegion(region, context);
                 return;
@@ -1095,7 +1094,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
             fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher dispatcher =
                     fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
             if (dispatcher != null) {
-                dispatcher.dispatchTick(context, context.getCurrentTick());
+                dispatcher.dispatchTick(context);
             } else {
                 // fallback: serial chunk ticking
                 this.mili$tickChunksSerial(regionizedWorldData, tickRateManager, context.getOwnedChunks());

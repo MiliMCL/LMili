@@ -71,6 +71,7 @@ public final class SchedulerWorker implements Runnable {
     public int workerId() { return workerId; }
     public WorkStealingDeque<RuntimeTask> localQueue() { return localQueue; }
     public WorkerUtilization utilization() { return utilization; }
+    public Thread getWorkerThread() { return workerThread; }
 
     @Override
     public void run() {

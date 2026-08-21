@@ -113,35 +113,35 @@ public final class RuntimeMetrics {
      * 记录任务提交。
      */
     public void recordTaskSubmit() {
-        tasksSubmitted.incrementAndGet();
+        tasksSubmitted.increment();
     }
 
     /**
      * 记录任务完成。
      */
     public void recordTaskComplete() {
-        tasksCompleted.incrementAndGet();
+        tasksCompleted.increment();
     }
 
     /**
      * 记录任务失败。
      */
     public void recordTaskFailure() {
-        tasksFailed.incrementAndGet();
+        tasksFailed.increment();
     }
 
     /**
      * 记录窃取成功。
      */
     public void recordStealSuccess() {
-        stealSuccessCount.incrementAndGet();
+        stealSuccessCount.increment();
     }
 
     /**
      * 记录窃取失败。
      */
     public void recordStealFailure() {
-        stealFailureCount.incrementAndGet();
+        stealFailureCount.increment();
     }
 
     /**

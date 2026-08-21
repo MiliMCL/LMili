@@ -90,8 +90,8 @@ public final class UnifiedRuntime {
 
         // 启动 Worker 线程
         for (int i = 0; i < this.workerCount; i++) {
-            this.workerThreads[i] = this.workers[i].workerThread;
             this.workers[i].start();
+            this.workerThreads[i] = this.workers[i].getWorkerThread();
         }
 
         LOGGER.info("[UnifiedRuntime] Started {} workers", this.workerCount);
