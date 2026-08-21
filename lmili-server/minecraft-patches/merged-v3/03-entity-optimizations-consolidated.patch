@@ -302,11 +302,11 @@ diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/pape
 +    private final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler;
 +    // Mili end
  
--    public static enum SchedulerType {
--        EDF,
--        WORK_STEALING;
--    }
--
++    // Stub enum kept for backward compatibility with GlobalConfiguration
+     public static enum SchedulerType {
+         EDF,
+         WORK_STEALING;
+     }
 -    public TickRegionScheduler(final SchedulerType schedulerType, final int initialThreads) {
 -        final ThreadFactory threadFactory = new ThreadFactory() {
 -            private final AtomicInteger idGenerator = new AtomicInteger();
@@ -4665,4 +4665,5 @@ diff --git a/net/minecraft/world/phys/AABB.java b/net/minecraft/world/phys/AABB.
      }
  
      @Override
+
 

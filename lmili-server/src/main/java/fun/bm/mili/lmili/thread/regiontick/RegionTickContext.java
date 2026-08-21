@@ -1,6 +1,7 @@
 package fun.bm.mili.lmili.thread.regiontick;
 
 import com.mojang.logging.LogUtils;
+import fun.bm.mili.lmili.thread.runtime.generation.TickGeneration;
 import io.papermc.paper.threadedregions.TickRegions;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
@@ -21,20 +22,44 @@ import java.util.concurrent.atomic.LongAdder;
  *
  * <p>线程安全：使用 CAS 状态机防止 tick 重叠。
  *
- * <h3>状态机</h3>
+ * <h3>生命周期状态机</h3>
  * <pre>
- * IDLE ──(tryBeginTick)──▶ TICKING ──(allSlicesDone/endTick)──▶ IDLE
- *                              │
- *                              └──(timeout/error)──▶ IDLE (强制恢复)
+ * CREATED
+ *    ↓
+ * RUNNING
+ *    ↓
+ * DEADLINE_EXCEEDED
+ *    ↓
+ * DRAINING
+ *    ↓
+ * COMPLETED / CANCELLED
  * </pre>
+ *
+ * <h3>Generation 隔离保证</h3>
+ * <ul>
+ *   <li>旧 Generation 的迟到完成不会影响新 Generation</li>
+ *   <li>旧 Generation 不得修改新 Tick 状态</li>
+ *   <li>旧 Generation 不得增加新 Tick completed counter</li>
+ *   <li>旧 Generation 不得触发新 Tick completion 或 reschedule</li>
+ * </ul>
+ *
+ * <h3>线程模型</h3>
+ * <ul>
+ *   <li>创建/调度线程：Region Tick 线程</li>
+ *   <li>执行线程：Worker 线程</li>
+ *   <li>完成通知：Worker 线程（通过 arriveSlice）</li>
+ * </ul>
  */
 public final class RegionTickContext {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
-     * Region tick 状态。
+     * Region tick 状态 —— 使用 CAS 防止 tick 重叠。
+     *
+     * @deprecated 使用 {@link TickGeneration.State} 替代
      */
+    @Deprecated
     public enum RegionTickState {
         /** 空闲，可以开始新 tick */
         IDLE,
@@ -49,8 +74,13 @@ public final class RegionTickContext {
             .ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
 
     private final AtomicReference<LongList> ownedChunks = new AtomicReference<>(new LongArrayList());
-    private final AtomicInteger expectedSlices = new AtomicInteger(0);
-    private final AtomicInteger completedSlices = new AtomicInteger(0);
+
+    /** 当前活跃的 Generation */
+    private final AtomicReference<TickGeneration> currentGeneration = new AtomicReference<>();
+
+    /** 上一个 Generation（用于诊断和 late completion 检测） */
+    private volatile TickGeneration previousGeneration;
+
     private volatile CountDownLatch tickLatch;
     private volatile long tickStartNanos;
     private volatile long lastTickDurationNanos;
@@ -58,14 +88,16 @@ public final class RegionTickContext {
     /**
      * Region tick 状态 —— 使用 CAS 防止 tick 重叠。
      */
-    private final AtomicReference<RegionTickState> tickState = new AtomicReference<>(RegionTickState.IDLE);
+    private final AtomicReference<TickGeneration.State> tickState = new AtomicReference<>(TickGeneration.State.CREATED);
 
     // 统计计数器
     private final LongAdder totalTicksCompleted = new LongAdder();
     private final LongAdder totalTickTimeNanos = new LongAdder();
     private final AtomicLong maxTickDurationNanos = new AtomicLong(0);
-    private final AtomicLong currentTick = new AtomicLong(0);
+    private final AtomicLong generationCounter = new AtomicLong(0);
     private final LongAdder totalSkippedTicks = new LongAdder();
+    private final LongAdder totalLateCompletions = new LongAdder();
+    private final LongAdder totalTimeouts = new LongAdder();
 
     // 超时配置
     private static final long AWAIT_TIMEOUT_MS = 4000; // 4秒，留1秒给 watchdog
@@ -86,50 +118,103 @@ public final class RegionTickContext {
     public LongList getOwnedChunks() { return this.ownedChunks.get(); }
 
     /**
-     * 尝试开始 tick —— 使用 CAS 防止 tick 重叠。
+     * 获取当前 Generation ID。
      *
-     * <p>如果前一个 tick 仍在执行，记录跳过并返回 false。
-     * 如果之前处于 TIMED_OUT 状态，也允许开始新 tick。</p>
-     *
-     * @param sliceCount 本次 tick 的 slice 数量
-     * @return true 如果成功进入 TICKING 状态
+     * <p>注意：此方法返回的是创建时的快照，可能在调用后立即变化。
+     * 任务创建时应捕获此值，而不是依赖执行时的"当前"值。
      */
-    public boolean tryBeginTick(final int sliceCount) {
-        RegionTickState currentState = tickState.get();
-        if (currentState == RegionTickState.TICKING) {
-            totalSkippedTicks.increment();
-            LOGGER.debug("[RegionTickContext] Region #{} tick skipped — already ticking", regionId);
-            return false;
-        }
-        // 从 IDLE 或 TIMED_OUT 进入 TICKING
-        if (!tickState.compareAndSet(currentState, RegionTickState.TICKING)) {
-            totalSkippedTicks.increment();
-            LOGGER.debug("[RegionTickContext] Region #{} tick skipped — state changed", regionId);
-            return false;
-        }
-
-        // CAS 成功，初始化 tick 状态
-        this.expectedSlices.set(sliceCount);
-        this.completedSlices.set(0);
-        this.tickLatch = new CountDownLatch(sliceCount);
-        this.tickStartNanos = System.nanoTime();
-        this.currentTick.incrementAndGet();
-
-        return true;
+    public long getCurrentGenerationId() {
+        TickGeneration gen = currentGeneration.get();
+        return gen != null ? gen.generationId() : generationCounter.get();
     }
 
     /**
-     * 标记一个 slice 完成。
+     * 尝试开始新的 tick —— 创建新的 TickGeneration。
      *
-     * @param tickGeneration slice 所属的 tick generation
+     * <p>如果前一个 tick 仍在执行，记录跳过并返回 false。
+     * 如果前一个 tick 处于 DEADLINE_EXCEEDED 或 DRAINING 状态，允许开始新 tick。
+     *
+     * @param sliceCount 本次 tick 的 slice 数量
+     * @param deadlineNanos 本次 tick 的 deadline（纳秒）
+     * @return 新的 TickGeneration，如果无法开始则返回 null
      */
-    public void arriveSlice(final long tickGeneration) {
-        // 只有 generation 匹配时才更新计数和 latch
-        if (tickGeneration != currentTick.get()) {
-            // late completion，忽略
+    public TickGeneration tryBeginTick(final int sliceCount, final long deadlineNanos) {
+        TickGeneration.State currentState = tickState.get();
+
+        // 只有 CREATED 或 COMPLETED 或 CANCELLED 状态才能开始新 tick
+        if (currentState == TickGeneration.State.RUNNING ||
+            currentState == TickGeneration.State.DEADLINE_EXCEEDED ||
+            currentState == TickGeneration.State.DRAINING) {
+            totalSkippedTicks.increment();
+            LOGGER.debug("[RegionTickContext] Region #{} tick skipped — current state: {}", regionId, currentState);
+            return null;
+        }
+
+        // CAS 确保状态一致性
+        if (!tickState.compareAndSet(currentState, TickGeneration.State.RUNNING)) {
+            totalSkippedTicks.increment();
+            LOGGER.debug("[RegionTickContext] Region #{} tick skipped — state changed", regionId);
+            return null;
+        }
+
+        // CAS 成功，创建新的 Generation
+        long newGenId = generationCounter.incrementAndGet();
+        TickGeneration newGen = new TickGeneration(newGenId, sliceCount, deadlineNanos);
+
+        // 保存上一个 generation 用于诊断
+        TickGeneration oldGen = currentGeneration.get();
+        if (oldGen != null) {
+            this.previousGeneration = oldGen;
+        }
+        this.currentGeneration.set(newGen);
+
+        // 初始化 tick 状态
+        this.tickLatch = new CountDownLatch(sliceCount);
+        this.tickStartNanos = System.nanoTime();
+
+        // 尝试从 CREATED 转换到 RUNNING
+        newGen.tryBegin();
+
+        return newGen;
+    }
+
+    /**
+     * 尝试开始新的 tick（使用相对延迟计算 deadline）。
+     *
+     * <p>使用 {@code previousDeadline + 50ms} 而非 {@code currentTime + 50ms} 来避免长期 Tick drift。
+     *
+     * @param sliceCount 本次 tick 的 slice 数量
+     * @param relativeDeadlineNanos 相对 deadline（从当前时间算起）
+     * @return 新的 TickGeneration，如果无法开始则返回 null
+     */
+    public TickGeneration tryBeginTickWithRelativeDeadline(final int sliceCount, final long relativeDeadlineNanos) {
+        long deadline = System.nanoTime() + relativeDeadlineNanos;
+        return tryBeginTick(sliceCount, deadline);
+    }
+
+    /**
+     * 标记一个 slice 完成 —— 必须携带 generation ID。
+     *
+     * <p><b>Generation 隔离</b>：只有 generation 匹配时才更新计数和 latch。
+     * 旧 Generation 的迟到完成会被忽略并记录诊断信息。
+     *
+     * @param generationId slice 所属的 tick generation
+     */
+    public void arriveSlice(final long generationId) {
+        TickGeneration current = currentGeneration.get();
+
+        // Generation 不匹配 —— late completion
+        if (current == null || current.generationId() != generationId) {
+            totalLateCompletions.increment();
+            LOGGER.debug("[RegionTickContext] Late completion ignored for region #{}: gen={}, current={}",
+                    regionId, generationId, current != null ? current.generationId() : "null");
             return;
         }
-        completedSlices.incrementAndGet();
+
+        // 标记任务完成
+        current.markTaskCompleted();
+
+        // 更新 latch
         CountDownLatch latch = this.tickLatch;
         if (latch != null) {
             latch.countDown();
@@ -139,36 +224,54 @@ public final class RegionTickContext {
     /**
      * 标记一个 slice 完成（使用当前 generation）。
      *
-     * <p>注意：此方法使用当前 generation，可能在 tick 已经切换时失效。
+     * @deprecated 此方法使用当前 generation，可能在 tick 已经切换时失效。
+     *             应使用 {@link #arriveSlice(long)} 并传入创建时捕获的 generationId。
      */
+    @Deprecated
     public void arriveSlice() {
-        arriveSlice(currentTick.get());
+        TickGeneration current = currentGeneration.get();
+        if (current != null) {
+            arriveSlice(current.generationId());
+        }
     }
 
     /**
-     * 标记一个 slice 失败（使用当前 generation）。
+     * 标记一个 slice 失败 —— 必须携带 generation ID。
      *
-     * <p>失败也会推进完成计数，但会记录失败状态。
-     *
+     * @param generationId slice 所属的 tick generation
      * @param throwable 失败原因
      */
-    public void failSlice(final long tickGeneration, final Throwable throwable) {
-        if (tickGeneration != currentTick.get()) {
+    public void failSlice(final long generationId, final Throwable throwable) {
+        TickGeneration current = currentGeneration.get();
+
+        // Generation 不匹配 —— late failure，忽略
+        if (current == null || current.generationId() != generationId) {
+            totalLateCompletions.increment();
+            LOGGER.debug("[RegionTickContext] Late failure ignored for region #{}: gen={}", regionId, generationId);
             return;
         }
-        completedSlices.incrementAndGet();
+
+        current.markTaskCompleted();
+        current.reportFailure(throwable);
+
         CountDownLatch latch = this.tickLatch;
         if (latch != null) {
             latch.countDown();
         }
-        LOGGER.error("[RegionTickContext] Slice failed in region #{}", regionId, throwable);
+        LOGGER.error("[RegionTickContext] Slice failed in region #{} gen={}", regionId, generationId, throwable);
     }
 
     /**
      * 标记一个 slice 失败（使用当前 generation）。
+     *
+     * @deprecated 应使用 {@link #failSlice(long, Throwable)} 并传入创建时捕获的 generationId。
      */
+    @Deprecated
     public void failSlice(final Throwable throwable) {
-        failSlice(currentTick.get(), throwable);
+        TickGeneration current = currentGeneration.get();
+        if (current != null) {
+            failSlice(current.generationId(), throwable);
+        }
     }
 
     /**
@@ -184,14 +287,15 @@ public final class RegionTickContext {
             // 等待 latch，但同时检查 completedSlices 以避免旧任务错误 countDown
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(AWAIT_TIMEOUT_MS);
             while (System.nanoTime() < deadline) {
-                if (completedSlices.get() >= expectedSlices.get()) {
+                TickGeneration current = currentGeneration.get();
+                if (current != null && current.allTasksCompleted()) {
                     return true;
                 }
                 if (latch.await(50, TimeUnit.MILLISECONDS)) {
-                    return completedSlices.get() >= expectedSlices.get();
+                    return currentGeneration.get() != null && currentGeneration.get().allTasksCompleted();
                 }
             }
-            return completedSlices.get() >= expectedSlices.get();
+            return currentGeneration.get() != null && currentGeneration.get().allTasksCompleted();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
@@ -199,34 +303,83 @@ public final class RegionTickContext {
     }
 
     /**
+     * 检查当前 tick 是否已超时。
+     *
+     * @return true 如果已触发超时转换
+     */
+    public boolean checkTimeout() {
+        TickGeneration current = currentGeneration.get();
+        if (current == null) return false;
+
+        long now = System.nanoTime();
+        boolean timedOut = current.checkTimeout(now);
+
+        if (timedOut) {
+            totalTimeouts.increment();
+            tickState.set(TickGeneration.State.DEADLINE_EXCEEDED);
+            LOGGER.warn("[RegionTickContext] Tick timeout in region #{} gen={}: deadline={}ms",
+                    regionId, current.generationId(), (now - current.deadlineNanos()) / 1_000_000);
+        }
+
+        return timedOut;
+    }
+
+    /**
+     * 进入 DRAINING 状态 —— 不再接受新任务，等待剩余任务完成。
+     *
+     * @return true 如果成功进入 DRAINING
+     */
+    public boolean beginDraining() {
+        TickGeneration current = currentGeneration.get();
+        if (current == null) return false;
+
+        boolean drained = current.tryBeginDraining();
+        if (drained) {
+            tickState.set(TickGeneration.State.DRAINING);
+        }
+        return drained;
+    }
+
+    /**
      * 结束 tick —— 记录耗时统计并根据 slice 完成情况决定状态。
      *
-     * <p>只有当所有 slice 都完成时才进入 IDLE，否则进入 TIMED_OUT。
+     * <p>只有当所有 slice 都完成时才进入 COMPLETED，否则进入 DEADLINE_EXCEEDED → DRAINING → CANCELLED。
      */
     public void endTick() {
         long elapsed = System.nanoTime() - this.tickStartNanos;
         this.lastTickDurationNanos = elapsed;
 
-        // 检查是否所有 slice 都已完成
-        if (completedSlices.get() < expectedSlices.get()) {
-            // 有 slice 未完成，标记为超时
-            tickState.set(RegionTickState.TIMED_OUT);
-            LOGGER.warn("[RegionTickContext] Tick timeout in region #{}: {}ms (slices={}/{})",
-                    regionId, elapsed / 1_000_000, completedSlices.get(), expectedSlices.get());
+        TickGeneration current = currentGeneration.get();
+        if (current == null) {
+            LOGGER.error("[RegionTickContext] endTick called with no active generation for region #{}", regionId);
             return;
         }
 
-        this.totalTicksCompleted.increment();
-        this.totalTickTimeNanos.add(elapsed);
-        this.maxTickDurationNanos.accumulateAndGet(elapsed, Math::max);
+        // 检查是否所有 slice 都已完成
+        if (current.allTasksCompleted()) {
+            // 所有任务完成 —— 进入 DRAINING → COMPLETED
+            current.trySealFromRunning();
+            current.complete();
+            tickState.set(TickGeneration.State.COMPLETED);
 
-        // 所有 slice 完成，回到 IDLE 状态
-        tickState.set(RegionTickState.IDLE);
+            this.totalTicksCompleted.increment();
+            this.totalTickTimeNanos.add(elapsed);
+            this.maxTickDurationNanos.accumulateAndGet(elapsed, Math::max);
 
-        if (elapsed / 1_000_000 > SLOW_TICK_WARNING_MS) {
-            LOGGER.warn("[RegionTickContext] Slow tick in region #{}: {}ms (chunks={}, slices={}/{})",
-                    regionId, elapsed / 1_000_000, ownedChunks.get().size(),
-                    completedSlices.get(), expectedSlices.get());
+            if (elapsed / 1_000_000 > SLOW_TICK_WARNING_MS) {
+                LOGGER.warn("[RegionTickContext] Slow tick in region #{}: {}ms (chunks={}, slices={}/{})",
+                        regionId, elapsed / 1_000_000, ownedChunks.get().size(),
+                        current.completedTasks(), current.expectedTasks());
+            }
+        } else {
+            // 有 slice 未完成 —— 进入 DEADLINE_EXCEEDED → DRAINING → CANCELLED
+            current.checkTimeout(System.nanoTime());
+            current.tryBeginDraining();
+            current.cancel();
+            tickState.set(TickGeneration.State.CANCELLED);
+
+            LOGGER.warn("[RegionTickContext] Tick cancelled in region #{}: {}ms (slices={}/{})",
+                    regionId, elapsed / 1_000_000, current.completedTasks(), current.expectedTasks());
         }
     }
 
@@ -234,40 +387,56 @@ public final class RegionTickContext {
      * 检查当前是否正在 tick。
      */
     public boolean isTicking() {
-        return tickState.get() == RegionTickState.TICKING;
+        return tickState.get() == TickGeneration.State.RUNNING;
     }
 
     /**
      * 获取当前 region tick 状态。
      */
-    public RegionTickState getTickState() {
+    public TickGeneration.State getTickState() {
         return tickState.get();
+    }
+
+    /**
+     * 获取当前 TickGeneration。
+     */
+    public TickGeneration getCurrentGeneration() {
+        return currentGeneration.get();
     }
 
     /**
      * 获取已完成的 slice 数量。
      */
     public int getCompletedSlices() {
-        return completedSlices.get();
+        TickGeneration current = currentGeneration.get();
+        return current != null ? current.completedTasks() : 0;
     }
 
     /**
      * 获取期望的 slice 数量。
      */
     public int getExpectedSlices() {
-        return expectedSlices.get();
+        TickGeneration current = currentGeneration.get();
+        return current != null ? current.expectedTasks() : 0;
     }
 
     /**
      * 强制重置 tick 状态 —— 仅用于错误恢复。
      *
-     * <p>通过递增 generation 使旧 tick 的延迟完成失效，并回到 IDLE 状态。
+     * <p>通过创建新 Generation 使旧 tick 的延迟完成失效。
      */
     public void forceReset() {
         // 递增 generation，使旧 tick 的 arriveSlice 调用被忽略
-        currentTick.incrementAndGet();
-        tickState.set(RegionTickState.IDLE);
-        LOGGER.warn("[RegionTickContext] Force reset tick state for region #{}", regionId);
+        long newGenId = generationCounter.incrementAndGet();
+        TickGeneration newGen = new TickGeneration(newGenId, 0, System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(5000));
+
+        TickGeneration oldGen = currentGeneration.getAndSet(newGen);
+        if (oldGen != null) {
+            oldGen.cancel();
+        }
+
+        tickState.set(TickGeneration.State.CANCELLED);
+        LOGGER.warn("[RegionTickContext] Force reset tick state for region #{}: new gen={}", regionId, newGenId);
     }
 
     // ---- 统计查询 ----
@@ -279,8 +448,9 @@ public final class RegionTickContext {
     public long getTotalTickTimeNanos() { return this.totalTickTimeNanos.sum(); }
     public long getMaxTickDurationNanos() { return this.maxTickDurationNanos.get(); }
     public long getMaxTickDurationMs() { return this.maxTickDurationNanos.get() / 1_000_000; }
-    public long getCurrentTick() { return this.currentTick.get(); }
-    public void setCurrentTick(long tick) { this.currentTick.set(tick); }
+    public long getCurrentTick() { return generationCounter.get(); }
+    public long getTotalLateCompletions() { return totalLateCompletions.sum(); }
+    public long getTotalTimeouts() { return totalTimeouts.sum(); }
 
     public long getAverageTickDurationNanos() {
         long completed = totalTicksCompleted.sum();
@@ -291,11 +461,15 @@ public final class RegionTickContext {
 
     @Override
     public String toString() {
+        TickGeneration current = currentGeneration.get();
         return "RegionTickContext{regionId=" + regionId +
                 ", chunks=" + ownedChunks.get().size() +
-                ", slices=" + completedSlices.get() + "/" + expectedSlices.get() +
+                ", state=" + tickState.get() +
+                ", slices=" + (current != null ? current.completedTasks() : 0) +
+                "/" + (current != null ? current.expectedTasks() : 0) +
                 ", avg_tick_ms=" + getAverageTickDurationMs() +
                 ", max_tick_ms=" + getMaxTickDurationMs() +
-                ", skipped=" + getTotalSkippedTicks() + "}";
+                ", skipped=" + getTotalSkippedTicks() +
+                ", late=" + getTotalLateCompletions() + "}";
     }
 }

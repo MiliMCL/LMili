@@ -41,6 +41,11 @@ public class TickRegionScheduler {
     // Folia end - watchdog
 
     // Mili start - unified scheduler (Folia scheduler removed)
+    // Stub enum kept for backward compatibility with GlobalConfiguration — not used by Mili scheduler
+    public static enum SchedulerType {
+        EDF,
+        WORK_STEALING;
+    }
     private final fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler miliScheduler;
     // Mili end
 

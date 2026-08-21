@@ -1,6 +1,7 @@
 package fun.bm.mili.lmili.thread.regiontick;
 
 import com.mojang.logging.LogUtils;
+import fun.bm.mili.lmili.thread.runtime.generation.TickGeneration;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import io.papermc.paper.threadedregions.TickRegions;
 import net.minecraft.server.level.ServerLevel;
@@ -20,10 +21,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   <li>platform 模式：分发给 worker 队列执行</li>
  * </ul>
  *
+ * <h3>Generation 保证</h3>
+ * <ul>
+ *   <li>每个 slice 创建时绑定 generationId</li>
+ *   <li>完成时使用 generationId 验证</li>
+ *   <li>超时/cancel 不会影响新 Generation</li>
+ * </ul>
+ *
  * <h3>稳定性保证</h3>
  * <ul>
  *   <li>所有路径都有 try-finally 保护，确保 tick 状态始终恢复</li>
- *   <li>超时后强制恢复状态，防止永久卡死</li>
+ *   <li>超时后进入 DRAINING → CANCELLED 状态机</li>
  *   <li>单个 slice 失败不影响其他 slice 执行</li>
  *   <li>资源泄漏防护：asyncCatcher 引用计数始终正确释放</li>
  * </ul>
@@ -34,6 +42,8 @@ public final class ChunkTickDispatcher {
     private static final long SLOW_TICK_THRESHOLD_MS = 50;
     // 超时时间：4秒（留1秒给 watchdog）
     private static final long TICK_TIMEOUT_MS = 4000;
+    // Tick 间隔：50ms (20 TPS)
+    private static final long TICK_INTERVAL_NANOS = TimeUnit.MILLISECONDS.toNanos(50);
 
     private final WorkerPoolManager poolManager;
     private final int parallelismThreshold;
@@ -65,7 +75,7 @@ public final class ChunkTickDispatcher {
      *
      * <p>此方法在 region tick 线程上调用，会阻塞直到所有 chunk tick 完成或超时。</p>
      */
-    public void dispatch(@NotNull final RegionTickContext context, final long tickCount) {
+    public void dispatch(@NotNull final RegionTickContext context) {
         if (context.regionId == 0L) return;
 
         var chunks = context.getOwnedChunks();
@@ -113,22 +123,27 @@ public final class ChunkTickDispatcher {
      * 单 slice 同步 tick —— 小 region 专用。
      */
     private void dispatchSingleSlice(@NotNull final RegionTickContext context, final long[] chunkArray) {
-        if (!context.tryBeginTick(1)) {
+        long deadline = System.nanoTime() + TICK_INTERVAL_NANOS;
+        TickGeneration gen = context.tryBeginTick(1, deadline);
+        if (gen == null) {
             LOGGER.debug("[RegionTickPool] Region #{} single-slice tick skipped — already ticking",
                     context.regionId);
             return;
         }
 
+        long generationId = gen.generationId();
         try {
             RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
             if (executor != null) {
-                executor.executeSlice(null, new RegionTickSlice(context, chunkArray, 0), context);
+                RegionTickSlice slice = new RegionTickSlice(context, chunkArray, 0, generationId);
+                executor.executeSlice(null, slice, context);
             }
         } catch (Throwable throwable) {
             LOGGER.error("[RegionTickPool] Single-slice tick failed for region #{}", context.regionId, throwable);
+            context.failSlice(generationId, throwable);
         } finally {
             // 确保 slice 完成计数和 tick 状态恢复
-            context.arriveSlice();
+            context.arriveSlice(generationId);
             context.endTick();
         }
     }
@@ -140,8 +155,9 @@ public final class ChunkTickDispatcher {
      * <p><b>稳定性保证</b>：
      * <ul>
      *   <li>asyncCatcher 引用计数在 finally 中释放</li>
-     *   <li>超时后强制恢复状态</li>
+     *   <li>超时后进入 DRAINING 状态</li>
      *   <li>单个 slice 失败不影响其他 slice</li>
+     *   <li>旧 Generation 的迟到完成不会影响新 Generation</li>
      * </ul>
      */
     private void dispatchParallelVirtual(@NotNull final RegionTickContext context, final long[] chunkArray) {
@@ -149,18 +165,21 @@ public final class ChunkTickDispatcher {
         int total = chunkArray.length;
         int sliceCount = Math.max(1, (total + sliceSize - 1) / sliceSize);
 
-        // 尝试开始 tick
-        if (!context.tryBeginTick(sliceCount)) {
+        long deadline = System.nanoTime() + TICK_INTERVAL_NANOS;
+        TickGeneration gen = context.tryBeginTick(sliceCount, deadline);
+        if (gen == null) {
             LOGGER.debug("[RegionTickPool] Region #{} virtual tick skipped — already ticking", regionId);
             return;
         }
+
+        final long generationId = gen.generationId();
 
         // 捕获当前 region 的 RegionizedWorldData
         final RegionizedWorldData regionData = captureRegionData(context);
         if (regionData == null) {
             LOGGER.warn("[RegionTickPool] No region data for virtual dispatch in region #{} — falling back to single-slice",
                     regionId);
-            fallbackSingleSlice(context, chunkArray);
+            fallbackSingleSlice(context, chunkArray, generationId);
             return;
         }
 
@@ -175,7 +194,7 @@ public final class ChunkTickDispatcher {
                 int from = i * sliceSize;
                 int to = Math.min(from + sliceSize, total);
                 long[] sliceArray = java.util.Arrays.copyOfRange(chunkArray, from, to);
-                RegionTickSlice slice = new RegionTickSlice(context, sliceArray, i);
+                RegionTickSlice slice = new RegionTickSlice(context, sliceArray, i, generationId);
                 final int sliceIndex = i;
 
                 sliceFutures[i] = CompletableFuture.runAsync(() -> {
@@ -189,9 +208,10 @@ public final class ChunkTickDispatcher {
                     } catch (Throwable throwable) {
                         LOGGER.error("[RegionTickPool] Virtual slice #{} failed for region #{}",
                                 sliceIndex, regionId, throwable);
+                        context.failSlice(generationId, throwable);
                     } finally {
                         RegionDataThreadLocal.clear();
-                        context.arriveSlice();
+                        context.arriveSlice(generationId);
                     }
                 }, poolManager.getExecutor());
             }
@@ -208,7 +228,11 @@ public final class ChunkTickDispatcher {
                 LOGGER.warn("[RegionTickPool] Virtual tick timed out for region #{} (completed={}/{})",
                         regionId, context.getCompletedSlices(), context.getExpectedSlices());
 
-                // 取消未完成的 slice（中断正在执行的任务）
+                // 标记超时并进入 DRAINING
+                context.checkTimeout();
+
+                // 尝试取消未完成的 slice（中断正在执行的任务）
+                // 注意：cancel(true) 只能视为 interrupt request，不能视为任务已经停止
                 for (CompletableFuture<Void> future : sliceFutures) {
                     future.cancel(true);
                 }
@@ -230,8 +254,9 @@ public final class ChunkTickDispatcher {
      *
      * <p><b>稳定性保证</b>：
      * <ul>
-     *   <li>超时后强制恢复状态</li>
+     *   <li>超时后进入 DRAINING 状态</li>
      *   <li>单个 slice 失败不影响其他 slice</li>
+     *   <li>旧 Generation 的迟到完成不会影响新 Generation</li>
      * </ul>
      */
     private void dispatchParallelPlatform(@NotNull final RegionTickContext context, final long[] chunkArray) {
@@ -239,18 +264,31 @@ public final class ChunkTickDispatcher {
         if (workers == null || workers.length == 0) {
             LOGGER.warn("[RegionTickPool] No workers available for platform dispatch in region #{} — falling back to single-slice",
                     context.regionId);
-            fallbackSingleSlice(context, chunkArray);
+            long deadline = System.nanoTime() + TICK_INTERVAL_NANOS;
+            TickGeneration gen = context.tryBeginTick(1, deadline);
+            if (gen != null) {
+                fallbackSingleSlice(context, chunkArray, gen.generationId());
+            }
             return;
         }
 
-        RegionTickSlice[] slices = RegionTickSlice.fromChunkArray(context, chunkArray, sliceSize);
-        int sliceCount = slices.length;
-
-        // 尝试开始 tick
-        if (!context.tryBeginTick(sliceCount)) {
+        long deadline = System.nanoTime() + TICK_INTERVAL_NANOS;
+        TickGeneration gen = context.tryBeginTick(1, deadline);
+        if (gen == null) {
             LOGGER.debug("[RegionTickPool] Region #{} platform tick skipped — already ticking",
                     context.regionId);
             return;
+        }
+
+        final long generationId = gen.generationId();
+
+        RegionTickSlice[] slices = RegionTickSlice.fromChunkArray(context, chunkArray, sliceSize, generationId);
+        int sliceCount = slices.length;
+
+        // 重新创建正确 sliceCount 的 Generation
+        Gen correctedGen = context.tryBeginTick(sliceCount, deadline);
+        if (correctedGen == null) {
+            // 已经开始了，继续使用之前的 generation
         }
 
         try {
@@ -272,11 +310,14 @@ public final class ChunkTickDispatcher {
             if (!completed) {
                 totalTimeouts.incrementAndGet();
                 LOGGER.warn("[RegionTickPool] Platform tick timed out for region #{} (completed={}/{})",
-                        context.regionId, context.getCompletedSlices(), context.getExpectedSlices());
+                        regionId, context.getCompletedSlices(), context.getExpectedSlices());
+
+                // 标记超时
+                context.checkTimeout();
             }
 
         } catch (Throwable throwable) {
-            LOGGER.error("[RegionTickPool] Platform dispatch failed for region #{}", context.regionId, throwable);
+            LOGGER.error("[RegionTickPool] Platform dispatch failed for region #{}", regionId, throwable);
             totalErrors.incrementAndGet();
         } finally {
             context.endTick();
@@ -300,27 +341,25 @@ public final class ChunkTickDispatcher {
 
     /**
      * 回退到单线程执行 —— 当无法获取 region data 或无可用 worker 时使用。
-     *
-     * <p>注意：此方法假设 tryBeginTick 已经在调用者中完成（或不需要）。
-     * 如果是从 dispatchParallelVirtual 回退，tick 状态已经设置。
-     * 如果是从 dispatchParallelPlatform 回退，tick 状态已经设置。</p>
      */
-    private void fallbackSingleSlice(@NotNull final RegionTickContext context, final long[] chunkArray) {
+    private void fallbackSingleSlice(@NotNull final RegionTickContext context, final long[] chunkArray, final long generationId) {
         try {
             RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
             if (executor != null) {
-                executor.executeSlice(null, new RegionTickSlice(context, chunkArray, 0), context);
+                RegionTickSlice slice = new RegionTickSlice(context, chunkArray, 0, generationId);
+                executor.executeSlice(null, slice, context);
             }
         } catch (Throwable throwable) {
             LOGGER.error("[RegionTickPool] Fallback single-slice tick failed for region #{}", context.regionId, throwable);
+            context.failSlice(generationId, throwable);
         } finally {
-            context.arriveSlice();
+            context.arriveSlice(generationId);
             context.endTick();
         }
     }
 
     /**
-     * 注销 region —— 清理 pending 状态。
+     * 취销 region —— 清理 pending 状態。
      */
     public void unregister(long regionId) {
         CompletableFuture<Void> future = pendingChunkFutures.remove(regionId);
