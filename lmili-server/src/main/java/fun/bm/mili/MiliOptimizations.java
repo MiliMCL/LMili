@@ -4,6 +4,7 @@ import fun.bm.mili.bridge.ChunkRegionBridge;
 import fun.bm.mili.chunk.MiliChunkSystem;
 import fun.bm.mili.lmili.i18n.I18nManager;
 import fun.bm.mili.lmili.thread.regiontick.RegionTickBootstrap;
+import fun.bm.mili.config.modules.function.LanguageConfig;
 import fun.bm.mili.config.modules.optimizations.ChunkSystemConfig;
 import fun.bm.mili.config.modules.optimizations.NetworkOptimizerConfig;
 import fun.bm.mili.config.modules.optimizations.VillagerOptimizerConfig;
@@ -34,9 +35,8 @@ public final class MiliOptimizations {
     private MiliOptimizations() {}
 
     public static void init(Plugin plugin) {
-        // 初始化国际化系统
-        String locale = plugin.getConfig().getString("language", "en_us");
-        I18nManager.init(locale);
+        // 初始化国际化系统（使用 LanguageConfig.lang 配置）
+        I18nManager.init(LanguageConfig.lang);
 
         // 核心延迟缓解
         LagRemover.init(plugin);
