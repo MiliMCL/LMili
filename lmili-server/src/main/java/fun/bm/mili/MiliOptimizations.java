@@ -60,7 +60,8 @@ public final class MiliOptimizations {
             NetworkOptimizer.init();
         }
 
-        LOGGER.info("[Mili] Optimizations initialized (v5.0 — unified scheduler, locale=" + locale + ")");
+        // 修复：使用 I18nManager.getCurrentLocale() 替换未定义的 locale 变量
+        LOGGER.info("[Mili] Optimizations initialized (v5.0 — unified scheduler, locale=" + I18nManager.getCurrentLocale() + ")");
     }
 
     public static void shutdown() {
