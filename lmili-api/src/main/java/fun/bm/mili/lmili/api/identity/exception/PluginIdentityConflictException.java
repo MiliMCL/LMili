@@ -1,7 +1,7 @@
 package fun.bm.mili.lmili.api.identity.exception;
 
-import fun.bm.mili.lmili.api.identity.ConflictReason;
 import fun.bm.mili.lmili.api.identity.PluginId;
+import fun.bm.mili.lmili.api.identity.conflict.ConflictReason;
 import org.jetbrains.annotations.NotNull;
 
 /**

@@ -1,7 +1,7 @@
 package fun.bm.mili.config.modules.function;
 
 import fun.bm.mili.MiliLogger;
-import fun.bm.mili.command.PluginsCommand;
+import fun.bm.mili.command.PluginIdCommand;
 import fun.bm.mili.config.TomlConfigData;
 import fun.bm.mili.identity.PluginIdentityBootstrap;
 import fun.bm.mili.lmili.config.IConfigModule;
@@ -18,7 +18,7 @@ import java.util.Set;
  *
  * <p>Discovered by {@code ConfigsInstance}, which scans
  * {@code fun.bm.mili.config.modules}. On {@link #onLoaded} we install the
- * bootstrap listener and register the {@code /plugins} command.</p>
+ * bootstrap listener and register the {@code /pluginid} command.</p>
  */
 @ConfigClassInfo(category = EnumConfigCategory.FUNCTION,
                  name = "plugin-identity-system",
@@ -36,7 +36,7 @@ public final class PluginIdentitySystemConfig implements IConfigModule {
     private static volatile PluginIdentityBootstrap BOOTSTRAP;
 
     @DoNotLoad
-    private static volatile PluginsCommand COMMAND;
+    private static volatile PluginIdCommand COMMAND;
 
     public boolean isEnabled() { return enabled; }
 
@@ -58,10 +58,10 @@ public final class PluginIdentitySystemConfig implements IConfigModule {
         }
         if (COMMAND == null) {
             try {
-                COMMAND = new PluginsCommand();
+                COMMAND = new PluginIdCommand();
                 COMMAND.register();
             } catch (final Throwable t) {
-                MiliLogger.LOGGER.error("[LMiliIdentity] Failed to register /plugins command", t);
+                MiliLogger.LOGGER.error("[LMiliIdentity] Failed to register /pluginid command", t);
             }
         }
     }

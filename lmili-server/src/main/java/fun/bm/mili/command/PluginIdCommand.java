@@ -22,20 +22,25 @@ import java.util.Collection;
  *
  * <p>V2 §23 requires at least:</p>
  * <ul>
- *   <li>{@code /plugins}          — list all identities</li>
- *   <li>{@code /plugins info <id>}</li>
- *   <li>{@code /plugins conflicts} — REQUIRED minimum</li>
- *   <li>{@code /plugins observe <id>}</li>
- *   <li>{@code /plugins enable <id>}</li>
- *   <li>{@code /plugins disable <id>}</li>
+ *   <li>{@code /pluginid}           — list all identities</li>
+ *   <li>{@code /pluginid info <id>}</li>
+ *   <li>{@code /pluginid conflicts} — REQUIRED minimum</li>
+ *   <li>{@code /pluginid observe <id>}</li>
+ *   <li>{@code /pluginid enable <id>}</li>
+ *   <li>{@code /pluginid disable <id>}</li>
  * </ul>
+ *
+ * <p>Note: we deliberately use the root name {@code pluginid} instead of
+ * {@code plugins} because Paper's {@code PaperPluginsCommand} already owns
+ * that literal. Using it would cause Paper's later registration to overwrite
+ * ours during server startup.</p>
  */
-public final class PluginsCommand extends RootNode {
+public final class PluginIdCommand extends RootNode {
 
     private static final String PERM_BASE = "mili.admin.identity";
 
-    public PluginsCommand() {
-        super("plugins", PERM_BASE);
+    public PluginIdCommand() {
+        super("pluginid", PERM_BASE);
         children(new ListCommand(),
                  new InfoCommand(),
                  new ConflictsCommand(),
@@ -57,18 +62,18 @@ public final class PluginsCommand extends RootNode {
 
     private static void sendHelp(final CommandSender sender) {
         sender.sendMessage(Component.text("=== LMili Plugin Identity ===", NamedTextColor.GOLD));
-        sender.sendMessage(Component.text("  /plugins list", NamedTextColor.GRAY)
-                .append(Component.text("                  List all registered plugin identities", NamedTextColor.WHITE)));
-        sender.sendMessage(Component.text("  /plugins info <id>", NamedTextColor.GRAY)
-                .append(Component.text("            Show one identity in detail", NamedTextColor.WHITE)));
-        sender.sendMessage(Component.text("  /plugins conflicts", NamedTextColor.GRAY)
-                .append(Component.text("               Show all recorded conflicts", NamedTextColor.WHITE)));
-        sender.sendMessage(Component.text("  /plugins observe <id>", NamedTextColor.GRAY)
-                .append(Component.text("           Move plugin into OBSERVE state", NamedTextColor.WHITE)));
-        sender.sendMessage(Component.text("  /plugins enable <id>", NamedTextColor.GRAY)
-                .append(Component.text("            Restore a plugin to ACTIVE", NamedTextColor.WHITE)));
-        sender.sendMessage(Component.text("  /plugins disable <id>", NamedTextColor.GRAY)
-                .append(Component.text("           Disable a plugin", NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /pluginid list", NamedTextColor.GRAY)
+                .append(Component.text("                 List all registered plugin identities", NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /pluginid info <id>", NamedTextColor.GRAY)
+                .append(Component.text("           Show one identity in detail", NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /pluginid conflicts", NamedTextColor.GRAY)
+                .append(Component.text("              Show all recorded conflicts", NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /pluginid observe <id>", NamedTextColor.GRAY)
+                .append(Component.text("          Move plugin into OBSERVE state", NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /pluginid enable <id>", NamedTextColor.GRAY)
+                .append(Component.text("           Restore a plugin to ACTIVE", NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /pluginid disable <id>", NamedTextColor.GRAY)
+                .append(Component.text("          Disable a plugin", NamedTextColor.WHITE)));
     }
 
     private static NamedTextColor statusColor(final PluginStatus status) {
@@ -124,7 +129,7 @@ public final class PluginsCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final String idStr = context.getStringOrDefault("id", null);
             if (idStr == null) {
-                sender.sendMessage(Component.text("Usage: /plugins info <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text("Usage: /pluginid info <id>", NamedTextColor.RED));
                 return true;
             }
             final PluginId pid = PluginId.parseNullable(idStr);
@@ -200,7 +205,7 @@ public final class PluginsCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final String idStr = context.getStringOrDefault("id", null);
             if (idStr == null) {
-                sender.sendMessage(Component.text("Usage: /plugins observe <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text("Usage: /pluginid observe <id>", NamedTextColor.RED));
                 return true;
             }
             final PluginId pid = PluginId.parseNullable(idStr);
@@ -226,7 +231,7 @@ public final class PluginsCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final String idStr = context.getStringOrDefault("id", null);
             if (idStr == null) {
-                sender.sendMessage(Component.text("Usage: /plugins enable <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text("Usage: /pluginid enable <id>", NamedTextColor.RED));
                 return true;
             }
             final PluginId pid = PluginId.parseNullable(idStr);
@@ -252,7 +257,7 @@ public final class PluginsCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final String idStr = context.getStringOrDefault("id", null);
             if (idStr == null) {
-                sender.sendMessage(Component.text("Usage: /plugins disable <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text("Usage: /pluginid disable <id>", NamedTextColor.RED));
                 return true;
             }
             final PluginId pid = PluginId.parseNullable(idStr);
