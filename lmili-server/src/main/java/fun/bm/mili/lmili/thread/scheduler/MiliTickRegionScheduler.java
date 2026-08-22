@@ -72,6 +72,14 @@ public final class MiliTickRegionScheduler {
     private static final Map<TickRegionScheduler.RegionScheduleHandle, TickTask> REGISTRY =
             Collections.synchronizedMap(new IdentityHashMap<>());
 
+    // ---- R3-FIX: region 暂时不可获取时的重试退避（避免触发服务器关闭） ----
+    /** 重试退避的初始延迟（ms） */
+    private static final long RETRY_BACKOFF_INITIAL_MS = 5L;
+    /** 重试退避的最大延迟（ms） */
+    private static final long RETRY_BACKOFF_MAX_MS = 50L;
+    /** 单次 tick 任务的最大连续重试次数（超过后放弃本次 tick） */
+    private static final int MAX_CONSECUTIVE_RETRIES = 20;
+
     /**
      * 创建 Mili Tick Region Scheduler。
      *
@@ -259,6 +267,10 @@ public final class MiliTickRegionScheduler {
         final TickRegionScheduler.RegionScheduleHandle handle;
         final TaskScheduleState state = new TaskScheduleState();
         volatile TaskHandle taskHandle;
+        // R3-FIX: 当前退避延迟（连续 region-not-acquirable 时递增）
+        private volatile long currentBackoffMs = RETRY_BACKOFF_INITIAL_MS;
+        // R3-FIX: 连续 region-not-acquirable 重试计数（成功 tick 后重置）
+        private volatile int consecutiveRetries = 0;
 
         TickTask(final TickRegionScheduler.RegionScheduleHandle handle) {
             this.handle = handle;
@@ -298,11 +310,68 @@ public final class MiliTickRegionScheduler {
                     }
                 }
 
+                // R3-FIX: 执行 tick 前再次检查 handle 是否已被取消
+                // 避免在取消后仍尝试 tick 并触发 region-not-acquirable 异常
+                if (handle.isMarkedAsNonSchedulable()) {
+                    state.tryMarkIdle();
+                    return;
+                }
+
                 // 执行 tick — runTick() 内部会调用 setTickingRegion() 设置上下文
                 // TPS 修复：记录 tick 开始时间，用于计算自适应延迟
-                final long tickStartMillis = System.currentTimeMillis();
-                final boolean reschedule = handle.runTick();
-                final long tickElapsedMillis = System.currentTimeMillis() - tickStartMillis;
+                final long tickStartMillis;
+                final boolean reschedule;
+                final long tickElapsedMillis;
+                try {
+                    tickStartMillis = System.currentTimeMillis();
+                    reschedule = handle.runTick();
+                    tickElapsedMillis = System.currentTimeMillis() - tickStartMillis;
+                } catch (IllegalStateException ise) {
+                    // R3-FIX: 优雅处理 region-not-acquirable 异常
+                    //
+                    // runTick() 会在 region.state != STATE_READY 时抛出
+                    // "Scheduled region should be acquirable"。这不是真正的失败，
+                    // 只是说明 region 暂时被另一个执行者持有（Folia 原生调度器、
+                    // 或 Mili 的另一条执行路径短暂持有）。
+                    //
+                    // 原代码通过 handleRegionFailure() → stopServer() 处理此异常，
+                    // 会触发不必要的服务器关闭。修复方案：归还状态 + 短暂退避后重试。
+                    state.tryMarkIdle();
+
+                    if (!"Scheduled region should be acquirable".equals(ise.getMessage())) {
+                        // 其他 IllegalStateException 仍按原逻辑处理
+                        handleRegionFailure(ise);
+                        return;
+                    }
+
+                    consecutiveRetries++;
+                    if (consecutiveRetries > MAX_CONSECUTIVE_RETRIES) {
+                        // R3-FIX: 连续重试次数超限 —— 放弃本次 tick 但不关闭服务器
+                        LOGGER.warn("[MiliTickRegionScheduler] Region #{} not acquirable after {} retries, "
+                                        + "skipping this tick (server will not shut down)",
+                                regionId(), consecutiveRetries);
+                        consecutiveRetries = 0;
+                        currentBackoffMs = RETRY_BACKOFF_INITIAL_MS;
+                        // 仍然重新调度下一次 tick（region 释放后即可恢复）
+                        if (!handle.isMarkedAsNonSchedulable() && !halted.get()) {
+                            resubmitDelayed(TIME_BETWEEN_TICKS_MS);
+                        }
+                        return;
+                    }
+
+                    // 指数退避（最多 RETRY_BACKOFF_MAX_MS）后重新提交
+                    final long backoff = currentBackoffMs;
+                    currentBackoffMs = Math.min(currentBackoffMs * 2, RETRY_BACKOFF_MAX_MS);
+                    LOGGER.debug("[MiliTickRegionScheduler] Region #{} not acquirable, retrying in {} ms (attempt {})",
+                            regionId(), backoff, consecutiveRetries);
+                    if (!handle.isMarkedAsNonSchedulable() && !halted.get()) {
+                        resubmitDelayed(backoff);
+                    }
+                    return;
+                }
+                // 成功执行了一次 tick —— 重置重试计数与退避延迟
+                consecutiveRetries = 0;
+                currentBackoffMs = RETRY_BACKOFF_INITIAL_MS;
                 state.tryMarkIdle();
 
                 // 如果需要继续调度，延迟提交到统壹队列
