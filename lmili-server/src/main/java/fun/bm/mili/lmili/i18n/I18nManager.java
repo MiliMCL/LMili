@@ -37,8 +37,13 @@ public final class I18nManager {
     private static volatile String currentLocale = DEFAULT_LOCALE;
 
     // Mili start - eager initialization so translations work even without explicit init()
+    // 支持的语言列表
+    private static final String[] SUPPORTED_LOCALES = {"en_us", "zh_cn"};
     static {
-        loadTranslations(DEFAULT_LOCALE);
+        // 加载所有支持的语言，这样无需调用 init() 也能切换语言
+        for (String locale : SUPPORTED_LOCALES) {
+            loadTranslations(locale);
+        }
     }
     // Mili end
 
@@ -117,6 +122,19 @@ public final class I18nManager {
 
         // 未找到翻译，返回键名
         return key;
+    }
+
+    /**
+     * 设置当前语言（无需重新加载翻译文件，前提是已通过 init() 或静态块加载过该语言）。
+     *
+     * @param locale 语言代码（如 "zh_cn"、"en_us"）
+     */
+    public static void setLocale(String locale) {
+        if (locale == null || locale.isEmpty()) return;
+        String normalized = locale.toLowerCase(java.util.Locale.ROOT);
+        if (translations.containsKey(normalized)) {
+            currentLocale = normalized;
+        }
     }
 
     /**

@@ -412,6 +412,17 @@ public final class CommandServerHealth extends Command {
 
     @Override
     public boolean execute(final CommandSender sender, final String commandLabel, final String[] args) {
+        // Mili start - sync locale from LanguageConfig before rendering
+        try {
+            Class<?> configClass = Class.forName("fun.bm.mili.config.modules.function.LanguageConfig");
+            Object value = configClass.getField("lang").get(null);
+            if (value instanceof String && !((String) value).isEmpty()) {
+                I18nManager.setLocale((String) value);
+            }
+        } catch (Throwable ignored) {
+            // LanguageConfig not available — use default locale
+        }
+        // Mili end
         final String type;
         if (args.length < 1) {
             type = "server";
