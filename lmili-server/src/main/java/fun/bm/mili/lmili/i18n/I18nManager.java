@@ -36,6 +36,12 @@ public final class I18nManager {
     // 当前语言
     private static volatile String currentLocale = DEFAULT_LOCALE;
 
+    // Mili start - eager initialization so translations work even without explicit init()
+    static {
+        loadTranslations(DEFAULT_LOCALE);
+    }
+    // Mili end
+
     private I18nManager() {}
 
     /**
