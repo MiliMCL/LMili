@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/image/Mili/mili-logo.png" alt="LMili Logo" width="600">
+  <img src="public/image/Mili/1787378660721.jpg" alt="LMili Logo" width="600">
 </p>
 
 <h1 align="center">LMili（米粒）</h1>
