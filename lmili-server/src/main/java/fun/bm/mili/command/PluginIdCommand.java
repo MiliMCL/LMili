@@ -5,7 +5,6 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import fun.bm.mili.lmili.api.LMili;
-import fun.bm.mili.lmili.api.identity.LifecycleState;
 import fun.bm.mili.lmili.api.identity.PluginId;
 import fun.bm.mili.lmili.api.identity.PluginIdentity;
 import fun.bm.mili.lmili.api.identity.PluginIdentityManager;
@@ -319,7 +318,7 @@ public final class PluginIdCommand extends RootNode {
                 return true;
             }
 
-            // 1. Update status to DISABLED
+            // 1. Update status to DISABLED (temporary — keeps context, identity)
             mgr.setStatus(pid, PluginStatus.DISABLED);
             sender.sendMessage(Component.text("Disabled " + pid.value() + ".", NamedTextColor.GRAY));
 
@@ -329,12 +328,8 @@ public final class PluginIdCommand extends RootNode {
                 sender.sendMessage(Component.text("  → cancelled " + cancelled + " pending task(s)", NamedTextColor.DARK_GRAY));
             }
 
-            // 3. Update runtime context lifecycle
-            final PluginRuntimeContext ctx = PluginRuntimeContext.forPluginId(pid);
-            if (ctx != null) {
-                ctx.setLifecycleState(LifecycleState.DISABLING);
-                sender.sendMessage(Component.text("  → lifecycle: DISABLING", NamedTextColor.DARK_GRAY));
-            }
+            // 3. Runtime context is retained — /pluginid enable restores immediately
+            sender.sendMessage(Component.text("  → use /pluginid enable " + pid.value() + " to restore", NamedTextColor.DARK_GRAY));
 
             return true;
         }

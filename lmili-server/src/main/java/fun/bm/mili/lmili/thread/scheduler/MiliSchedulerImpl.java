@@ -359,6 +359,16 @@ public final class MiliSchedulerImpl implements MiliScheduler {
         return lifecycle.isShuttingDown();
     }
 
+    @Override
+    public void unregisterRegion(long regionId) {
+        if (lifecycle.isShuttingDown()) return;
+        // 从 WorkStealingCoordinator 注销 region（清理 regionSlots）
+        // 使用非阻塞 deregisterRegion（不等待 barrier，适合频繁生命周期操作）
+        workStealingCoordinator.deregisterRegion(regionId);
+        // 从 PerformanceMetrics 清理该 region 的统计
+        metrics.removeRegion(regionId);
+    }
+
     /**
      * 获取池名（用于诊断/Holder 标识）。
      */

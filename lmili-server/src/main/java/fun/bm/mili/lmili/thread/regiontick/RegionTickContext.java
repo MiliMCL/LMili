@@ -439,6 +439,38 @@ public final class RegionTickContext {
         LOGGER.warn("[RegionTickContext] Force reset tick state for region #{}: new gen={}", regionId, newGenId);
     }
 
+    /**
+     * 关闭此 context —— 清理所有资源。
+     *
+     * <p>在 region 被销毁时由 {@code RegionTickDispatcher.unregisterRegion()} 调用。
+     * 执行以下操作：
+     * <ol>
+     *   <li>取消当前 Generation（阻止迟到完成影响后续状态）</li>
+     *   <li>将 tickState 置为 CANCELLED</li>
+     *   <li>释放 tickLatch（防止等待线程永远阻塞）</li>
+     * </ol>
+     *
+     * <p>此方法幂等，多次调用安全。</p>
+     */
+    public void close() {
+        // 1. 取消当前 Generation
+        final TickGeneration gen = currentGeneration.getAndSet(null);
+        if (gen != null) {
+            gen.cancel();
+        }
+
+        // 2. 重置 tick 状态
+        tickState.set(TickGeneration.State.CANCELLED);
+
+        // 3. 释放 latch（如果有等待线程）
+        final CountDownLatch latch = this.tickLatch;
+        if (latch != null && latch.getCount() > 0) {
+            while (latch.getCount() > 0) {
+                latch.countDown();
+            }
+        }
+    }
+
     // ---- 统计查询 ----
 
     public long getLastTickDurationNanos() { return this.lastTickDurationNanos; }

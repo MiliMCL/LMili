@@ -138,10 +138,36 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
 
     @Override
     public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+        final TickRegionData data = region.getData();
+        // Mili start - 清理 RegionTickDispatcher 上下文与 handle 注册表
+        // 防止长时间挂机后 activeContexts 与 FoliaRegionNodeSchedulerHandleRegistry 无限增长
+        try {
+            final fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher dispatcher =
+                    fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
+            if (dispatcher != null && data != null) {
+                dispatcher.unregisterRegion(data.id);
+            }
+        } catch (Throwable ignore) {
+            // 非关键路径，忽略异常
+        }
+        // 通知共享 MiliScheduler 清理该 region 的 WorkStealingCoordinator 槽位与性能指标
+        // 防止 region 频繁创建/销毁后 regionSlots 与 regionMetrics 无限增长
+        try {
+            if (data != null) {
+                final fun.bm.mili.lmili.thread.scheduler.api.MiliScheduler shared =
+                        fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler.getSharedScheduler();
+                if (shared != null) {
+                    shared.unregisterRegion(data.id);
+                }
+            }
+        } catch (Throwable ignore) {
+            // 非关键路径，忽略异常
+        }
+        // Mili end
         // nothing for now
         // Folia start - profiler
-        if (region.getData().profiler != null) {
-            region.getData().profiler.stopProfiler();
+        if (data != null && data.profiler != null) {
+            data.profiler.stopProfiler();
         }
         // Folia end - profiler
     }

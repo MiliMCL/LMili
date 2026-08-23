@@ -108,4 +108,22 @@ public interface MiliScheduler {
      * 检查调度器是否已关闭。
      */
     boolean isShutdown();
+
+    /**
+     * 注销一个 region —— 清理该 region 在调度器内部的所有追踪数据。
+     *
+     * <p>当 region 被销毁或不再需要调度时调用，防止：
+     * <ul>
+     *   <li>{@code WorkStealingCoordinator.regionSlots} 无限增长</li>
+     *   <li>{@code PerformanceMetrics.regionMetrics} 无限增长</li>
+     * </ul>
+     * 这些泄露会导致长时间挂机后：
+     * <ul>
+     *   <li>活跃区域计数持续上升</li>
+     *   <li>工作窃取循环扫描大量过期条目，TPS 下降</li>
+     * </ul>
+     *
+     * @param regionId 要注销的 region ID
+     */
+    void unregisterRegion(long regionId);
 }

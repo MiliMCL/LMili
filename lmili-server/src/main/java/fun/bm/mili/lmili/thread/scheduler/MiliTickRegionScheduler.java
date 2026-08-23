@@ -9,11 +9,10 @@ import io.papermc.paper.threadedregions.*;
 import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
 
-import java.util.Collections;
-import java.util.IdentityHashMap;
-import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Mili Tick Region Scheduler —— Folia API 适配器（R2-07 双 Worker runtime 合并 + 单 runtime 修复）。
@@ -78,9 +77,12 @@ public final class MiliTickRegionScheduler {
         return MiliSchedulerHolder.get();
     }
 
-    // ---- R2-08/R2-13: handle → TickTask wrapper registry (identity-based) ----
-    private static final Map<TickRegionScheduler.RegionScheduleHandle, TickTask> REGISTRY =
-            Collections.synchronizedMap(new IdentityHashMap<>());
+    // ---- R4-修复: regionId → TickTask ----
+    // 使用 ConcurrentHashMap 以 regionId 为键，替代之前的 IdentityHashMap + synchronizedMap 方案。
+    // regionId 是 region 的稳定标识符（TickRegionData.ID_GENERATOR 生成，全局唯一），
+    // 比 handle identity 更适合做键：线程安全（无需外部同步）、避免 identity 泄漏导致的
+    // 无限增长问题。
+    private static final ConcurrentHashMap<Long, TickTask> REGISTRY = new ConcurrentHashMap<>();
 
     // ---- R3-FIX: region 暂时不可获取时的重试退避（避免触发服务器关闭） ----
     /** 重试退避的初始延迟（ms） */
@@ -121,6 +123,7 @@ public final class MiliTickRegionScheduler {
      */
     public void scheduleRegion(final TickRegionScheduler.RegionScheduleHandle handle) {
         if (halted.get()) return;
+        if (handle.isMarkedAsNonSchedulable()) return; // 已取消的 handle 不应再被调度
 
         final TickTask task = computeTask(handle);
         // R2-08: CAS IDLE→QUEUED 防止重复入队
@@ -129,7 +132,13 @@ public final class MiliTickRegionScheduler {
         }
 
         try {
-            task.taskHandle = scheduler.submit(task.toRegionTask());
+            // R4-修复: getAndSet 原子交换 —— 旧 handle（若有）不会被新 handle 覆盖丢失
+            task.taskHandle.set(scheduler.submit(task.toRegionTask()));
+            // Note: this is a system-level tick task — it does NOT go through
+            // PluginSchedulerBridge because it is a region-tick (Folia-level)
+            // task, not a plugin task. The owner is implicitly lmili.system.
+            // Per V2 §18, system tasks are exempt from per-plugin lifecycle
+            // checks and tracking.
         } catch (Exception e) {
             // 提交失败，状态仍是 QUEUED（不是 RUNNING），tryMarkIdle() 无法工作，使用 forceCancel() 清理
             task.state.forceCancel();
@@ -140,14 +149,21 @@ public final class MiliTickRegionScheduler {
 
     /**
      * 取消 region 的调度。
+     *
+     * <p>注意：此处只清理 handle → TickTask 映射与 delayed future。
+     * region 在 merge 时会短暂进入 inactive，但其任务队列会被转移到目标 region，
+     * 因此<b>不能</b>在此注销共享调度器中的 region 槽位 —— 该清理
+     * 只在 {@link io.papermc.paper.threadedregions.TickRegions#onRegionDestroy}（region 真正销毁）时进行。</p>
      */
     public void descheduleRegion(final TickRegionScheduler.RegionScheduleHandle handle) {
         handle.markNonSchedulable();
-        final TickTask task = REGISTRY.get(handle);
+        final long rid = handle.region != null ? handle.region.id : GLOBAL_TICK_REGION_ID;
+        final TickTask task = REGISTRY.remove(rid);
         if (task != null) {
-            task.state.tryCancel();
-            if (task.taskHandle != null) {
-                task.taskHandle.cancel();
+            task.state.forceCancel();
+            final TaskHandle th = task.taskHandle.getAndSet(null);
+            if (th != null) {
+                th.cancel();
             }
         }
     }
@@ -178,8 +194,9 @@ public final class MiliTickRegionScheduler {
         for (final TickTask task : REGISTRY.values()) {
             task.handle.markNonSchedulable();
             task.state.forceCancel();
-            if (task.taskHandle != null) {
-                task.taskHandle.cancel();
+            final TaskHandle th = task.taskHandle.getAndSet(null);
+            if (th != null) {
+                th.cancel();
             }
             cancelledCount++;
         }
@@ -276,7 +293,8 @@ public final class MiliTickRegionScheduler {
     final class TickTask {
         final TickRegionScheduler.RegionScheduleHandle handle;
         final TaskScheduleState state = new TaskScheduleState();
-        volatile TaskHandle taskHandle;
+        // R4-修复: 使用 AtomicReference 实现 getAndSet，避免 read-then-write 竞争
+        final AtomicReference<TaskHandle> taskHandle = new AtomicReference<>(null);
         // R3-FIX: 当前退避延迟（连续 region-not-acquirable 时递增）
         private volatile long currentBackoffMs = RETRY_BACKOFF_INITIAL_MS;
         // R3-FIX: 连续 region-not-acquirable 重试计数（成功 tick 后重置）
@@ -433,14 +451,36 @@ public final class MiliTickRegionScheduler {
 
         /**
          * 延迟重新提交 tick 任务（避免忙等待）。
+         *
+         * <p>TPS 修复（R4）：在创建新的 delayed future 之前，先取消旧的任务句柄。
+         * 否则每次 resubmit 都会在单线程 delayed scheduler 中堆积一个
+         * {@code ScheduledFuture}，且与当前 {@code taskHandle} 分离、不会被清理。</p>
+         *
+         * <p>这些“孤儿”future 之后仍会触发：回调里调用 {@code submitRegionTask}，
+         * 使同一个 region 产生重复的 tick 任务。重复任务竞速执行时，
+         * {@code "Scheduled region should be acquirable"} 异常被抛出并计数
+         * {@code consecutiveRetries} —— 当重试计数超过
+         * {@link #MAX_CONSECUTIVE_RETRIES} 后，合法的 region tick 会被跳过，
+         * 直接表现为长时间挂机后 TPS 从 20 下跌到 8 附近。</p>
+         *
+         * <p>取消旧句柄保证同一 region 同一时刻只有一个 delayed future 存活；
+         * 配合 {@link TaskScheduleState} 的 dedup，彻底消除重复 tick 的源头。</p>
          */
         void resubmitDelayed(final long delayMs) {
             if (halted.get() || handle.isMarkedAsNonSchedulable()) return;
             // R2-08: CAS IDLE→QUEUED，防止重复提交
             if (!state.tryMarkQueued()) return;
             try {
-                taskHandle = scheduler.scheduleDelayed(toRegionTask(),
+                // R4-TPS 修复: 先创建新 delayed future，再用 getAndSet 原子交换。
+                // 返回的旧 handle 若仍存活则取消，避免孤儿回调堆积在单线程
+                // delayed scheduler 中（旧 handle 不会被新 handle 覆盖丢失）。
+                final TaskHandle newHandle = scheduler.scheduleDelayed(toRegionTask(),
                         Math.max(1, delayMs), TimeUnit.MILLISECONDS);
+                final TaskHandle previous = taskHandle.getAndSet(newHandle);
+                if (previous != null) {
+                    previous.cancel();
+                }
+                // System-level tick task — not a plugin task, no bridge needed.
             } catch (Exception e) {
                 // scheduleDelayed 失败，状态仍是 QUEUED（不是 RUNNING），使用 forceCancel() 清理
                 state.forceCancel();
@@ -449,16 +489,23 @@ public final class MiliTickRegionScheduler {
     }
 
     /**
-     * 获取或创建 handle 对应的 TickTask（identity-based，同一 handle 只有一个实例）。
+     * 获取或创建 regionId 对应的 TickTask。
+     *
+     * <p>R4-修复: 使用 ConcurrentHashMap.compute 以 regionId 为键。
+     * regionId 是 region 的稳定标识符，比 handle identity 更适合做键：
+     * 线程安全、不会因 handle 复制而泄漏旧条目。</p>
+     *
+     * <p>如果已有 TickTask 且其 handle 仍未标记为不可调度，则复用；
+     * 否则创建新的 TickTask（关联新的 handle）。</p>
      */
     private TickTask computeTask(final TickRegionScheduler.RegionScheduleHandle handle) {
-        synchronized (REGISTRY) {
-            TickTask existing = REGISTRY.get(handle);
-            if (existing != null) return existing;
-            final TickTask created = new TickTask(handle);
-            REGISTRY.put(handle, created);
-            return created;
-        }
+        final long rid = handle.region != null ? handle.region.id : GLOBAL_TICK_REGION_ID;
+        return REGISTRY.compute(rid, (id, existing) -> {
+            if (existing != null && !existing.handle.isMarkedAsNonSchedulable()) {
+                return existing; // 复用
+            }
+            return new TickTask(handle);
+        });
     }
 
     /**

@@ -150,13 +150,20 @@ public final class RegionTickDispatcher {
     }
 
     public void unregisterRegion(final long regionId) {
-        this.activeContexts.remove(regionId);
+        // R4-修复: 关闭 context 释放资源，而不仅仅是 remove
+        final RegionTickContext ctx = this.activeContexts.remove(regionId);
+        if (ctx != null) {
+            ctx.close();
+        }
         this.chunkDispatcher.unregister(regionId);
         // RISK-18 修复：注销 region 的所有 generation handle
         // （region 销毁时无法精确知道最后一个 generation 是什么，全部清理即可）
         fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
                 .FoliaRegionNodeSchedulerHandleRegistry
                 .unregisterRegion(regionId);
+        // 清理该 region 在 FoliaRegionNodeScheduler 中的 pending 跨 region DAG 任务
+        // 区域已销毁，这些任务不需要再执行
+        this.foliaRegionScheduler.drainPending(regionId);
     }
 
     public RegionTickContext getOrCreateContext(

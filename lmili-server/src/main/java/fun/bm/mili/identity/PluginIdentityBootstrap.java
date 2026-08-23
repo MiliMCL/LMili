@@ -102,7 +102,21 @@ public final class PluginIdentityBootstrap implements Listener {
             return;
         }
 
+        // Hot reload: if a runtime context already exists for this PluginId,
+        // clean up the old runtime (cancel tasks, clear indices) before
+        // building a new one. This ensures Identity, RuntimeContext,
+        // SchedulerDomain, Metrics and Bukkit Plugin stay in sync.
+        final PluginId registeredId = registered.id();
+        final PluginRuntimeContext existing = PluginRuntimeContext.forPluginId(registeredId);
+        if (existing != null) {
+            MiliLogger.LOGGER.info("{}hot reload detected for {} — cleaning previous runtime",
+                    LOG_PREFIX, registeredId.value());
+            PluginSchedulerBridge.unloadPlugin(registeredId);
+        }
+
         final PluginRuntimeContext ctx = buildContext(registered);
+        // If a runtime context already existed for this PluginId (hot reload),
+        // the old one was cleaned up before building the new context.
         PluginRuntimeContext.registerForPlugin(name, ctx);
         // V2 §18: also index by PluginId so the runtime can locate the live
         // context (quota/observability/domain) without a Bukkit name.

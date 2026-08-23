@@ -124,6 +124,17 @@ public final class PerformanceMetrics {
     }
 
     /**
+     * 移除一个 region 的所有追踪数据（在 region 被销毁或注销时调用）。
+     *
+     * <p>防止 {@link #regionMetrics} ConcurrentHashMap 无限增长。
+     * 长时间挂机后 region 反复创建/销毁，若不清理会导致
+     * 活跃 region 计数持续上升、占用内存并影响诊断效率。</p>
+     */
+    public void removeRegion(final long regionId) {
+        regionMetrics.remove(regionId);
+    }
+
+    /**
      * 获取 P99 延迟。
      *
      * <p>使用直方图近似，不需要存储所有样本。

@@ -387,13 +387,16 @@ public final class ChunkTickDispatcher {
     }
 
     /**
-     * 취销 region —— 清理 pending 状態。
+     * 취销 region —— 清理 pending 状態与 region 统计。
      */
     public void unregister(long regionId) {
+        // R4-修复: 清理 pending chunk tick future
         CompletableFuture<Void> future = pendingChunkFutures.remove(regionId);
         if (future != null) {
             future.cancel(true);
         }
+        // R4-修复: 清理 Adaptive Slicer 统计（region 已销毁，无需保留其 slice 历史）
+        regionSlicers.remove(regionId);
     }
 
     /**

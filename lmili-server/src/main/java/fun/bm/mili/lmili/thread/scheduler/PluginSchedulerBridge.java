@@ -166,10 +166,16 @@ public final class PluginSchedulerBridge {
             @Override
             public void execute(@NotNull final EntityTask.EntityTaskContext context) throws Exception {
                 LMili.bindCurrentOwner(owner);
+                final long start = System.nanoTime();
+                boolean ok = true;
                 try {
                     task.execute(context);
+                } catch (final Throwable t) {
+                    ok = false;
+                    throw t;
                 } finally {
                     LMili.clearCurrentOwner();
+                    recordExecution(owner, System.nanoTime() - start, ok);
                 }
             }
 
@@ -194,6 +200,11 @@ public final class PluginSchedulerBridge {
     /**
      * Disable a plugin: cancel all pending (queued or running) tasks.
      *
+     * <p>This is a <em>temporary</em> operator action — Identity, Runtime
+     * Context, Metrics and the Bukkit plugin are all retained. Only the
+     * scheduler tasks are cancelled and further submissions are rejected by
+     * the lifecycle check in {@link #submit}.</p>
+     *
      * @return the number of tasks that were successfully cancelled
      */
     public static int disablePlugin(@NotNull final PluginId owner) {
@@ -202,14 +213,9 @@ public final class PluginSchedulerBridge {
 
         int cancelled = 0;
         for (final TaskHandle h : set) {
-            if (h.cancel()) {
-                cancelled++;
-                // Record quota cancellation
-                final PluginRuntimeContext ctx = PluginRuntimeContext.forPluginId(owner);
-                if (ctx != null) {
-                    ctx.resourceQuota().onTaskCancelled();
-                }
-            }
+            if (h.cancel()) cancelled++;
+            // Note: quota accounting for the cancelled handle is done by the
+            // onComplete callback registered in trackHandle (recordTerminal).
         }
         set.clear();
 
@@ -219,17 +225,72 @@ public final class PluginSchedulerBridge {
     }
 
     /**
-     * Unload a plugin: cancel pending tasks and remove all tracking.
-     * Called during {@link PluginIdentityBootstrap} plugin disable.
+     * Unload a plugin: cancel pending tasks, remove all tracking and clean up
+     * the runtime context. Called when the plugin is truly unloaded (Bukkit
+     * {@code PluginDisableEvent} / hot-reload), NOT by operator disable.
+     *
+     * <p>Also cascades to addon plugins whose {@link PluginId} is a child of
+     * the unloaded plugin (P1: parent unload must not leave addon tasks
+     * running).</p>
      */
     public static void unloadPlugin(@NotNull final PluginId owner) {
         disablePlugin(owner);
         TASKS_BY_OWNER.remove(owner);
 
+        // Cascade to child addons that inherit this plugin's scheduler domain.
+        for (final PluginId tracked : TASKS_BY_OWNER.keySet()) {
+            if (tracked.isChildOf(owner)) {
+                disablePlugin(tracked);
+                TASKS_BY_OWNER.remove(tracked);
+                PluginRuntimeContext.unregisterForPluginId(tracked);
+                LOGGER.info("[PluginSchedulerBridge] Cascaded unload to addon {}", tracked.value());
+            }
+        }
+
         // Clean up the runtime context index
         PluginRuntimeContext.unregisterForPluginId(owner);
 
         LOGGER.info("[PluginSchedulerBridge] Unloaded {}", owner.value());
+    }
+
+    // ---- task accounting -------------------------------------------------
+
+    /**
+     * Record the actual execution of a task on the owner's quota and
+     * observability counters. Called from the owner-stamped wrappers after
+     * {@code execute()} returns (success or failure).
+     */
+    private static void recordExecution(@NotNull final PluginId owner,
+                                        final long executionNanos,
+                                        final boolean success) {
+        if (owner.equals(LMili.SYSTEM_OWNER_ID)) return;
+        final PluginRuntimeContext ctx = PluginRuntimeContext.forPluginId(owner);
+        if (ctx == null) return;
+        ctx.resourceQuota().onTaskStart();
+        ctx.resourceQuota().onTaskFinish(executionNanos, success);
+        ctx.observability().recordExecutionNanos(executionNanos);
+        if (!success) ctx.observability().recordTaskFailed();
+    }
+
+    /**
+     * Record the terminal state of a tracked task. Fired from the
+     * {@code onComplete} callback in {@link #trackHandle}.
+     */
+    private static void recordTerminal(@NotNull final PluginId owner,
+                                       @NotNull final TaskHandle handle) {
+        if (owner.equals(LMili.SYSTEM_OWNER_ID)) return;
+        final PluginRuntimeContext ctx = PluginRuntimeContext.forPluginId(owner);
+        if (ctx == null) return;
+
+        switch (handle.state()) {
+            case COMPLETED, FAILED -> {
+                // Execution already recorded in the stamped wrapper; nothing to add.
+                // (For tasks that complete without the wrapper running, the
+                // wrapper's recordExecution still fires on the carrying thread.)
+            }
+            case CANCELLED -> ctx.resourceQuota().onTaskCancelled();
+            default -> { }
+        }
     }
 
     // ---- diagnostics ----------------------------------------------------
@@ -263,8 +324,12 @@ public final class PluginSchedulerBridge {
                 owner, k -> ConcurrentHashMap.newKeySet());
         set.add(handle);
 
-        // Auto-remove on completion so the set stays lean
-        handle.onComplete(h -> set.remove(h));
+        // Auto-remove on completion so the set stays lean, and record the
+        // terminal state on the owner's quota.
+        handle.onComplete(h -> {
+            set.remove(h);
+            recordTerminal(owner, h);
+        });
     }
 
     /**
@@ -278,10 +343,16 @@ public final class PluginSchedulerBridge {
             @Override
             public void execute() throws Exception {
                 LMili.bindCurrentOwner(owner);
+                final long start = System.nanoTime();
+                boolean ok = true;
                 try {
                     task.execute();
+                } catch (final Throwable t) {
+                    ok = false;
+                    throw t;
                 } finally {
                     LMili.clearCurrentOwner();
+                    recordExecution(owner, System.nanoTime() - start, ok);
                 }
             }
 

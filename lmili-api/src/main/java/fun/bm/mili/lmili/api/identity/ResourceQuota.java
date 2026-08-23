@@ -35,6 +35,7 @@ public final class ResourceQuota {
     private final AtomicLong tasksTimedOut = new AtomicLong();
     private final AtomicLong tasksCancelled = new AtomicLong();
     private final AtomicLong totalExecutionNanos = new AtomicLong();
+    private final AtomicLong maxExecutionNanos = new AtomicLong();
     private final AtomicLong rejected = new AtomicLong();
 
     private ResourceQuota(@NotNull final PluginId owner,
@@ -79,6 +80,11 @@ public final class ResourceQuota {
     public long tasksTimedOut() { return tasksTimedOut.get(); }
     public long tasksCancelled() { return tasksCancelled.get(); }
     public long totalExecutionNanos() { return totalExecutionNanos.get(); }
+    public long maxExecutionNanos() { return maxExecutionNanos.get(); }
+    public long averageExecutionNanos() {
+        final long completed = tasksCompleted.get();
+        return completed == 0 ? 0 : totalExecutionNanos.get() / completed;
+    }
     public long rejectedCount() { return rejected.get(); }
 
     public boolean canAdmit(final int currentInflight, final int currentQueued) {
@@ -102,7 +108,10 @@ public final class ResourceQuota {
         tasksRunning.decrementAndGet();
         tasksCompleted.incrementAndGet();
         if (!success) tasksFailed.incrementAndGet();
-        if (executionNanos > 0) totalExecutionNanos.addAndGet(executionNanos);
+        if (executionNanos > 0) {
+            totalExecutionNanos.addAndGet(executionNanos);
+            maxExecutionNanos.accumulateAndGet(executionNanos, Math::max);
+        }
     }
 
     public void onTaskTimedOut() {
@@ -137,6 +146,8 @@ public final class ResourceQuota {
                 + ", failed=" + tasksFailed.get()
                 + ", timedOut=" + tasksTimedOut.get()
                 + ", cancelled=" + tasksCancelled.get()
+                + ", avgExecNanos=" + averageExecutionNanos()
+                + ", maxExecNanos=" + maxExecutionNanos.get()
                 + ", rejected=" + rejected.get() + "}";
     }
 }

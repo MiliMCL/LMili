@@ -178,6 +178,52 @@ public final class WorkStealingCoordinator {
         return remaining;
     }
 
+    /**
+     * 轻量级注销 region —— 不等待 barrier，直接从 map 移除并 drain 剩余任务。
+     *
+     * <p>与 {@link #unregisterRegion(long)} 的区别：
+     * <ul>
+     *   <li>不等待 {@link RegionSlot#closeBarrier} —— 不会阻塞调用线程</li>
+     *   <li>适用于 region 生命周期内频繁的 inactive/destroy 操作</li>
+     *   <li>调用方不持有 regionizer 写锁时也可安全调用</li>
+     * </ul>
+     *
+     * <p><b>操作顺序（R4-修复）</b>：
+     * <ol>
+     *   <li>{@code deactivate()} — 阻止新任务入队</li>
+     *   <li>{@code drain()} — 取出剩余任务并调用 {@code onCancel()}</li>
+     *   <li>{@code forceClose()} — 强制关闭 RegionState</li>
+     *   <li>{@code remove()} — 从 {@link #regionSlots} 中移除</li>
+     * </ol>
+     * 先 drain 后 remove 保证：旧 worker 仍在活跃时，region 不会从 map 中
+     * 突然消失（旧 worker 的 slot 引用仍然有效，但会被 drain 处理）。
+     *
+     * <p>用于修复长时间挂机后 {@link #regionSlots} 无限增长的问题：
+     * region 被销毁时（{@code onRegionDestroy}）调用此方法清理，
+     * 防止工作窃取循环扫描大量过期条目导致 TPS 下降。</p>
+     */
+    public void deregisterRegion(final long regionId) {
+        RegionSlot slot = regionSlots.get(regionId);
+        if (slot == null) return;
+        RegionQueue queue = slot.queue;
+
+        // 1. 标记为 DRAINING，阻止新任务入队
+        queue.deactivate();
+
+        // 2. 先 drain 剩余任务并调用 onCancel（确保旧 worker 持有的引用被释放）
+        List<RegionTask> remaining = queue.drain();
+        if (!remaining.isEmpty()) {
+            LOGGER.debug("[WorkStealingCoordinator] Deregistered region #{} (gen {} , drained {} tasks)",
+                    regionId, slot.generation, remaining.size());
+        }
+
+        // 3. 强制关闭 RegionState
+        queue.forceClose();
+
+        // 4. 最后从 map 中移除（后续 submit 会重新注册，获得新 generation 的 slot）
+        regionSlots.remove(regionId);
+    }
+
     public boolean isRegionRegistered(final long regionId) {
         RegionSlot slot = regionSlots.get(regionId);
         return slot != null && slot.queue.isActive();
