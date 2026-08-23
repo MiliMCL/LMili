@@ -1,5 +1,6 @@
 package fun.bm.mili.lmili.thread.regiontick.executor;
 
+import fun.bm.mili.lmili.thread.regiontick.RegionTickContext;
 import fun.bm.mili.lmili.thread.regiontick.dag.CompiledDag;
 import fun.bm.mili.lmili.thread.regiontick.dag.DagExecutionState;
 import fun.bm.mili.lmili.thread.scheduler.tick.TickContext;
@@ -12,7 +13,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -59,46 +59,38 @@ public final class DagExecutionEngine {
      *   <li>{@link TaskHandle#completion()} 获取 CompletionStage 用于非阻塞观察</li>
  * </ul>
      *
-     * @param dag      编译后的 DAG（不可变）
-     * @param executor 用于执行节点的线程池
-     * @param tick     当前 tick 数（传递给执行上下文）
+     * @param dag                  编译后的 DAG（不可变）
+     * @param nodeScheduler        节点路由器（按 regionId 路由到正确的执行路径）
+     * @param tick                 当前 tick 数
+     * @param currentRegionContext 当前 region tick 上下文（用于路由决策）
      * @return TaskHandle 用于追踪完成状态
      */
     public @NotNull TaskHandle execute(
             final @NotNull CompiledDag dag,
-            final @NotNull Executor executor,
-            final long tick
+            final @NotNull NodeScheduler nodeScheduler,
+            final long tick,
+            final @NotNull RegionTickContext currentRegionContext
     ) {
-        return execute(dag, executor, tick, null);
+        return execute(dag, nodeScheduler, tick, currentRegionContext, null);
     }
 
     /**
      * 执行编译后的 DAG，并连接到 {@link TickContext} 的 barrier。
      *
-     * <p>当所有 DAG 节点完成后，会自动完成 tick barrier：
-     * <pre>
-     * DAG
-     *  ├── Node A
-     *  ├── Node B
-     *  └── Node C
-     *        ↓
-     *  all complete
-     *        ↓
-     *  TaskHandle.complete()
-     *        ↓
-     *  TickBarrier.complete()
-     * </pre>
+     * <p>当所有 DAG 节点完成后，会自动完成 tick barrier。</p>
      *
-     * @param dag      编译后的 DAG（不可变）
-     * @param executor 用于执行节点的线程池
-     * @param tick     当前 tick 数（传递给执行上下文）
-     * @param tickCtx  tick 上下文（可为 null，如果不连接 barrier）
+     * @param dag                  编译后的 DAG（不可变）
+     * @param nodeScheduler        节点路由器
+     * @param tick                 当前 tick 数
+     * @param currentRegionContext 当前 region tick 上下文
+     * @param tickCtx              tick 上下文（可为 null）
      * @return TaskHandle 用于追踪完成状态
      */
     public @NotNull TaskHandle execute(
             final @NotNull CompiledDag dag,
-            final @NotNull Executor executor,
+            final @NotNull NodeScheduler nodeScheduler,
             final long tick,
+            final @NotNull RegionTickContext currentRegionContext,
             final @Nullable TickContext tickCtx
     ) {
         int nodeCount = dag.nodeCount();
@@ -133,38 +125,46 @@ public final class DagExecutionEngine {
             return handle;
         }
 
-        // 提交所有就绪节点
+        // 派发所有初始就绪节点
         for (int nodeId : readyNodes) {
-            submitNode(dag, executor, handle, state, nodeId, tick, tickCtx);
+            submitNode(dag, nodeScheduler, handle, state, nodeId, tick, currentRegionContext, tickCtx);
         }
 
         return handle;
     }
 
     /**
-     * 提交单个节点执行。
+     * 提交单个节点执行（通过 NodeScheduler 路由）。
+     *
+     * <p><b>Mili 关键修复</b>：节点派发改为通过 {@link NodeScheduler}，按 regionId
+     * 路由 —— 同 region 节点在当前线程同步执行（保留 tickingRegion 上下文），
+     * 跨 region 节点重新入 Folia 调度（由目标 region 的 acquire 路径执行）。</p>
      *
      * <p>节点执行完成后，会自动：
      * <ol>
      *   <li>递减所有后继节点的入度（原子操作）</li>
-     *   <li>将新就绪的节点提交执行</li>
+     *   <li>将新就绪的节点通过 NodeScheduler 派发</li>
      *   <li>标记当前节点完成</li>
      * </ol>
      */
     private void submitNode(
             final CompiledDag dag,
-            final Executor executor,
+            final NodeScheduler nodeScheduler,
             final TaskHandle handle,
             final DagExecutionState state,
             final int nodeId,
             final long tick,
+            final @NotNull RegionTickContext currentRegionContext,
             final @Nullable TickContext tickCtx
     ) {
         if (handle.isCancelled() || state.isCancelled()) {
             return; // 已取消，不再提交新节点
         }
 
-        executor.execute(() -> {
+        final long nodeRegionId = dag.regionId(nodeId);
+
+        // 构造节点 body：执行节点逻辑 + 后继节点派发
+        final Runnable body = () -> {
             if (handle.isCancelled() || state.isCancelled()) {
                 return; // 执行前再次检查取消状态
             }
@@ -198,8 +198,8 @@ public final class DagExecutionEngine {
                 // 原子递减入度 —— 多个 predecessor 可能同时完成
                 // 只有最后一个将入度降为 0 的线程才会提交该后继节点
                 if (state.decrementDependency(succId)) {
-                    // 入度降为 0，提交执行
-                    submitNode(dag, executor, handle, state, succId, tick, tickCtx);
+                    // 入度降为 0，派发后继节点（通过 NodeScheduler 路由）
+                    submitNode(dag, nodeScheduler, handle, state, succId, tick, currentRegionContext, tickCtx);
                 }
             }
 
@@ -210,7 +210,27 @@ public final class DagExecutionEngine {
             if (state.nodeCompleted() && tickCtx != null) {
                 tickCtx.complete();
             }
-        });
+        };
+
+        // 通过 NodeScheduler 派发 —— 按 regionId 自动路由
+        try {
+            nodeScheduler.dispatch(nodeId, nodeRegionId, body, currentRegionContext);
+        } catch (SameRegionNodeScheduler.CrossRegionExecutionException cee) {
+            // 内部断言失败：SameRegionNodeScheduler 不应收到跨 region 节点
+            LOGGER.error("DAG node routing assertion failed: {}", cee.getMessage(), cee);
+            state.markFailed();
+            handle.fail(cee);
+            if (tickCtx != null) {
+                tickCtx.reportFailure(cee);
+            }
+        } catch (Throwable t) {
+            LOGGER.error("Failed to dispatch DAG node {}", nodeId, t);
+            state.markFailed();
+            handle.fail(t);
+            if (tickCtx != null) {
+                tickCtx.reportFailure(t);
+            }
+        }
     }
 
     /**

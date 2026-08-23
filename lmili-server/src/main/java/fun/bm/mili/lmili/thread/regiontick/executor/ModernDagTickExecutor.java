@@ -18,7 +18,6 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Executor;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 
@@ -61,8 +60,8 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
     /** 系统依赖图 */
     private final SystemGraph systemGraph;
 
-    /** 执行节点的 Executor（通常是 Virtual Thread 执行器） */
-    private final Executor nodeExecutor;
+    /** 节点路由器（按 regionId 路由节点）。 */
+    private volatile NodeScheduler nodeScheduler;
 
     /** 回退执行器（当没有注册系统时使用） */
     private final RegionTickExecutor fallbackExecutor;
@@ -84,14 +83,14 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
     /**
      * 创建现代 DAG 执行器。
      *
-     * @param nodeExecutor    用于执行节点的 Executor
+     * @param nodeScheduler   用于派发节点的路由器（按 regionId 路由到正确的执行路径）
      * @param fallbackExecutor 没有注册系统时的回退执行器
      */
     public ModernDagTickExecutor(
-            final @NotNull Executor nodeExecutor,
+            final @NotNull NodeScheduler nodeScheduler,
             final @NotNull RegionTickExecutor fallbackExecutor
     ) {
-        this.nodeExecutor = Objects.requireNonNull(nodeExecutor, "nodeExecutor");
+        this.nodeScheduler = Objects.requireNonNull(nodeScheduler, "nodeScheduler");
         this.fallbackExecutor = Objects.requireNonNull(fallbackExecutor, "fallbackExecutor");
         this.systemGraph = new SystemGraph();
     }
@@ -99,10 +98,36 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
     /**
      * 创建现代 DAG 执行器（使用默认的 FoliaTickExecutor 作为回退）。
      *
-     * @param nodeExecutor 用于执行节点的 Executor
+     * @param nodeScheduler 节点路由器
      */
-    public ModernDagTickExecutor(final @NotNull Executor nodeExecutor) {
-        this(nodeExecutor, new FoliaTickExecutor());
+    public ModernDagTickExecutor(final @NotNull NodeScheduler nodeScheduler) {
+        this(nodeScheduler, new FoliaTickExecutor());
+    }
+
+    /**
+     * 替换节点路由器（用于在运行时切换到 region-acquire 路由）。
+     *
+     * <p>典型用法：在 {@code RegionTickBootstrap.init()} 中调用本方法，把 DAG 节点
+     * 从裸 {@link Executor} 切换到按 regionId 路由的 {@link NodeScheduler}，确保
+     * 跨 region 节点重新走 Folia 的 acquire 路径。</p>
+     *
+     * <p>注意：此切换对正在执行的节点无效，仅影响后续 submit 的节点。</p>
+     *
+     * @param newScheduler 新路由器（不允许为 null）
+     */
+    public void setNodeScheduler(final @NotNull NodeScheduler newScheduler) {
+        Objects.requireNonNull(newScheduler, "newScheduler");
+        LOGGER.info("[ModernDagTickExecutor] Switching node scheduler: {} -> {}",
+                this.nodeScheduler.getClass().getSimpleName(),
+                newScheduler.getClass().getSimpleName());
+        this.nodeScheduler = newScheduler;
+    }
+
+    /**
+     * 获取当前节点路由器（用于诊断）。
+     */
+    public @NotNull NodeScheduler getNodeScheduler() {
+        return nodeScheduler;
     }
 
     /**
@@ -128,7 +153,9 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
                     "System name mismatch: name='" + name + "', profile.name()='" + profile.name() + "'");
         }
 
-        systemGraph.register(profile, ctx -> executor.accept(profile, scope));
+        // Mili 扩展：从 scope 提取 regionId，让 DAG 编译时把节点 region 信息固化
+        long nodeRegionId = SystemGraph.extractRegionId(scope);
+        systemGraph.register(profile, nodeRegionId, ctx -> executor.accept(profile, scope));
         // 安全转换：SystemProfile 是 Object 的子类型，BiConsumer 可以向上转型
         BiConsumer<Object, Object> rawExec = (BiConsumer<Object, Object>) (BiConsumer<?, ?>) executor;
         SystemGraph.SystemHandle handle = systemGraph.getHandle(profile.name());
@@ -178,6 +205,41 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
     }
 
     /**
+     * 在 region tick 进入时执行积压的跨 region DAG 子任务。
+     *
+     * <p><b>Mili 修复</b>：当 {@link FoliaRegionNodeScheduler} 把跨 region 节点
+     * 投递给目标 region 时，会调用 {@link TickRegionScheduler#getScheduler()#scheduleRegion}
+     * 触发 Folia 调度。Folia 自然进入该 region 的 tick —— 本方法在 tick 进入
+     * 入口被调用，先 drain 上次 tick 遗留的 pending 任务，再走正常的 DAG 执行。</p>
+     *
+     * <p>由 FoliaRegionNodeSchedulerHandleRegistry 找到 handle 后，region tick
+     * 触发时调用此方法。pending 列表空时此方法 no-op。</p>
+     *
+     * @param context 当前 region tick 上下文
+     */
+    public void drainCrossRegionPending(@NotNull final RegionTickContext context) {
+        if (systemGraph.systemCount() == 0) return;
+        if (!(this.nodeScheduler instanceof CompositeNodeScheduler composite)) {
+            return;
+        }
+        final FoliaRegionNodeScheduler foliaSched = composite.foliaRegionScheduler();
+        final java.util.List<FoliaRegionNodeScheduler.PendingNodeTask> pending = foliaSched.drainPending(context.regionId);
+        if (pending.isEmpty()) return;
+        LOGGER.info("[ModernDagTickExecutor] Draining {} cross-region pending DAG nodes for region #{}",
+                pending.size(), context.regionId);
+        // 在当前线程同步执行 pending 节点 —— 上下文就是当前 region 的 acquire/tickingRegion
+        for (final FoliaRegionNodeScheduler.PendingNodeTask task : pending) {
+            try {
+                // pending 任务 body 内部已包含"节点执行 + 后继派发"逻辑
+                // 后继派发会再次进入 CompositeNodeScheduler 路由（可能再产生 pending）
+                task.body().run();
+            } catch (Throwable t) {
+                LOGGER.error("Failed to drain cross-region pending node {}", task.nodeId(), t);
+            }
+        }
+    }
+
+    /**
      * 异步执行 slice 并返回完成阶段。
      *
      * <p>这是 Phase A 的核心修复：DAG 完成必须可观察，不能 fire-and-forget。
@@ -218,10 +280,10 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
             return CompletableFuture.completedFuture(null);
         }
 
-        // 使用新引擎执行，连接 tick barrier
+        // 使用新引擎执行 —— 节点派发由 NodeScheduler 按 regionId 路由
         DagExecutionEngine engine = new DagExecutionEngine();
         DagExecutionEngine.TaskHandle handle = engine.execute(
-                dag, nodeExecutor, context.getCurrentTick(), tickCtx);
+                dag, nodeScheduler, context.getCurrentTick(), context, tickCtx);
 
         // 返回完成阶段 —— DAG 完成必须可观察
         return handle.completion();

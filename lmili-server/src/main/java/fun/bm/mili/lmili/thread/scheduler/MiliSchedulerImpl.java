@@ -278,6 +278,27 @@ public final class MiliSchedulerImpl implements MiliScheduler {
         return lifecycle.isShuttingDown();
     }
 
+    /**
+     * 获取池名（用于诊断/Holder 标识）。
+     */
+    public String getPoolName() {
+        return config.poolName;
+    }
+
+    /**
+     * 获取当前线程名前缀（用于诊断）。
+     */
+    public String getThreadNamePrefix() {
+        return config.threadNamePrefix;
+    }
+
+    /**
+     * 当前是否使用 TickThread worker。
+     */
+    public boolean isTickThreadMode() {
+        return config.tickThreads;
+    }
+
     // ---- 内部方法 ----
 
     /**

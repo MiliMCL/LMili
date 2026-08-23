@@ -75,6 +75,25 @@ public final class SystemGraph {
             final @NotNull SystemProfile profile,
             final @NotNull CompiledDag.DagExecutor executor
     ) {
+        return register(profile, CompiledDag.GLOBAL_REGION_ID, executor);
+    }
+
+    /**
+     * 注册一个 tick 系统，指定所属 regionId。
+     *
+     * <p>用于 Mili：节点声明其所属 region，DAG 编译时把 regionId 固化到 {@link CompiledDag}，
+     * 节点执行时按 regionId 路由（Folia region acquire 路径）。</p>
+     *
+     * @param profile  系统声明（资源访问模式、优先级）
+     * @param regionId 节点所属 regionId（正数）或 {@link CompiledDag#GLOBAL_REGION_ID} 表示无 region 约束
+     * @param executor 系统执行函数
+     * @return 系统句柄，用于后续声明依赖
+     */
+    public @NotNull SystemHandle register(
+            final @NotNull SystemProfile profile,
+            final long regionId,
+            final @NotNull CompiledDag.DagExecutor executor
+    ) {
         Objects.requireNonNull(profile, "profile");
         Objects.requireNonNull(executor, "executor");
 
@@ -84,7 +103,7 @@ public final class SystemGraph {
             }
 
             int id = systems.size();
-            systems.add(new RegisteredSystem(id, profile, executor));
+            systems.add(new RegisteredSystem(id, profile, regionId, executor));
             nameToId.put(profile.name(), id);
             invalidateCache();
 
@@ -202,6 +221,17 @@ public final class SystemGraph {
                 builder.setExecutor(sys.id, sys.executor);
             }
 
+            // Mili 扩展：将每个节点的 regionId（注册时声明）固化到 DAG。
+            //
+            // 原因：DAG 引擎在执行节点时需要按 regionId 路由 —— 同 region 节点保留当前
+            // 线程的 tickingRegion 上下文直接执行；跨 region 节点必须重新走 Folia 的
+            // region acquire 路径，禁止在同一线程直接执行以免破坏 region 不变量。
+            for (RegisteredSystem sys : systems) {
+                if (sys.regionId != CompiledDag.GLOBAL_REGION_ID) {
+                    builder.setRegionId(sys.id, sys.regionId);
+                }
+            }
+
             // 添加显式依赖
             for (int[] dep : dependencies) {
                 builder.addEdge(dep[0], dep[1]);
@@ -262,10 +292,13 @@ public final class SystemGraph {
 
     /**
      * 已注册的系统。
+     *
+     * <p>包含 {@code regionId} 用于 Mili DAG 编译时把节点 region 信息固化到 {@link CompiledDag}。</p>
      */
     private record RegisteredSystem(
             int id,
             SystemProfile profile,
+            long regionId,
             CompiledDag.DagExecutor executor
     ) {}
 
@@ -277,5 +310,29 @@ public final class SystemGraph {
         public String toString() {
             return "SystemHandle{" + name + " (id=" + id + ")}";
         }
+    }
+
+    /**
+     * 兼容旧 API：从 Scope 提取 regionId。
+     *
+     * <p>{@link Scope} 形如 {@code Scope.RegionScope/ChunkScope/EntityIdSetScope}，均携带 regionId。
+     * 用户可通过 {@code register(profile, regionId, executor)} 直接传 regionId，无需构造 Scope。</p>
+     *
+     * @deprecated 建议直接使用 {@link #register(SystemProfile, long, CompiledDag.DagExecutor)}
+     */
+    @Deprecated
+    public static long extractRegionId(@Nullable final Object scope) {
+        if (scope == null) return CompiledDag.GLOBAL_REGION_ID;
+        if (scope instanceof Scope.RegionScope rs) {
+            return rs.regionId();
+        }
+        if (scope instanceof Scope.ChunkScope cs) {
+            return cs.regionId();
+        }
+        if (scope instanceof Scope.EntityIdSetScope es) {
+            return es.regionId();
+        }
+        // 未知 scope 形态 —— 视为 global
+        return CompiledDag.GLOBAL_REGION_ID;
     }
 }

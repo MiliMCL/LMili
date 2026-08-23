@@ -28,10 +28,20 @@ import java.util.Objects;
  * │ inDegrees: int[] (每个节点的入度)              │
  * │ executors: DagExecutor[] (每个节点的执行函数)  │
  * │ readyNodes: IntList (入度为0的节点，缓存)      │
+ * │ regionIds: long[] (每个节点所属 regionId)     │  ← Mili 扩展
  * └──────────────────────────────────────────────┘
  * </pre>
+ *
+ * <p><b>Mili 扩展（DAG 与 Folia region 调度协调）</b>：每个节点携带其所属 regionId，
+ * 由 {@code SystemGraph.compile()} 在编译时从 {@link Scope} 提取。
+ * 节点执行时由 {@link fun.bm.mili.lmili.thread.regiontick.executor.NodeScheduler}
+ * 根据 regionId 路由 —— <b>严禁</b>跨 region 在同一线程上直接执行（会破坏 Folia 的
+ * tickingRegion 上下文）。</p>
  */
 public final class CompiledDag {
+
+    /** 全局 regionId（用于不属于特定 region 的节点；此时 DAG 引擎允许在当前线程执行） */
+    public static final long GLOBAL_REGION_ID = -1L;
 
     /** 节点数量 */
     private final int nodeCount;
@@ -60,18 +70,29 @@ public final class CompiledDag {
      */
     private final IntList readyNodes;
 
+    /**
+     * 每个节点所属的 regionId。
+     * <ul>
+     *   <li>正数：该 region 的 regionId —— 节点必须在该 region 的 acquire/tickingRegion 上下文内执行</li>
+     *   <li>{@link #GLOBAL_REGION_ID} (-1)：全局节点（如 global tick 任务），无 region 约束</li>
+     * </ul>
+     */
+    private final long[] regionIds;
+
     private CompiledDag(
             final int nodeCount,
             final IntList[] adjacency,
             final int[] inDegrees,
             final DagExecutor[] executors,
-            final IntList readyNodes
+            final IntList readyNodes,
+            final long[] regionIds
     ) {
         this.nodeCount = nodeCount;
         this.adjacency = adjacency;
         this.inDegrees = inDegrees;
         this.executors = executors;
         this.readyNodes = readyNodes;
+        this.regionIds = regionIds;
     }
 
     /**
@@ -130,6 +151,25 @@ public final class CompiledDag {
      */
     public @NotNull IntList readyNodes() {
         return IntLists.unmodifiable(readyNodes);
+    }
+
+    /**
+     * 获取指定节点所属的 regionId。
+     *
+     * <p>用于 DAG 执行时把节点路由到正确的 Folia region acquire 路径：
+     * <ul>
+     *   <li>正数：节点必须由该 region 的 tick 线程执行</li>
+     *   <li>{@link #GLOBAL_REGION_ID} (-1)：节点无 region 约束（global tick 任务）</li>
+     * </ul>
+     *
+     * @param nodeId 节点 ID
+     * @return regionId（正数或 {@link #GLOBAL_REGION_ID}）
+     */
+    public long regionId(final int nodeId) {
+        if (nodeId < 0 || nodeId >= nodeCount) {
+            throw new IndexOutOfBoundsException("nodeId: " + nodeId + ", nodeCount: " + nodeCount);
+        }
+        return regionIds[nodeId];
     }
 
     /**
@@ -202,6 +242,7 @@ public final class CompiledDag {
         private final IntList[] adjacency;
         private final int[] inDegrees;
         private final DagExecutor[] executors;
+        private final long[] regionIds;
         private final int nodeCount;
 
         @SuppressWarnings("unchecked")
@@ -210,6 +251,9 @@ public final class CompiledDag {
             this.adjacency = new IntList[nodeCount];
             this.inDegrees = new int[nodeCount];
             this.executors = new DagExecutor[nodeCount];
+            this.regionIds = new long[nodeCount];
+            // 默认所有节点为 global（无 region 约束），setRegionId() 可覆盖
+            java.util.Arrays.fill(this.regionIds, GLOBAL_REGION_ID);
             // 初始化邻接表
             for (int i = 0; i < nodeCount; i++) {
                 adjacency[i] = new IntArrayList(2);
@@ -229,6 +273,25 @@ public final class CompiledDag {
                 throw new IndexOutOfBoundsException("nodeId: " + nodeId + ", nodeCount: " + nodeCount);
             }
             executors[nodeId] = executor;
+            return this;
+        }
+
+        /**
+         * 设置节点所属的 regionId（Mili 扩展）。
+         *
+         * <p>用于 DAG 引擎在执行时按 regionId 路由节点 —— 同 region 节点可走快路径
+         * （保留当前线程的 tickingRegion 上下文）；跨 region 节点必须重新走
+         * Folia 的 region acquire 路径，禁止在同一线程直接执行。</p>
+         *
+         * @param nodeId   节点 ID
+         * @param regionId 节点所属 regionId（正数）或 {@link #GLOBAL_REGION_ID} 表示无 region 约束
+         * @return this（链式调用）
+         */
+        public @NotNull Builder setRegionId(final int nodeId, final long regionId) {
+            if (nodeId < 0 || nodeId >= nodeCount) {
+                throw new IndexOutOfBoundsException("nodeId: " + nodeId + ", nodeCount: " + nodeCount);
+            }
+            this.regionIds[nodeId] = regionId;
             return this;
         }
 
@@ -337,7 +400,7 @@ public final class CompiledDag {
         }
         ready.trim();
 
-            return new CompiledDag(nodeCount, adjacency, inDegrees, executors, ready);
+            return new CompiledDag(nodeCount, adjacency, inDegrees, executors, ready, regionIds);
         }
 
         /**

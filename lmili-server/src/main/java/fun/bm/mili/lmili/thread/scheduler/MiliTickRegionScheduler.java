@@ -16,17 +16,15 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Mili Tick Region Scheduler —— Folia API 适配器（R2-07 双 Worker runtime 合并）。
+ * Mili Tick Region Scheduler —— Folia API 适配器（R2-07 双 Worker runtime 合并 + 单 runtime 修复）。
  *
  * <p><b>R2-07 修复</b>：此类现在是纯 Folia API 适配器，不再拥有独立的 Worker 线程池。
- * 所有 tick 执行委派给 {@link MiliScheduler} 的统壹 Worker Pool
+ * 所有 tick 执行委派给共享 {@link MiliScheduler} 的 Worker Pool
  * （{@link MiliTickThread} 实例作为 carrier 线程）。</p>
  *
- * <h3>与旧版的区别</h3>
- * <ul>
- *   <li>旧版：独立的 {@code TickRegionWorker[]} + 独立的队列 + 独立的 stealing 逻辑</li>
- *   <li>新版：单一 {@link MiliScheduler} Worker Pool，work-stealing 负载均衡</li>
- * </ul>
+ * <p><b>单 runtime 修复</b>：scheduler 不再私有 —— 通过 {@link MiliSchedulerHolder} 取得
+ * 全 Mili 唯一的 MiliScheduler 实例。这意味着 Folia 区域 tick、公共 API、
+ * region 内并行任务、DAG 系统全部共享同一套 Worker 池和 WorkStealing 调度。</p>
  *
  * <h3>Tick 调度流程</h3>
  * <pre>
@@ -63,10 +61,22 @@ public final class MiliTickRegionScheduler {
         WATCHDOG_THREAD.start();
     }
 
-    // ---- R2-07: 单壹 MiliScheduler（统壹 Worker Pool） ----
+    // ---- 统一 MiliScheduler runtime（修复双 runtime 并存）----
+    //
+    // 此 scheduler 现在通过 {@link MiliSchedulerHolder} 持有，整个 Mili（区域 tick +
+    // 公共 API + DAG 系统）共享同一个 MiliScheduler 实例。
     private final MiliScheduler scheduler;
     private final AtomicBoolean halted = new AtomicBoolean(false);
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
+
+    /**
+     * 获取共享的 MiliScheduler（Folia 区域 tick 入口）。
+     *
+     * <p>仅在 {@link #MiliTickRegionScheduler(int)} 构造后可用；之前返回 null。</p>
+     */
+    public static MiliScheduler getSharedScheduler() {
+        return MiliSchedulerHolder.get();
+    }
 
     // ---- R2-08/R2-13: handle → TickTask wrapper registry (identity-based) ----
     private static final Map<TickRegionScheduler.RegionScheduleHandle, TickTask> REGISTRY =
@@ -83,7 +93,11 @@ public final class MiliTickRegionScheduler {
     /**
      * 创建 Mili Tick Region Scheduler。
      *
-     * <p>R2-07: 使用 tickThreads=true 创建 MiliTickThread worker（统壹 Worker Pool）。
+     * <p>R2-07: 使用 tickThreads=true 创建 MiliTickThread worker（统壹 Worker Pool）。</p>
+     *
+     * <p><b>修复双 runtime 并存</b>：scheduler 不再私有构造，而是通过
+     * {@link MiliSchedulerHolder#getOrCreate(int, boolean, String)} 取得共享单例。
+     * 这确保 Folia 区域 tick、公共 API、DAG 系统全部走同一个 MiliScheduler runtime。</p>
      *
      * @param threadCount worker 线程数
      */
@@ -91,15 +105,11 @@ public final class MiliTickRegionScheduler {
         // 至少使用2个worker线程，确保global tick不会被region tick阻塞
         final int workerCount = Math.max(2, threadCount);
 
-        // R2-07: tickThreads=true → workers 是 MiliTickThread 实例
-        this.scheduler = MiliSchedulerBuilder.create("tick-region-scheduler")
-                .threadNamePrefix("MiliTick-")
-                .carrierThreads(workerCount)
-                .maxBlockingTasks(Math.max(2, workerCount / 2))
-                .tickThreads(true)
-                .build();
+        // 通过 Holder 获取/创建共享 MiliScheduler（worker 是 MiliTickThread）
+        this.scheduler = MiliSchedulerHolder.getOrCreate(workerCount, true, "MiliTickRegionScheduler");
 
-        LOGGER.info("[MiliTickRegionScheduler] Started with unified runtime ({} workers)", workerCount);
+        LOGGER.info("[MiliTickRegionScheduler] Started with shared MiliScheduler runtime ({} workers)",
+                workerCount);
     }
 
     /**
@@ -153,7 +163,11 @@ public final class MiliTickRegionScheduler {
     /**
      * 停止调度器。
      *
-     * <p>R2-07: 委派给 MiliScheduler 统一关闭（不再需要独立的 worker 停止逻辑）。
+     * <p>R2-07: 委派给共享 MiliScheduler 统一关闭（不再需要独立的 worker 停止逻辑）。</p>
+     *
+     * <p><b>修复双 runtime 并存</b>：halt 时由本类（唯一所有者）调用
+     * {@link MiliSchedulerHolder#shutdown(String, long)}，避免与其它子系统重复关闭同一 scheduler。
+     * 调用方应保证：halt() 调用前所有其它子系统（公共 API/DAG）已停止提交任务。</p>
      */
     public void halt() {
         if (!halted.compareAndSet(false, true)) return;
@@ -173,12 +187,8 @@ public final class MiliTickRegionScheduler {
             LOGGER.info("[MiliTickRegionScheduler] Cancelled {} pending tick handles", cancelledCount);
         }
 
-        // 统壹关闭 MiliScheduler
-        try {
-            scheduler.shutdown(5, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        // 关闭共享 MiliScheduler（owner=本类 —— 唯一所有者）
+        MiliSchedulerHolder.shutdown("MiliTickRegionScheduler", 5_000L);
 
         shutdownLatch.countDown();
         LOGGER.info("[MiliTickRegionScheduler] Halted");

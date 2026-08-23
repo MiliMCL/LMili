@@ -95,9 +95,23 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
      }
 
     // Mili start - shutdown hook
+    //
+    // 关闭顺序（MinecraftServer.stopServer 调用顺序）：
+    //   1. 本方法（TickRegions.shutdown）
+    //      -> RegionTickBootstrap.shutdown() (注销公共 API + 关闭 dispatcher)
+    //      -> RegionTickDispatcher.shutdown() (关闭 WorkerPoolManager 等)
+    //   2. TickRegionScheduler.halt() -> MiliTickRegionScheduler.halt()
+    //      -> MiliSchedulerHolder.shutdown() (关闭共享 MiliScheduler runtime)
+    //
+    // 关键：必须先关闭 dispatcher + 注销公共 API，让所有 MiliTickThread 上的活动任务
+    // 完成它们的"提交"动作；之后唯一所有者（MiliTickRegionScheduler）再关共享 scheduler，
+    // 避免在 scheduler 关闭中仍有任务进入队列导致 RejectedExecutionException。
     public static void shutdown() {
         try {
-            fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher dispatcher = fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
+            // 先注销公共 API + 关闭 dispatcher（不再独立关闭 scheduler —— 由唯一所有者关闭）
+            fun.bm.mili.lmili.thread.regiontick.RegionTickBootstrap.shutdown();
+            fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher dispatcher =
+                    fun.bm.mili.lmili.thread.regiontick.RegionTickDispatcher.getInstance();
             if (dispatcher != null) dispatcher.shutdown();
         } catch (Throwable throwable) {
             LOGGER.error("[Mili] Error during RegionTickPool shutdown", throwable);

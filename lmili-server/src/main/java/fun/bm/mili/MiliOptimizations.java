@@ -53,6 +53,9 @@ public final class MiliOptimizations {
         }
 
         // Mili 统一调度器（RegionTickPool — 永久启用）
+        //
+        // 注意：单 runtime 修复后，RegionTickBootstrap.init() 也可由 TickRegions.start() 调用
+        // （更早的时机，且 worker 线程已就绪）。此处调用仍保留作为兜底路径：init() 是幂等的。
         RegionTickBootstrap.init();
 
         // 网络优化

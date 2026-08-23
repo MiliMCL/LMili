@@ -1057,12 +1057,14 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
 
     public void stopServer() { // Folia - region threading - public
         // Folia start - region threading
+        // Mili start - shutdown RegionTickPool FIRST
+        // Reason: 在关停 scheduler 之前，先关掉依赖它的子系统（公共 API、Dispatcher、
+        // WorkerPoolManager），避免提交任务到正在关闭的 scheduler 造成 RejectedExecutionException。
+        io.papermc.paper.threadedregions.TickRegions.shutdown();
+        // Mili end
         // halt scheduler
         // don't wait, we may be on a scheduler thread
         io.papermc.paper.threadedregions.TickRegions.getScheduler().halt(false, 0L);
-        // Mili start - shutdown RegionTickPool
-        io.papermc.paper.threadedregions.TickRegions.shutdown();
-        // Mili end
         // cannot run shutdown logic on this thread, as it may be a scheduler
         if (true) {
             if (!ca.spottedleaf.moonrise.common.util.TickThread.isShutdownThread()) {
