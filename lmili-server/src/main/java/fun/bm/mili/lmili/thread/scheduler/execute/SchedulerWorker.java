@@ -98,7 +98,7 @@ public final class SchedulerWorker implements Runnable {
                 //   (3) token.owner == workerId                          （RISK-09：worker steal 跨 ownership）
                 // 任意一项不匹配：取消 task + 释放 token，绝不执行 task。
                 if (!verifyOwnership(result, task, workerId)) {
-                    LOGGER.error("[Worker-{}] Ownership violation: token.regionId={} task.regionId={} "
+                    LOGGER.warn("[Worker-{}] Ownership violation (cancelling task): token.regionId={} task.regionId={} "
                                     + "token.gen={} region.gen={} token.owner={} workerId={}",
                             workerId,
                             result.regionId(), task.regionId(),
@@ -164,12 +164,17 @@ public final class SchedulerWorker implements Runnable {
     /**
      * RISK-08/09/10/20 修复：执行前 ownership 三因素校验。
      *
-     * <p>必须同时满足：
+     * <p>两套规则：
      * <ul>
-     *   <li>token.regionId != -1（GLOBAL 不该进入 ownership 路径）</li>
-     *   <li>token.regionId == task.regionId</li>
-     *   <li>token.generation == regionState.generation（防 stale）</li>
-     *   <li>token.owner == workerId（防 steal）</li>
+     *   <li><b>GLOBAL 任务</b>（task.regionId == -1L）：不需要 region ownership，
+     *       只需校验 token 也是 GLOBAL（regionId == -1L）。</li>
+     *   <li><b>Region 任务</b>（task.regionId >= 0）：必须同时满足：
+     *     <ul>
+     *       <li>token.regionId == task.regionId</li>
+     *       <li>token.generation == regionState.generation（防 stale）</li>
+     *       <li>token.owner == workerId（防 steal）</li>
+     *     </ul>
+     *   </li>
      * </ul>
      *
      * <p>任意一项失败返回 false，调用者必须取消 task 并释放 token，绝不执行。</p>
@@ -182,9 +187,13 @@ public final class SchedulerWorker implements Runnable {
         long regionGen = result.regionGeneration();
         int tokenOwner = result.ownerId();
 
-        if (tokenRegionId == -1L) {
-            return false; // GLOBAL token 不在 ownership 路径
+        // GLOBAL 任务：只要求 token 也是 GLOBAL（避免偷窃执行权）。
+        // 注意：GLOBAL 任务没有 region ownership，所以也不校验 owner/generation。
+        if (taskRegionId == -1L) {
+            return tokenRegionId == -1L;
         }
+
+        // Region 任务：三因素校验
         if (tokenRegionId != taskRegionId) {
             return false; // RISK-20：handle 与 node regionId 不匹配
         }
