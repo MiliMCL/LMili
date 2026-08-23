@@ -151,6 +151,33 @@ public final class PluginRuntimeContext {
     }
 
     // ----------------------------------------------------------------------
+    // Index by PluginId for runtime lookups (V2 §18 closed-loop).
+    // ----------------------------------------------------------------------
+
+    private static final ConcurrentMap<PluginId, PluginRuntimeContext> BY_PLUGIN_ID = new ConcurrentHashMap<>();
+
+    /** Server-side hook. Returns the previously registered context, if any. */
+    @org.jetbrains.annotations.Nullable
+    public static PluginRuntimeContext registerForPluginId(@NotNull final PluginId pluginId,
+                                                           @NotNull final PluginRuntimeContext ctx) {
+        return BY_PLUGIN_ID.put(pluginId, ctx);
+    }
+
+    /** Server-side hook. */
+    public static void unregisterForPluginId(@NotNull final PluginId pluginId) {
+        BY_PLUGIN_ID.remove(pluginId);
+    }
+
+    @org.jetbrains.annotations.Nullable
+    public static PluginRuntimeContext forPluginId(@NotNull final PluginId pluginId) {
+        return BY_PLUGIN_ID.get(pluginId);
+    }
+
+    public static boolean hasContextFor(@NotNull final PluginId pluginId) {
+        return BY_PLUGIN_ID.containsKey(pluginId);
+    }
+
+    // ----------------------------------------------------------------------
     // Index by Bukkit plugin name for runtime lookups.
     // ----------------------------------------------------------------------
 
@@ -176,5 +203,8 @@ public final class PluginRuntimeContext {
         return BY_PLUGIN_NAME.containsKey(bukkitPluginName);
     }
 
-    public static void clearIndex() { BY_PLUGIN_NAME.clear(); }
+    public static void clearIndex() {
+        BY_PLUGIN_ID.clear();
+        BY_PLUGIN_NAME.clear();
+    }
 }

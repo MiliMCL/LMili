@@ -63,10 +63,20 @@ public final class LMili {
      * the identity with scheduler domain, permission, quota and observability.
      *
      * <p>The runtime builds one context per registered plugin during bootstrap.
-     * Returns {@code null} if the id is unknown.</p>
+     * This method first checks the {@link PluginRuntimeContext#forPluginId}
+     * index (the authoritative live context), then falls back to building a
+     * fresh context from the identity record.</p>
+     *
+     * @return the live registered context, or a fresh one from the identity,
+     *         or {@code null} if the id is unknown.
      */
     @Nullable
     public static PluginRuntimeContext getRuntimeContext(@NotNull final PluginId id) {
+        // 1. Live registered context (authoritative counters, domain, lifecycle).
+        final PluginRuntimeContext live = PluginRuntimeContext.forPluginId(id);
+        if (live != null) return live;
+
+        // 2. Fallback: build a fresh context from the identity record.
         final PluginIdentity identity = MANAGER_REF.get().find(id).orElse(null);
         if (identity == null) return null;
         return PluginRuntimeContext.forIdentity(identity);

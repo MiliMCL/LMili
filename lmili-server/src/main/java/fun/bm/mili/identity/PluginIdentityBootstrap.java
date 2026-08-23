@@ -2,6 +2,7 @@ package fun.bm.mili.identity;
 
 import fun.bm.mili.MiliLogger;
 import fun.bm.mili.lmili.api.LMili;
+import fun.bm.mili.lmili.api.identity.LifecycleState;
 import fun.bm.mili.lmili.api.identity.LmiliJsonLoader;
 import fun.bm.mili.lmili.api.identity.PluginIdentity;
 import fun.bm.mili.lmili.api.identity.PluginIdentityFallback;
@@ -11,6 +12,7 @@ import fun.bm.mili.lmili.api.identity.PluginStatus;
 import fun.bm.mili.lmili.api.identity.PluginType;
 import fun.bm.mili.lmili.api.identity.SchedulerDomain;
 import fun.bm.mili.lmili.api.identity.conflict.PluginIdentityConflict;
+import fun.bm.mili.lmili.thread.scheduler.PluginSchedulerBridge;
 import fun.bm.mili.lmili.utils.NullPlugin;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
@@ -102,6 +104,9 @@ public final class PluginIdentityBootstrap implements Listener {
 
         final PluginRuntimeContext ctx = buildContext(registered);
         PluginRuntimeContext.registerForPlugin(name, ctx);
+        // V2 §18: also index by PluginId so the runtime can locate the live
+        // context (quota/observability/domain) without a Bukkit name.
+        PluginRuntimeContext.registerForPluginId(registered.id(), ctx);
         bukkitById.put(name, bukkitPlugin);
         logRegistered(name, ctx);
     }
@@ -113,7 +118,25 @@ public final class PluginIdentityBootstrap implements Listener {
         if (!seenPluginNames.remove(name)) return;
 
         final PluginIdentityManager mgr = LMili.getPluginIdentityManager();
-        mgr.findByBukkitName(name).ifPresent(id -> mgr.unregister(id.id()));
+        final PluginIdentity current = mgr.findByBukkitName(name).orElse(null);
+
+        if (current != null) {
+            // V2 §5 full unload sequence:
+            // 1. lifecycle → DISABLING
+            final PluginRuntimeContext ctx = PluginRuntimeContext.forPluginId(current.id());
+            if (ctx != null) {
+                ctx.setLifecycleState(LifecycleState.DISABLING);
+            }
+
+            // 2. cancel pending scheduler tasks + clear scheduler tracking
+            PluginSchedulerBridge.unloadPlugin(current.id());
+
+            // 3. registry → UNLOADED then unregister
+            mgr.setStatus(current.id(), PluginStatus.UNLOADED);
+            mgr.unregister(current.id());
+        }
+
+        // 4. remove Bukkit-name context index
         PluginRuntimeContext.unregisterForPlugin(name);
         bukkitById.remove(name);
 

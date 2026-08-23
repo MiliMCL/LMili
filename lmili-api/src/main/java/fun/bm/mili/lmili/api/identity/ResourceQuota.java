@@ -33,6 +33,7 @@ public final class ResourceQuota {
     private final AtomicLong tasksCompleted = new AtomicLong();
     private final AtomicLong tasksFailed = new AtomicLong();
     private final AtomicLong tasksTimedOut = new AtomicLong();
+    private final AtomicLong tasksCancelled = new AtomicLong();
     private final AtomicLong totalExecutionNanos = new AtomicLong();
     private final AtomicLong rejected = new AtomicLong();
 
@@ -76,6 +77,7 @@ public final class ResourceQuota {
     public long tasksCompleted() { return tasksCompleted.get(); }
     public long tasksFailed() { return tasksFailed.get(); }
     public long tasksTimedOut() { return tasksTimedOut.get(); }
+    public long tasksCancelled() { return tasksCancelled.get(); }
     public long totalExecutionNanos() { return totalExecutionNanos.get(); }
     public long rejectedCount() { return rejected.get(); }
 
@@ -109,6 +111,20 @@ public final class ResourceQuota {
         tasksFailed.incrementAndGet();
     }
 
+    /**
+     * Record that a submitted task was cancelled before completion (e.g. the
+     * plugin was disabled). Best-effort dequeue: the running/queued split is
+     * an estimate, so the queued counter is decremented at most to zero.
+     */
+    public void onTaskCancelled() {
+        tasksCancelled.incrementAndGet();
+        while (true) {
+            final long cur = tasksQueued.get();
+            if (cur <= 0) break;
+            if (tasksQueued.compareAndSet(cur, cur - 1)) break;
+        }
+    }
+
     public void onRejected() { rejected.incrementAndGet(); }
 
     @Override
@@ -120,6 +136,7 @@ public final class ResourceQuota {
                 + ", completed=" + tasksCompleted.get()
                 + ", failed=" + tasksFailed.get()
                 + ", timedOut=" + tasksTimedOut.get()
+                + ", cancelled=" + tasksCancelled.get()
                 + ", rejected=" + rejected.get() + "}";
     }
 }
