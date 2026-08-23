@@ -113,7 +113,7 @@ public final class EntityCleanupManager {
         }
         if (removed > 0) {
             LOGGER.info("[EntityCleanup] world='{}' removed={} (cap={}, was={}, candidates={})",
-                level.dimension().location(), removed, cap, total, candidates.size());
+                level.dimension().identifier(), removed, cap, total, candidates.size());
         }
         return removed;
     }

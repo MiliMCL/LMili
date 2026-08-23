@@ -72,9 +72,9 @@ public final class PlayerChunkPreloader {
             // ─── 同 region 内预加载（玩家当前位置周围） ───
             if (sameRegionRadius > 0) {
                 final BlockPos playerPos = player.blockPosition();
-                final ChunkPos centerChunk = new ChunkPos(playerPos);
+                final ChunkPos centerChunk = ChunkPos.containing(playerPos);
                 final long cacheKey = (long) player.getId();
-                final long centerChunkKey = centerChunk.toLong();
+                final long centerChunkKey = centerChunk.pack();
                 final Integer lastRadius = lastPreloadedRadius.get(cacheKey);
                 final Long lastChunkKey = lastPreloadedChunkKey.get(cacheKey);
                 if (lastRadius == null || lastRadius != sameRegionRadius || lastChunkKey == null || lastChunkKey != centerChunkKey) {

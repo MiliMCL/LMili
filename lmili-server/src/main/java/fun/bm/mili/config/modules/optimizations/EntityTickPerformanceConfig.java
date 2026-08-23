@@ -5,7 +5,7 @@ import fun.bm.mili.lmili.config.IConfigModule;
 import fun.bm.mili.lmili.config.flags.ConfigClassInfo;
 import fun.bm.mili.lmili.config.flags.DoNotLoad;
 import fun.bm.mili.lmili.thread.regiontick.PlayerChunkPreloadListener;
-import fun.bm.mili.enums.EnumConfigCategory;
+import fun.bm.mili.lmili.enums.EnumConfigCategory;
 import org.bukkit.Bukkit;
 import org.jetbrains.annotations.Nullable;
 
