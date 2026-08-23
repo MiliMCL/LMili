@@ -242,12 +242,15 @@ public final class MiliSchedulerImpl implements MiliScheduler {
                 // RISK-05 兜底：scheduler 在 schedule() 边界被 force shutdown
                 // 立即标记 handle 为失败，绝不留 PENDING
                 handle.completeExceptionally(ree);
-                return handle;
+                // RISK-13 修复：必须 release submit slot，不能跳过 finally
             }
 
             // C-18 修复：设置取消动作，使 handle.cancel() 能真正取消 ScheduledFuture
+            // 只有 future 注册成功才设置取消动作
             final ScheduledFuture<?> sf = futureRef[0];
-            handle.setCancelAction(() -> sf.cancel(false));
+            if (sf != null) {
+                handle.setCancelAction(() -> sf.cancel(false));
+            }
 
             return handle;
         } finally {
@@ -334,6 +337,12 @@ public final class MiliSchedulerImpl implements MiliScheduler {
 
         // 步骤 5：关闭虚拟线程池
         virtualThreadPool.shutdown();
+
+        // 步骤 6：清空 region handle registry（RISK-18 生命周期收尾）
+        // RegionTickDispatcher.shutdown 会单独调用 FoliaRegionNodeSchedulerHandleRegistry.clear()，
+        // 这里只是双保险。
+        fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
+                .FoliaRegionNodeSchedulerHandleRegistry.clear();
 
         // 确认关闭完成（QUIESCING → CLOSED）
         lifecycle.completeShutdown();

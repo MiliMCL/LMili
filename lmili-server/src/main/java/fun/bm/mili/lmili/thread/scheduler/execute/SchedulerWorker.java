@@ -89,6 +89,34 @@ public final class SchedulerWorker implements Runnable {
                 RegionTask task = result.task;
                 long regionId = task.regionId();
                 long startNanos = System.nanoTime();
+
+                // RISK-08/09/10/20 修复：执行前强制 ownership 三因素验证。
+                //
+                // 校验 token 与 task 的三因素一致：
+                //   (1) token.regionId == task.regionId                  （RISK-20：handle 与 node 不匹配）
+                //   (2) token.generation == regionState.generation        （RISK-12：stale token/旧任务复活）
+                //   (3) token.owner == workerId                          （RISK-09：worker steal 跨 ownership）
+                // 任意一项不匹配：取消 task + 释放 token，绝不执行 task。
+                if (!verifyOwnership(result, task, workerId)) {
+                    LOGGER.error("[Worker-{}] Ownership violation: token.regionId={} task.regionId={} "
+                                    + "token.gen={} region.gen={} token.owner={} workerId={}",
+                            workerId,
+                            result.regionId(), task.regionId(),
+                            result.generation(), result.regionGeneration(),
+                            result.ownerId(), workerId);
+                    try {
+                        task.onCancel();
+                    } catch (Throwable ignored) {
+                    }
+                    try {
+                        result.release();
+                    } catch (Throwable ignored) {
+                    }
+                    tasksExecuted++;
+                    totalExecutionTimeNanos += System.nanoTime() - startNanos;
+                    continue;
+                }
+
                 // RISK-01：取出 token 后立即把 ownership 写到当前线程。
                 // blocking task 不写在这里 —— 它会通过 transferTo 由 BlockingWorker 接管 token，
                 // ownership 的写入也由 BlockingWorker 负责（见 BlockingTaskIsolation）。
@@ -131,6 +159,39 @@ public final class SchedulerWorker implements Runnable {
         // Worker 退出时确保不残留 ownership
         clearOwnership();
         LOGGER.debug("[Worker-{}] Stopped (executed {} tasks)", workerId, tasksExecuted);
+    }
+
+    /**
+     * RISK-08/09/10/20 修复：执行前 ownership 三因素校验。
+     *
+     * <p>必须同时满足：
+     * <ul>
+     *   <li>token.regionId != -1（GLOBAL 不该进入 ownership 路径）</li>
+     *   <li>token.regionId == task.regionId</li>
+     *   <li>token.generation == regionState.generation（防 stale）</li>
+     *   <li>token.owner == workerId（防 steal）</li>
+     * </ul>
+     *
+     * <p>任意一项失败返回 false，调用者必须取消 task 并释放 token，绝不执行。</p>
+     */
+    private static boolean verifyOwnership(WorkStealingCoordinator.PollResult result,
+                                           RegionTask task, int workerId) {
+        long taskRegionId = task.regionId();
+        long tokenRegionId = result.regionId();
+        long tokenGen = result.generation();
+        long regionGen = result.regionGeneration();
+        int tokenOwner = result.ownerId();
+
+        if (tokenRegionId == -1L) {
+            return false; // GLOBAL token 不在 ownership 路径
+        }
+        if (tokenRegionId != taskRegionId) {
+            return false; // RISK-20：handle 与 node regionId 不匹配
+        }
+        if (tokenGen != regionGen) {
+            return false; // RISK-12：region 已重新生成，token stale
+        }
+        return tokenOwner == workerId; // RISK-09：worker ownership 校验
     }
 
     /**

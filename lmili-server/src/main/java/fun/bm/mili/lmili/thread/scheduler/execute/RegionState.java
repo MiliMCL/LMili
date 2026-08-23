@@ -111,6 +111,16 @@ public final class RegionState {
         }
 
         /**
+         * RISK-09 修复：返回 token 的 owner workerId。
+         *
+         * <p>用于校验"持有此 token 的 worker 才是合法执行者"——防 work stealing
+         * 偷走 region ownership。</p>
+         */
+        public int owner() {
+            return owner;
+        }
+
+        /**
          * LATEST-01 修复：释放执行权。
          *
          * <p>使用 {@code AtomicBoolean.compareAndSet(false, true)} 保证幂等性：
@@ -477,6 +487,16 @@ public final class RegionState {
      */
     public boolean isRunning() {
         return snapshot.get().execState == ExecState.RUNNING;
+    }
+
+    /**
+     * RISK-12 修复：返回当前 regionState 的 generation。
+     *
+     * <p>用于 PollResult 校验 token.generation == region.generation —— 如果不相等，
+     * 说明 region 在 token 创建后被 unregister/reregister，token 已 stale。</p>
+     */
+    public long getGeneration() {
+        return snapshot.get().generation;
     }
 
     @Override

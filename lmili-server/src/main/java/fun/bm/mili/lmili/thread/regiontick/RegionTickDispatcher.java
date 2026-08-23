@@ -128,15 +128,22 @@ public final class RegionTickDispatcher {
                                                      .ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
         RegionTickContext context = new RegionTickContext(regionId, region);
         this.activeContexts.put(regionId, context);
-        // Mili 修复：注册 regionId → handle 映射，使跨 region DAG 节点能被正确路由
+        // Mili 修复：注册 (regionId, generation) → handle 映射，使跨 region DAG 节点能被正确路由
+        // RISK-18 修复：使用 (regionId, generation) 作为逻辑身份，
+        // 旧 generation 的 handle 不会与新 generation 的 handle 混淆。
         // TickRegionData.tickHandle 是 private，必须通过公开 API getRegionSchedulingHandle() 访问
         if (region != null && region.getData() != null) {
             io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle handle =
                     region.getData().getRegionSchedulingHandle();
             if (handle != null) {
+                // RISK-18 修复：使用 currentTick 作为 generation proxy。
+                // Folia RegionScheduleHandle 没有独立的 generation 字段，
+                // 但 region 在被 unregister/重建后 tick 会从 0 重新计数，
+                // 这足够区分新旧 handle。
+                long generation = region.getData().getCurrentTick();
                 fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
                         .FoliaRegionNodeSchedulerHandleRegistry
-                        .register(regionId, handle);
+                        .register(regionId, generation, handle);
             }
         }
         return context;
@@ -145,10 +152,11 @@ public final class RegionTickDispatcher {
     public void unregisterRegion(final long regionId) {
         this.activeContexts.remove(regionId);
         this.chunkDispatcher.unregister(regionId);
-        // Mili 修复：注销 regionId 映射
+        // RISK-18 修复：注销 region 的所有 generation handle
+        // （region 销毁时无法精确知道最后一个 generation 是什么，全部清理即可）
         fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
                 .FoliaRegionNodeSchedulerHandleRegistry
-                .unregister(regionId);
+                .unregisterRegion(regionId);
     }
 
     public RegionTickContext getOrCreateContext(

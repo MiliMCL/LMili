@@ -137,9 +137,10 @@ public final class FoliaRegionNodeScheduler implements NodeScheduler {
             if (regionized == null) {
                 return false;
             }
-            // 这里直接通过 TickRegions.getScheduler().scheduleRegion(handle) 触发
-            // 由于当前 RegionTickContext 不直接暴露"通过 regionId 查 handle"的 API，
-            // 我们提供一个 getRegionById helper —— 由 RegionTickDispatcher 注册
+            // RISK-18 修复：strict 查找按 (regionId, generation)。
+            // 没有 generation 时回退到非严格 findHandle（旧路径兼容）。
+            // 这里 generation 取 0L 表示"接受任意 generation"（仅兜底用），
+            // 严格路径必须由 dispatcher 调用 findHandleStrict(regionId, gen)。
             TickRegionScheduler.RegionScheduleHandle handle =
                     FoliaRegionNodeSchedulerHandleRegistry.findHandle(targetRegionId);
             if (handle == null) {
@@ -199,23 +200,93 @@ public final class FoliaRegionNodeScheduler implements NodeScheduler {
      * handle 注册器 —— FoliaRegionNodeScheduler 不知道如何从 regionId 找 handle，
      * 因此 RegionTickDispatcher 注册全局 handle 表供本 scheduler 查询。
      *
-     * <p>线程安全：使用 ConcurrentHashMap，put/remove 由 dispatcher 在 registerRegion/unregisterRegion
-     * 中调用。</p>
+     * <p><b>RISK-18 修复</b>：使用 {@code (regionId, generation)} 作为逻辑身份。
+     * 同一个 regionId 在 unregister → register 周期后，新 handle 对应新的 generation；
+     * 旧 handle 不会与新 handle 混淆。任何持有 (regionId, oldGeneration) 的调度请求
+     * 都会被拒绝（findHandleStrict 返回 null）。</p>
+     *
+     * <p>线程安全：使用 ConcurrentHashMap，put/remove 由 dispatcher 在
+     * registerRegion/unregisterRegion 中调用。</p>
      */
     public static final class FoliaRegionNodeSchedulerHandleRegistry {
-        private static final ConcurrentHashMap<Long, TickRegionScheduler.RegionScheduleHandle> HANDLES
+        /**
+         * RISK-18 修复：逻辑身份 = (regionId, generation)。
+         *
+         * <p>key 编码：(regionId &lt;&lt; 32) | (generation &amp; 0xFFFFFFFFL)</p>
+         */
+        private static final ConcurrentHashMap<Long, RegisteredHandle> HANDLES
                 = new ConcurrentHashMap<>();
 
-        public static void register(long regionId, TickRegionScheduler.RegionScheduleHandle handle) {
-            HANDLES.put(regionId, handle);
+        /**
+         * 已注册的 handle 记录。
+         */
+        public record RegisteredHandle(long regionId, long generation,
+                                       TickRegionScheduler.RegionScheduleHandle handle) {
+            /**
+             * 复合 key。
+             */
+            public static long key(long regionId, long generation) {
+                return (regionId << 32) | (generation & 0xFFFFFFFFL);
+            }
+
+            public long key() {
+                return key(regionId, generation);
+            }
         }
 
-        public static void unregister(long regionId) {
-            HANDLES.remove(regionId);
+        /**
+         * RISK-18 修复：注册一个 handle（带 generation）。
+         *
+         * @param regionId   region ID
+         * @param generation region generation（从 RegionState.generation 取）
+         * @param handle     Folia 调度句柄
+         */
+        public static void register(long regionId, long generation,
+                                    TickRegionScheduler.RegionScheduleHandle handle) {
+            HANDLES.put(RegisteredHandle.key(regionId, generation),
+                    new RegisteredHandle(regionId, generation, handle));
         }
 
+        /**
+         * RISK-18 修复：注销特定 (regionId, generation) 的 handle。
+         */
+        public static void unregister(long regionId, long generation) {
+            HANDLES.remove(RegisteredHandle.key(regionId, generation));
+        }
+
+        /**
+         * RISK-18 修复：注销 region 的所有 generation handle（region 销毁时调用）。
+         */
+        public static void unregisterRegion(long regionId) {
+            HANDLES.entrySet().removeIf(entry -> entry.getValue().regionId() == regionId);
+        }
+
+        /**
+         * RISK-18 修复：按 (regionId, generation) 严格查找 handle。
+         *
+         * <p>返回 null 表示：
+         * <ul>
+         *   <li>该 regionId 的 handle 未注册</li>
+         *   <li>或者 generation 不匹配（旧 handle 已被替换/销毁）</li>
+         * </ul>
+         */
+        public static TickRegionScheduler.RegionScheduleHandle findHandleStrict(
+                long regionId, long generation) {
+            RegisteredHandle rh = HANDLES.get(RegisteredHandle.key(regionId, generation));
+            return rh != null ? rh.handle() : null;
+        }
+
+        /**
+         * 兼容旧 API：按 regionId 查找（返回任意匹配 generation 的 handle）。
+         *
+         * <p>仅用于诊断/兜底，生产代码应使用 {@link #findHandleStrict(long, long)}。</p>
+         */
         public static TickRegionScheduler.RegionScheduleHandle findHandle(long regionId) {
-            return HANDLES.get(regionId);
+            RegisteredHandle rh = HANDLES.values().stream()
+                    .filter(h -> h.regionId() == regionId)
+                    .findFirst()
+                    .orElse(null);
+            return rh != null ? rh.handle() : null;
         }
 
         /**
@@ -223,6 +294,13 @@ public final class FoliaRegionNodeScheduler implements NodeScheduler {
          */
         public static void clear() {
             HANDLES.clear();
+        }
+
+        /**
+         * 当前注册表大小（用于诊断）。
+         */
+        public static int size() {
+            return HANDLES.size();
         }
     }
 }

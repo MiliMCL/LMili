@@ -163,6 +163,21 @@ public final class DagExecutionEngine {
 
         final long nodeRegionId = dag.regionId(nodeId);
 
+        // RISK-19 修复：构造节点 body 之前，校验"节点 regionId 与当前 region 上下文"
+        // 的一致性约束。这是一个轻量级检查（只读 currentRegionContext.regionId），
+        // 真正的路由由 NodeScheduler 强制：
+        //   - SameRegionNodeScheduler 只接受同 region + global
+        //   - FoliaRegionNodeScheduler 只接受跨 region（且走 Folia acquire 路径）
+        // 这里再加一层防御：若节点 regionId 不合法（< 0 且 != GLOBAL），直接拒绝。
+        if (nodeRegionId < 0 && nodeRegionId != CompiledDag.GLOBAL_REGION_ID) {
+            LOGGER.error("[DAG] Illegal regionId {} for node {} — refusing to dispatch",
+                    nodeRegionId, nodeId);
+            state.markFailed();
+            handle.fail(new IllegalStateException(
+                    "DAG node " + nodeId + " has illegal regionId " + nodeRegionId));
+            return;
+        }
+
         // 构造节点 body：执行节点逻辑 + 后继节点派发
         final Runnable body = () -> {
             if (handle.isCancelled() || state.isCancelled()) {

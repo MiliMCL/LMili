@@ -339,11 +339,20 @@ public final class WorkStealingCoordinator {
         public final RegionTask task;
         private final RegionState.ExecutionToken token;
         private final RegionQueue queue;
+        /**
+         * RISK-12 修复：PollResult 构造时 snapshot 的 regionState.generation。
+         *
+         * <p>执行 task 前必须与 token.generation 比对：
+         *   - 相等 → token 有效，可执行
+         *   - 不等 → region 已被 unregister/reregister，token stale，必须取消
+         */
+        private final long regionGenerationSnapshot;
 
         PollResult(RegionTask task, RegionState.ExecutionToken token, RegionQueue queue) {
             this.task = task;
             this.token = token;
             this.queue = queue;
+            this.regionGenerationSnapshot = queue.regionState().getGeneration();
         }
 
         /**
@@ -361,6 +370,27 @@ public final class WorkStealingCoordinator {
          */
         public long generation() {
             return token.generation();
+        }
+
+        /**
+         * RISK-12 修复：返回 PollResult 构造时 snapshot 的 regionState.generation。
+         *
+         * <p>与 {@link #generation()} 一起用于 RISK-08 的 ownership 三因素校验：
+         * <pre>
+         *   if (token.generation != regionGeneration) → stale → reject
+         * </pre>
+         */
+        public long regionGeneration() {
+            return regionGenerationSnapshot;
+        }
+
+        /**
+         * RISK-09 修复：返回 token 的 owner workerId。
+         *
+         * <p>执行前必须校验 token.owner == currentWorkerId，防止 steal 跨 ownership。
+         */
+        public int ownerId() {
+            return token.owner();
         }
 
         /**
