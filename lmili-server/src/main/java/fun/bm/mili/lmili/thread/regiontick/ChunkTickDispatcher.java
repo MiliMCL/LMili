@@ -116,12 +116,15 @@ public final class ChunkTickDispatcher {
                         poolManager.isVirtualThreadMode() ? "virtual" : "platform");
             }
 
-            // 诊断日志（每 1000 tick）
-            long total = diagnostics.getTotalTicksDispatched();
-            if (total % 1000L == 0L) {
-                LOGGER.info("[RegionTickPool] Stats: total_ticks={}, errors={}, timeouts={}, max_tick_ms={}, pending={}",
-                        total, diagnostics.getTotalErrors(), totalTimeouts.get(),
-                        diagnostics.getMaxTickDurationMs(), pendingChunkFutures.size());
+            // 诊断日志（按配置间隔输出，0 为禁用）
+            final int statsInterval = fun.bm.mili.config.modules.experiment.RegionTickPoolConfig.statsLogInterval;
+            if (statsInterval > 0) {
+                long total = diagnostics.getTotalTicksDispatched();
+                if (total % statsInterval == 0L) {
+                    LOGGER.info("[RegionTickPool] Stats: total_ticks={}, errors={}, timeouts={}, max_tick_ms={}, pending={}",
+                            total, diagnostics.getTotalErrors(), totalTimeouts.get(),
+                            diagnostics.getMaxTickDurationMs(), pendingChunkFutures.size());
+                }
             }
         }
     }

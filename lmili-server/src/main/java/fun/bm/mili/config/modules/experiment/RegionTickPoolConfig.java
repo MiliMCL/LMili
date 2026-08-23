@@ -60,6 +60,12 @@ public class RegionTickPoolConfig implements IConfigModule {
             默认 4000ms。""")
     public static long virtualThreadTimeoutMs = 4000;
 
+    @ConfigInfo(name = "stats-log-interval", comments = """
+            ChunkTickDispatcher 统计日志的输出间隔（tick 数）。
+            每执行 N 次 dispatch 输出一次统计信息。
+            设为 0 禁用统计日志。默认 0（禁用）。""")
+    public static int statsLogInterval = 0;
+
     public static int getWorkerCount() {
         int cores = Runtime.getRuntime().availableProcessors();
         if (workerCount > 0) return Math.max(2, workerCount);
