@@ -4,6 +4,7 @@ import fun.bm.mili.MiliLogger;
 import fun.bm.mili.lmili.api.LMili;
 import fun.bm.mili.lmili.api.identity.LifecycleState;
 import fun.bm.mili.lmili.api.identity.LmiliJsonLoader;
+import fun.bm.mili.lmili.api.identity.PluginId;
 import fun.bm.mili.lmili.api.identity.PluginIdentity;
 import fun.bm.mili.lmili.api.identity.PluginIdentityFallback;
 import fun.bm.mili.lmili.api.identity.PluginIdentityManager;

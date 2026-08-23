@@ -28,6 +28,15 @@ public interface EntityTask {
     }
 
     /**
+     * 任务取消时的回调。
+     *
+     * <p>默认空实现。覆盖此方法以在任务被取消时执行清理逻辑。
+     */
+    default void onCancel() {
+        // 默认无操作
+    }
+
+    /**
      * 创建 EntityTask 的便捷方法。
      */
     static @NotNull EntityTask of(@NotNull final EntityTask task) {

@@ -202,7 +202,7 @@ public final class PublicSchedulerAdapter implements Scheduler {
                         new fun.bm.mili.lmili.thread.scheduler.api.EntityTask() {
                             @Override
                             public void execute(
-                                    @NotNull final fun.bm.mili.lmili.thread.scheduler.api.EntityTaskContext ctx)
+                                    @NotNull final fun.bm.mili.lmili.thread.scheduler.api.EntityTask.EntityTaskContext ctx)
                                     throws Exception {
                                 LMili.bindCurrentOwner(owner);
                                 if (pluginName != null) MiliUsageTracker.setCurrentPlugin(pluginName);
