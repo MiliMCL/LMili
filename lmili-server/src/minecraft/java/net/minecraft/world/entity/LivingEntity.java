@@ -3926,11 +3926,18 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         }
 
         int maxCramming = ((ServerLevel) this.level()).getGameRules().get(GameRules.MAX_ENTITY_CRAMMING);
-        if (maxCramming <= 0 && this.level().paperConfig().collisions.maxEntityCollisions <= 0) {
+        int maxEntityCollisions = this.level().paperConfig().collisions.maxEntityCollisions;
+        if (maxCramming <= 0 && maxEntityCollisions <= 0) {
             return;
         }
         // Paper end - don't run getEntities if we're not going to use its result
-        List<Entity> pushableEntities = this.level().getPushableEntities(this, this.getBoundingBox());
+        // Mili start - bound the collision query: we only push up to maxEntityCollisions entities
+        // and only need to know whether cramming (more than maxCramming) is exceeded, so stop the
+        // entity-lookup scan early instead of building the full neighbor list.
+        final long collisionLimitLong = Math.max((long) maxCramming + 1L, (long) maxEntityCollisions + 1L);
+        final int collisionLimit = collisionLimitLong >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) collisionLimitLong;
+        List<Entity> pushableEntities = this.level().getPushableEntities(this, this.getBoundingBox(), collisionLimit);
+        // Mili end
         if (!pushableEntities.isEmpty()) {
             if (this.level() instanceof ServerLevel serverLevel) {
                 // Paper - don't run getEntities if we're not going to use its result; moved up
@@ -3950,9 +3957,9 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
             }
 
             // Paper start - Cap entity collisions
-            this.numCollisions = Math.max(0, this.numCollisions - this.level().paperConfig().collisions.maxEntityCollisions);
+            this.numCollisions = Math.max(0, this.numCollisions - maxEntityCollisions);
             for (Entity entity : pushableEntities) {
-                if (this.numCollisions >= this.level().paperConfig().collisions.maxEntityCollisions) {
+                if (this.numCollisions >= maxEntityCollisions) {
                     break;
                 }
 

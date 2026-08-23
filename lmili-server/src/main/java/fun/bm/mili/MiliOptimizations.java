@@ -38,6 +38,10 @@ public final class MiliOptimizations {
         // 初始化国际化系统（使用 LanguageConfig.lang 配置）
         I18nManager.init(LanguageConfig.lang);
 
+        // Mili: 提供 Mili plugin 实例给 EntityTickPerformanceConfig 的 Bukkit listener
+        // 这样 listener 注册时不用走 Bukkit.getPluginManager().getPlugin("Mili") 间接查找
+        fun.bm.mili.config.modules.optimizations.EntityTickPerformanceConfig.setMiliPlugin(plugin);
+
         // 核心延迟缓解
         LagRemover.init(plugin);
 

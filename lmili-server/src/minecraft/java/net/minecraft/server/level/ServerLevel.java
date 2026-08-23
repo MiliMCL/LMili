@@ -1829,6 +1829,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         }
         // Lmili end - Entity portal-teleport speed fix
         // Folia end - region threading
+        } else if (fun.bm.mili.lmili.thread.regiontick.EntityThrottlePolicy.isEnabled()
+            && entity instanceof net.minecraft.world.entity.Mob mob
+            && fun.bm.mili.lmili.thread.regiontick.EntityThrottlePolicy.shouldThrottleThisTick(mob)
+            && fun.bm.mili.lmili.thread.regiontick.EntityThrottlePolicy.isThrottleEligible(this, mob)) {
+            // Mili - Stage A1 远距离实体降频节流：时间推进（portal + noActionTime），跳过 goal/target selector
+            // 短路顺序：isEnabled（最 cheap）→ instanceof → tickCount % interval → 距离/eligibility（最 expensive）
+            mob.mili$throttledInactiveTick();
         } else {entity.inactiveTick();} // Paper - EAR 2
         profiler.pop();
         } finally { foliaProfiler.stopTimer(timerId); } // Folia - profiler

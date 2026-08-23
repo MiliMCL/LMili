@@ -164,6 +164,9 @@ public final class RegionTickDispatcher {
         // 清理该 region 在 FoliaRegionNodeScheduler 中的 pending 跨 region DAG 任务
         // 区域已销毁，这些任务不需要再执行
         this.foliaRegionScheduler.drainPending(regionId);
+        // Mili: 通知 EntityTickDispatcher 清理该 region 的 per-region 缓存
+        // （EntityPriorityScheduler / 指标 / 清理时间戳 等）—— 防止 region 销毁后 map 无限增长
+        this.entityDispatcher.onRegionDestroyed(regionId);
     }
 
     public RegionTickContext getOrCreateContext(

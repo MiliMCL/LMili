@@ -229,6 +229,28 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
             this.targetSelector.tick();
         }
     }
+
+    // Mili start - Stage A1 远距离实体降频节流的轻量 tick 路径
+    /**
+     * 节流路径（throttle，非跳过）：只做<b>时间推进</b>，跳过 AI（goal/target selector）。
+     *
+     * <p>{@code super.inactiveTick()} 从 Mob 视角分发到 {@code LivingEntity.inactiveTick()}，
+     * 即 {@code Entity.inactiveTick()}（传送门处理）+ {@code ++noActionTime}，
+     * <b>不包含</b>本类的 goal/target selector inactive ticking。
+     *
+     * <p>语义保证：
+     * <ul>
+     *   <li>传送门仍处理 —— 刷怪塔（portal farm）远离玩家的 Mob 照常通过传送门</li>
+     *   <li>{@code noActionTime} 仍递增 —— despawn 逻辑不冻结（{@code noActionTime > 600} 判断仍成立）</li>
+     *   <li>{@code tickCount} / {@code totalEntityAge} 已由 {@code tickNonPassenger} 入口递增</li>
+     * </ul>
+     *
+     * <p>由 {@code ServerLevel.tickNonPassenger} 在 {@code entity.tickCount % interval != 0} 时调用。
+     */
+    public void mili$throttledInactiveTick() {
+        super.inactiveTick(); // LivingEntity.inactiveTick = portal + noActionTime++（无 goal/target selector）
+    }
+    // Mili end
     // Paper end
 
     public MoveControl getMoveControl() {

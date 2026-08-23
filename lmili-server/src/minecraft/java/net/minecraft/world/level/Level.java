@@ -2017,6 +2017,23 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
         return this.getEntities(pusher, boundingBox, EntitySelector.pushableBy(pusher));
     }
 
+    // Mili - bounded neighbor query (see LivingEntity.pushEntities). Identical to
+    // getPushableEntities(pusher, boundingBox) except it stops the entity-lookup scan after
+    // maxCount matches while still excluding the pusher itself, capping an otherwise O(n) scan
+    // per entity (O(n^2) total) in dense crowds.
+    public List<Entity> getPushableEntities(final Entity pusher, final AABB boundingBox, final int maxCount) {
+        // Mili - skip tick thread check for virtual threads (mirrors getEntities)
+        if (fun.bm.mili.lmili.thread.regiontick.RegionDataThreadLocal.getCurrent() == null) {
+            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)this, boundingBox, "Cannot getEntities asynchronously"); // Folia - region threading
+        }
+        Profiler.get().incrementCounter("getEntities");
+        final List<Entity> ret = new java.util.ArrayList<>();
+        final Predicate<Entity> selector = EntitySelector.pushableBy(pusher);
+        ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(pusher, boundingBox, ret, selector, maxCount);
+        ca.spottedleaf.moonrise.common.PlatformHooks.get().addToGetEntities((Level)(Object)this, pusher, boundingBox, selector, ret);
+        return ret;
+    }
+
     public abstract @Nullable Entity getEntity(int id);
 
     public @Nullable Entity getEntity(final UUID uuid) {

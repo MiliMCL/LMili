@@ -4,6 +4,7 @@ import java.util.EnumSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.level.LevelReader;
+import fun.bm.mili.config.modules.optimizations.EntityTickPerformanceConfig; // Mili
 
 public abstract class MoveToBlockGoal extends Goal {
     private static final int GIVE_UP_TICKS = 1200;
@@ -20,6 +21,12 @@ public abstract class MoveToBlockGoal extends Goal {
     private final int verticalSearchRange;
     protected int verticalSearchStart;
 
+    // Mili start - MoveToBlockGoal caching: 缓存 findNearestBlock 结果，避免每 200-400 tick 触发一次 ~1000 blocks 扫描
+    // 缓存验证条件：1) 缓存年龄 ≤ moveToBlockGoalCacheMaxAgeTicks；2) isValidTarget 仍为 true；3) stop 时清空
+    private BlockPos mili$cachedBlockPos = BlockPos.ZERO;
+    private int mili$cachedValidTick = -1; // mob.tickCount at cache write; -1 = 缓存无效
+    // Mili end
+
     public MoveToBlockGoal(final PathfinderMob mob, final double speedModifier, final int searchRange) {
         this(mob, speedModifier, searchRange, 1);
     }
@@ -29,6 +36,9 @@ public abstract class MoveToBlockGoal extends Goal {
         super.stop();
         this.blockPos = BlockPos.ZERO;
         this.mob.movingTarget = null;
+        // Mili: stop 清缓存（goal 停止时缓存不再有效）
+        this.mili$cachedBlockPos = BlockPos.ZERO;
+        this.mili$cachedValidTick = -1;
     }
     // Paper end
 
@@ -48,6 +58,23 @@ public abstract class MoveToBlockGoal extends Goal {
             return false;
         } else {
             this.nextStartTick = this.nextStartTick(this.mob);
+            // Mili start - 缓存命中：age 在配置阈值内且 isValidTarget 通过则跳过 findNearestBlock 的 ~1000 blocks 扫描
+            if (EntityTickPerformanceConfig.moveToBlockGoalCacheEnabled && this.mili$cachedValidTick >= 0) {
+                final int age = this.mob.tickCount - this.mili$cachedValidTick;
+                if (age >= 0 && age <= EntityTickPerformanceConfig.moveToBlockGoalCacheMaxAgeTicks) {
+                    if (this.isValidTarget(this.mob.level(), this.mili$cachedBlockPos)) {
+                        this.blockPos = this.mili$cachedBlockPos;
+                        this.mob.movingTarget = this.mili$cachedBlockPos == BlockPos.ZERO ? null : this.mili$cachedBlockPos.immutable();
+                        return true; // 缓存命中，避免 findNearestBlock 的块扫描
+                    }
+                    // 缓存块已无效（block 被破坏/改变）
+                    this.mili$cachedValidTick = -1;
+                } else {
+                    // 缓存过期
+                    this.mili$cachedValidTick = -1;
+                }
+            }
+            // Mili end
             return this.findNearestBlock();
         }
     }
@@ -123,6 +150,12 @@ public abstract class MoveToBlockGoal extends Goal {
                         if (this.mob.isWithinHome(pos) && this.isValidTarget(this.mob.level(), pos)) {
                             this.blockPos = pos;
                             this.mob.movingTarget = pos == BlockPos.ZERO ? null : pos.immutable(); // Paper
+                            // Mili: 写入缓存（用 immutable 避免 MutableBlockPos 被外部修改）
+                            if (EntityTickPerformanceConfig.moveToBlockGoalCacheEnabled) {
+                                this.mili$cachedBlockPos = pos.immutable();
+                                this.mili$cachedValidTick = this.mob.tickCount;
+                            }
+                            // Mili end
                             return true;
                         }
                     }
