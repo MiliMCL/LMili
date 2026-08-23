@@ -74,6 +74,124 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
     public static String getExtensionName() {
         return "." + fun.bm.mili.config.modules.function.RegionFormatConfig.regionFormat.getArgument();
     }
+
+    // Lmili start - bidirectional region file resolution & conversion
+    // LINEAR_V2 support has been removed and b_linear has been renamed to o_linear. Existing worlds
+    // may contain region files using those old extensions, the vanilla MCA format, or the o_linear
+    // format. On access, the missing configured format is produced from whatever exists:
+    //   O_LINEAR configured:
+    //     1) target o_linear exists
+    //     2) legacy b_linear/linear exists -> atomic rename (OptimizedLinearRegionFile migrates the
+    //        bucket layout, if any, on load)
+    //     3) mca exists -> convert to o_linear via a temp file, atomically publish, back up the mca
+    //   MCA configured:
+    //     1) target mca exists
+    //     2) o_linear / b_linear / linear exists -> convert to mca via a temp file, publish, back up
+    private static final String[] LEGACY_REGION_EXTENSIONS = new String[]{".b_linear", ".linear"};
+    private static final String[] LINEAR_EXTENSIONS = new String[]{".o_linear", ".b_linear", ".linear"};
+    private static final String MCA_BACKUP_SUFFIX = ".bak";
+
+    private Path resolveRegionFileWithLegacyConversion(final int chunkX, final int chunkZ) throws IOException {
+        final Path regionPath = this.folder.resolve(getRegionFileName(chunkX, chunkZ));
+
+        if (java.nio.file.Files.exists(regionPath)) {
+            return regionPath;
+        }
+
+        final int regionX = chunkX >> REGION_SHIFT;
+        final int regionZ = chunkZ >> REGION_SHIFT;
+        final String baseName = "r." + regionX + "." + regionZ;
+
+        final fun.bm.mili.lmili.enums.EnumRegionFormat configured =
+                fun.bm.mili.config.modules.function.RegionFormatConfig.regionFormat;
+
+        if (configured == fun.bm.mili.lmili.enums.EnumRegionFormat.O_LINEAR) {
+            // legacy b_linear/linear is the same format under an old extension -> rename, no data rewrite
+            for (final String legacyExt : LEGACY_REGION_EXTENSIONS) {
+                final Path legacyPath = this.folder.resolve(baseName + legacyExt);
+                if (java.nio.file.Files.exists(legacyPath)) {
+                    moveReplace(legacyPath, regionPath);
+                    return regionPath;
+                }
+            }
+
+            final Path mcaPath = this.folder.resolve(baseName + ANVIL_EXTENSION);
+            if (java.nio.file.Files.exists(mcaPath)) {
+                this.convertMcaToOlinear(mcaPath, regionPath, regionX, regionZ);
+                return regionPath;
+            }
+        } else {
+            // MCA configured: convert any linear-format region back to the vanilla Anvil format
+            for (final String linearExt : LINEAR_EXTENSIONS) {
+                final Path linearPath = this.folder.resolve(baseName + linearExt);
+                if (java.nio.file.Files.exists(linearPath)) {
+                    this.convertLinearToMca(linearPath, regionPath, regionX, regionZ);
+                    return regionPath;
+                }
+            }
+        }
+
+        return regionPath;
+    }
+
+    private void convertMcaToOlinear(final Path mcaPath, final Path olinearPath,
+                                     final int regionX, final int regionZ) throws IOException {
+        final String tmpName = olinearPath.getFileName().toString() + ".tmp";
+        final Path tmpPath = olinearPath.resolveSibling(tmpName);
+        final Path tmpSwapPath = olinearPath.resolveSibling(tmpName + ".swp");
+
+        // Remove stale artifacts from a previously interrupted conversion so OptimizedLinearRegionFile
+        // starts clean (its master parser would otherwise try to load the stale master file).
+        java.nio.file.Files.deleteIfExists(tmpPath);
+        java.nio.file.Files.deleteIfExists(tmpSwapPath);
+
+        final int chunkCount = fun.bm.mili.lmili.data.McaToOlinearConverter.convert(
+                mcaPath, tmpPath, this.info, this.folder, regionX, regionZ,
+                fun.bm.mili.config.modules.function.RegionFormatConfig.linearCompressionLevel,
+                fun.bm.mili.config.modules.function.RegionFormatConfig.olinearFlusher
+        );
+
+        // Publish the converted region, then back up the source MCA for reversibility.
+        moveReplace(tmpPath, olinearPath);
+
+        final Path backupPath = mcaPath.resolveSibling(mcaPath.getFileName().toString() + MCA_BACKUP_SUFFIX);
+        moveReplace(mcaPath, backupPath);
+
+        LOGGER.info("Migrated region {} from MCA to O_LINEAR ({} chunks; original kept at {})",
+                olinearPath.getFileName(), chunkCount, backupPath.getFileName());
+    }
+
+    private void convertLinearToMca(final Path linearPath, final Path mcaPath,
+                                    final int regionX, final int regionZ) throws IOException {
+        final String tmpName = mcaPath.getFileName().toString() + ".tmp";
+        final Path tmpPath = mcaPath.resolveSibling(tmpName);
+
+        java.nio.file.Files.deleteIfExists(tmpPath);
+
+        final int chunkCount = fun.bm.mili.lmili.data.OlinearToMcaConverter.convert(
+                linearPath, tmpPath, this.info, this.folder, regionX, regionZ,
+                fun.bm.mili.config.modules.function.RegionFormatConfig.linearCompressionLevel
+        );
+
+        moveReplace(tmpPath, mcaPath);
+
+        final Path backupPath = linearPath.resolveSibling(linearPath.getFileName().toString() + MCA_BACKUP_SUFFIX);
+        moveReplace(linearPath, backupPath);
+
+        LOGGER.info("Migrated region {} from {} to MCA ({} chunks; original kept at {})",
+                mcaPath.getFileName(), linearPath.getFileName(), chunkCount, backupPath.getFileName());
+    }
+
+    private static void moveReplace(final Path source, final Path target) throws IOException {
+        try {
+            java.nio.file.Files.move(source, target,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (final java.nio.file.AtomicMoveNotSupportedException atomicFailure) {
+            java.nio.file.Files.move(source, target,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
     // Lmili end
 
     private boolean doesRegionFilePossiblyExist(final long position) {
@@ -131,7 +249,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
             this.regionCache.removeLast().close();
         }
 
-        final Path regionPath = this.folder.resolve(getRegionFileName(chunkX, chunkZ));
+        final Path regionPath = this.resolveRegionFileWithLegacyConversion(chunkX, chunkZ);
 
         if (!java.nio.file.Files.exists(regionPath)) {
             this.markNonExisting(key);
@@ -310,7 +428,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
                 this.regionCache.removeLast().close();
             }
 
-            final Path regionPath = this.folder.resolve(getRegionFileName(pos.x(), pos.z()));
+            final Path regionPath = this.resolveRegionFileWithLegacyConversion(pos.x(), pos.z());
 
             this.createRegionFile(key);
 

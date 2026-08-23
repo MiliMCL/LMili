@@ -564,7 +564,7 @@ LMili 使用纯 Java 的 night-config TOML 配置文件系统（文件：`lmili_
 | `fun.bm.mili.config.modules` | 配置模块（lmili_config.toml 对应） |
 | `fun.bm.mili.lmili.config` | 配置管理 |
 | `fun.bm.mili.lmili.thread.regiontick` | 调度器实现 |
-| `fun.bm.mili.lmili.data` | 区块存储格式（Linear V2 等） |
+| `fun.bm.mili.lmili.data` | 区块存储格式（O_LINEAR 等） |
 | `fun.bm.mili.lmili.commands` | 服务端命令 |
 
 ### A.2 项目目录结构
@@ -593,7 +593,7 @@ Mili/
 │       └── lmili/             # 核心实现子树
 │           ├── thread/regiontick/   # RegionTickPool / 调度器
 │           ├── config/             # ConfigManager
-│           ├── data/               # Linear 区块存储
+│           ├── data/               # O_LINEAR 区块存储
 │           └── commands/           # /lmiconfig、/lmibar 等
 ├── paper-server/              # Paper 服务器（补丁应用目标）
 ├── paper-api/                 # Paper API（补丁应用目标）

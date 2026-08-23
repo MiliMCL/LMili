@@ -1147,6 +1147,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
     }
     public void stopPart2() {
         // Folia end - region threading
+        // Mili start - drain the o_linear background flusher BEFORE region files are closed.
+        // The flusher's I/O worker pool commits buffered swap-file chunk data to the master
+        // region file; awaiting it here guarantees no save is lost during shutdown and avoids
+        // racing the region-file close (which also performs a final sync).
+        fun.bm.mili.config.modules.function.RegionFormatConfig.shutdownOlinearFlusher();
+        // Mili end
         this.savedDataStorage.close();
         this.resources.close();
 

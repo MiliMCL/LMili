@@ -45,12 +45,12 @@ public class LinearFormatMigrator {
 
     private final ReadWriteLock masterFileLock = new ReentrantReadWriteLock();
 
-    private final BufferedLinearRegionFile file;
+    private final OptimizedLinearRegionFile file;
 
     /**
-     * @param file the owning BufferedLinearRegionFile instance whose data this migrator operates on
+     * @param file the owning OptimizedLinearRegionFile instance whose data this migrator operates on
      */
-    public LinearFormatMigrator(@NotNull BufferedLinearRegionFile file) {
+    public LinearFormatMigrator(@NotNull OptimizedLinearRegionFile file) {
         this.file = file;
     }
 
@@ -220,6 +220,12 @@ public class LinearFormatMigrator {
                     throw new IOException("Failed to replace master file!", e);
                 }
             }
+
+            // Mili - fsync the parent directory so the atomic rename above is durable across a
+            // power loss, not just a process crash. Best-effort: some platforms/filesystems do not
+            // support opening a directory as a file channel (e.g. Windows), which is safe to ignore
+            // because those filesystems handle rename durability themselves.
+            fsyncDirectory(mainFile.getParent());
         } finally {
             this.masterFileLock.writeLock().unlock();
         }
@@ -319,6 +325,17 @@ public class LinearFormatMigrator {
         }
     }
 
+    private static void fsyncDirectory(@Nullable Path dir) {
+        if (dir == null) {
+            return;
+        }
+        try (FileChannel dirChannel = FileChannel.open(dir, StandardOpenOption.READ)) {
+            dirChannel.force(true);
+        } catch (IOException ignored) {
+            // Best-effort durability: not all platforms/filesystems permit fsync on a directory.
+        }
+    }
+
     private static void writeFullyAt(FileChannel channel, @NonNull ByteBuffer buf, long startOffset) throws IOException {
         long offset = startOffset;
         while (buf.hasRemaining()) {
@@ -404,8 +421,8 @@ public class LinearFormatMigrator {
                             bucketBuffer.get(chunkData);
 
                             // Mark bucket as loaded and dirty so it gets synced to new master format
-                            final int blinearBucketIndex = chunkIndex >> BUCKET_SHIFT;
-                            final BufferedLinearRegionFile.Bucket bucket = this.file.getBuckets()[blinearBucketIndex];
+                            final int targetBucketIndex = chunkIndex >> BUCKET_SHIFT;
+                            final OptimizedLinearRegionFile.Bucket bucket = this.file.getBuckets()[targetBucketIndex];
 
                             bucket.dirty = true;
 
@@ -458,7 +475,7 @@ public class LinearFormatMigrator {
                     final ByteBuffer sectorDataNioBuffer = ByteBuffer.wrap(sectorData);
 
                     final int bucketIndex = index >> BUCKET_SHIFT;
-                    final BufferedLinearRegionFile.Bucket bucket = this.file.getBuckets()[bucketIndex];
+                    final OptimizedLinearRegionFile.Bucket bucket = this.file.getBuckets()[bucketIndex];
 
                     synchronized (bucket.lock) {
                         bucket.loaded = true;
@@ -515,7 +532,7 @@ public class LinearFormatMigrator {
 
 
                     final int bucketIndex = i >> BUCKET_SHIFT;
-                    final BufferedLinearRegionFile.Bucket bucket = this.file.getBuckets()[bucketIndex];
+                    final OptimizedLinearRegionFile.Bucket bucket = this.file.getBuckets()[bucketIndex];
 
                     bucket.dirty = true;
 

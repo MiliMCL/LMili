@@ -420,10 +420,12 @@ API 模块共 33 个 Java 文件，分属 4 个包：
 
 ### 数据格式（`lmili/data/`）
 
-5 个文件，实现 Linear V2 区块存储格式：
-- `BufferedLinearRegionFile`：缓冲线性 region 文件
-- `LinearFormatMigrator`：格迁移器
+5 个文件，实现 O_LINEAR（Optimized Linear）区块存储格式：
+- `OptimizedLinearRegionFile`：优化线性 region 文件（原 `BufferedLinearRegionFile` / `b_linear`，已改名为 `o_linear`）
+- `LinearFormatMigrator`：格式迁移器（兼容旧 Linear V1/V2、BLinear V2 格式的加载迁移）
 - `ChunkCompressor`：区块压缩
+- `Sector`：交换文件扇区管理
+- `ChunkBufferHelper`：区块写缓冲
 
 ### 村民优化（`villager/`）
 

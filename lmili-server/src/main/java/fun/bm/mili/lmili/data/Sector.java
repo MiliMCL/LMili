@@ -15,6 +15,11 @@ public class Sector {
     private long offset;
     private long length;
     boolean hasData = false;
+    // Mili - tombstone. Distinguishes "explicitly cleared" (the chunk must stay absent after crash
+    // recovery) from "never written" (the chunk may be reloaded from the master file). A plain
+    // hasData=false would conflate the two, causing a cleared chunk to resurrect from the stale
+    // master after a crash. Encoded as a 3-state byte: 0 = absent, 1 = present, 2 = cleared.
+    boolean cleared = false;
 
     public Sector(int index, long offset, long length) {
         this.index = index;
@@ -61,15 +66,13 @@ public class Sector {
      *
      * @param newData the data to write
      * @param channel the file channel to write to
-     * @param owner   the owning BufferedLinearRegionFile (for currentAcquiredIndex access)
+     * @param owner   the owning OptimizedLinearRegionFile (for currentAcquiredIndex access)
      */
     public void store(@NotNull ByteBuffer newData, @NotNull FileChannel channel,
-                      @NotNull BufferedLinearRegionFile owner) throws IOException {
+                      @NotNull OptimizedLinearRegionFile owner) throws IOException {
         final long oldLength = this.length;
         final long newDataLength = newData.remaining();
-
-        this.hasData = true;
-        this.length = newDataLength;
+        final boolean hadData = this.hasData;
 
         // data is smaller or its length equals to the local buffer we hold, write it directly
         if (newDataLength <= oldLength) {
@@ -78,18 +81,43 @@ public class Sector {
                 localOffset += channel.write(newData, localOffset);
             }
 
+            this.hasData = true;
+            this.cleared = false;
+            this.length = newDataLength;
+
+            // Mili start - perf: keep owner's live-sector byte count consistent.
+            if (!hadData) {
+                owner.trackSectorBytes(newDataLength);
+            }
+            // Mili end
+
+            // Mili - persist this sector's header entry (data first, metadata second) so the swap
+            // file remains recoverable after a crash.
+            owner.persistSectorMetadata(this.index);
             return;
         }
 
         // or we will append to the end of file
         this.offset = owner.getCurrentAcquiredIndex();
 
-        owner.advanceAcquiredIndex(this.length);
+        owner.advanceAcquiredIndex(newDataLength);
 
         long localOffset = this.offset;
         while (newData.hasRemaining()) {
             localOffset += channel.write(newData, localOffset);
         }
+
+        this.hasData = true;
+        this.cleared = false;
+        this.length = newDataLength;
+
+        // Mili start - perf: account for the delta of live-sector bytes.
+        owner.trackSectorBytes(hadData ? (newDataLength - oldLength) : newDataLength);
+        // Mili end
+
+        // Mili - persist this sector's header entry (data first, metadata second) so the swap file
+        // remains recoverable after a crash.
+        owner.persistSectorMetadata(this.index);
     }
 
     /**
@@ -101,7 +129,7 @@ public class Sector {
 
         buffer.putLong(this.offset);
         buffer.putLong(this.length);
-        buffer.put((byte) (this.hasData ? 1 : 0));
+        buffer.put((byte) (this.hasData ? 1 : (this.cleared ? 2 : 0)));
         buffer.flip();
 
         return buffer;
@@ -113,7 +141,9 @@ public class Sector {
     public void restoreFrom(@NotNull ByteBuffer buffer) {
         this.offset = buffer.getLong();
         this.length = buffer.getLong();
-        this.hasData = buffer.get() == 1;
+        final byte state = buffer.get();
+        this.hasData = state == 1;
+        this.cleared = state == 2;
 
         if (this.length < 0 || this.offset < 0) {
             throw new IllegalStateException("Invalid sector data: " + this);
@@ -121,10 +151,19 @@ public class Sector {
     }
 
     /**
-     * Clear this sector's data flag (marks as having no data).
+     * Clear this sector's data flag (marks as having no data) and records a tombstone so crash
+     * recovery knows the chunk was explicitly deleted rather than simply never loaded.
      */
     public void clear() {
         this.hasData = false;
+        this.cleared = true;
+    }
+
+    /**
+     * @return true when this sector was explicitly cleared (a deletion tombstone).
+     */
+    public boolean isCleared() {
+        return this.cleared;
     }
 
     /**

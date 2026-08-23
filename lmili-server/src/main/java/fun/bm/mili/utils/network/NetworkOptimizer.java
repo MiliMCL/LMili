@@ -182,20 +182,11 @@ public class NetworkOptimizer {
     }
 
     private static double getCurrentTps() {
-        try {
-            org.bukkit.scoreboard.Scoreboard main = Bukkit.getScoreboardManager().getMainScoreboard();
-            if (main != null) {
-                var criteria = main.getObjective("mili_tps");
-                if (criteria != null) {
-                    var entry = main.getEntries().stream().findFirst();
-                    if (entry.isPresent()) {
-                        var score = criteria.getScore(entry.get());
-                        return score.getScore() / 20.0;
-                    }
-                }
-            }
-        } catch (Throwable ignored) {}
-        return 20.0;
+        // Mili - fix: use the accurate TPSTracker (always initialized by LagRemover at startup)
+        // instead of reading TPS from a scoreboard objective. The previous approach depended on an
+        // external "mili_tps" objective that may not exist, silently returning 20.0 and defeating
+        // adaptive compression under real load.
+        return fun.bm.mili.utils.performance.TPSTracker.getTPS();
     }
 
     /**
