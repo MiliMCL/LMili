@@ -433,6 +433,12 @@ public final class MiliSchedulerImpl implements MiliScheduler {
             @Override
             public void onCancel() {
                 handle.cancel();
+                // RISK-FOLLOWUP：让原始 task 在 cancel 时能清理自己的 TaskScheduleState。
+                // 默认 task 是 lambda/builder，没有自定义 onCancel —— 委托给原 task 的 onCancel。
+                try {
+                    task.onCancel();
+                } catch (Throwable ignored) {
+                }
             }
         };
 

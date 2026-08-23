@@ -122,6 +122,21 @@ public final class TaskScheduleState {
     }
 
     /**
+     * 把任务从 QUEUED 状态还原为 IDLE。
+     *
+     * <p>用于：worker 拒收任务后，需要让 caller 能重新调度同一任务（例如
+     * Ownership verification 失败时 token 被取消但 task 需要被重新派发）。
+     *
+     * <p>只在 QUEUED 状态下生效。RUNNING/CANCELLED/IDLE 状态下调用返回 false，
+     * 避免与正在执行的 task 冲突。</p>
+     *
+     * @return true 如果成功 QUEUED→IDLE；false 如果状态不是 QUEUED
+     */
+    public boolean resetQueuedToIdle() {
+        return phase.compareAndSet(PHASE_QUEUED, PHASE_IDLE);
+    }
+
+    /**
      * 检查任务是否可以入队（处于 IDLE 状态）。
      */
     public boolean isIdle() {

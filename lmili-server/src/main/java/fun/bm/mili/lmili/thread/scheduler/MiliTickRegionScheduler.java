@@ -293,10 +293,37 @@ public final class MiliTickRegionScheduler {
         RegionTask toRegionTask() {
             final long rid = regionId();
             final Runnable r = this::executeTask;
-            return RegionTask.builder(rid)
-                    .task(r)
-                    .name(handle.region != null ? "TickRegion#" + handle.region.id : "TickGlobal")
-                    .build();
+            // RISK-FOLLOWUP：onCancel 把 task.state 从 QUEUED 还原为 IDLE，
+            // 这样如果 Ownership verification 失败 cancel task，调度器后续
+            // scheduleRegion(handle) 能重新 CAS tryMarkQueued() 成功。
+            final fun.bm.mili.lmili.thread.scheduler.execute.TaskScheduleState localState = this.state;
+            final TickRegionScheduler.RegionScheduleHandle localHandle = this.handle;
+            return new RegionTask() {
+                @Override
+                public void execute() throws Exception {
+                    r.run();
+                }
+
+                @Override
+                public long regionId() {
+                    return rid;
+                }
+
+                @Override
+                public @org.jetbrains.annotations.NotNull String name() {
+                    return localHandle.region != null
+                            ? "TickRegion#" + localHandle.region.id
+                            : "TickGlobal";
+                }
+
+                @Override
+                public void onCancel() {
+                    // 把 task.state 从 QUEUED 还原为 IDLE，
+                    // 允许 MiliTickRegionScheduler.scheduleRegion() 重新 CAS 成功。
+                    // 不影响正常路径（state 是 RUNNING 时 tryMarkIdle 已经处理过）。
+                    localState.resetQueuedToIdle();
+                }
+            };
         }
 
         /**
