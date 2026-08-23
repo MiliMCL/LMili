@@ -175,10 +175,12 @@ public class ClassLoadUtil {
             // RISK-06 关键：initialize = false
             final Class<?> clazz = Class.forName(className, false, loader);
             classes.add(clazz);
-        } catch (ClassNotFoundException | LinkageError | NoClassDefFoundError
-                 | ExceptionInInitializerError | SecurityException e) {
+        } catch (ClassNotFoundException | SecurityException e) {
             // RISK-07：隔离异常，不抛出去打断扫描流程
             LOGGER.warn("[ClassLoadUtil] Failed to load class {}: {}", className, e.toString());
+        } catch (LinkageError e) {
+            // RISK-07：LinkageError 已包含 NoClassDefFoundError / ExceptionInInitializerError 子类
+            LOGGER.warn("[ClassLoadUtil] Linkage error loading class {}: {}", className, e.toString());
         } catch (Throwable t) {
             // 兜底：任何其他异常也隔离
             LOGGER.warn("[ClassLoadUtil] Unexpected error loading class {}", className, t);

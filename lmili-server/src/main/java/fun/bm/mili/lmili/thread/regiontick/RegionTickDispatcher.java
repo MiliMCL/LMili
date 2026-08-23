@@ -129,10 +129,15 @@ public final class RegionTickDispatcher {
         RegionTickContext context = new RegionTickContext(regionId, region);
         this.activeContexts.put(regionId, context);
         // Mili 修复：注册 regionId → handle 映射，使跨 region DAG 节点能被正确路由
-        if (region != null && region.getData() != null && region.getData().tickHandle != null) {
-            fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
-                    .FoliaRegionNodeSchedulerHandleRegistry
-                    .register(regionId, region.getData().tickHandle);
+        // TickRegionData.tickHandle 是 private，必须通过公开 API getRegionSchedulingHandle() 访问
+        if (region != null && region.getData() != null) {
+            io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle handle =
+                    region.getData().getRegionSchedulingHandle();
+            if (handle != null) {
+                fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
+                        .FoliaRegionNodeSchedulerHandleRegistry
+                        .register(regionId, handle);
+            }
         }
         return context;
     }
