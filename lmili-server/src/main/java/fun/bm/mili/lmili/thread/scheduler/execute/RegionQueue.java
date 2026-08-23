@@ -34,6 +34,9 @@ public final class RegionQueue {
         this.regionId = regionId;
         this.deque = new ConcurrentLinkedDeque<>();
         this.regionState = new RegionState();
+        // RISK-01 修复：把 regionId 绑定到 RegionState，
+        // 使后续构造的 ExecutionToken 能够携带 regionId 供 worker ownership 校验使用。
+        this.regionState.bindRegionId(regionId);
         this.pushCount = new LongAdder();
         this.popCount = new LongAdder();
         this.stealCount = new LongAdder();

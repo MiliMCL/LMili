@@ -77,17 +77,37 @@ public final class RegionState {
      * 执行令牌 —— 持有它即表示拥有 Region 执行权。
      *
      * <p>必须在使用完毕后调用 {@link #release()}。
+     *
+     * <p>RISK-01 修复：每个 token 携带 regionId 与 generation 两个不变量。
+     * regionId + generation 与持有该 token 的 worker 线程（TreadLocal
+     * MiliTickThread.setRegionOwnership）一一对应，杜绝 TickThread 身份伪造。</p>
      */
     public static final class ExecutionToken {
         final RegionState state;
+        final long regionId;
         final long generation;
         final int owner;
         private final AtomicBoolean released = new AtomicBoolean(false);
 
-        ExecutionToken(RegionState state, long generation, int owner) {
+        ExecutionToken(RegionState state, long regionId, long generation, int owner) {
             this.state = state;
+            this.regionId = regionId;
             this.generation = generation;
             this.owner = owner;
+        }
+
+        /**
+         * RISK-01 修复：返回 token 持有的 regionId。
+         */
+        public long regionId() {
+            return regionId;
+        }
+
+        /**
+         * RISK-01 修复：返回 token 的 generation（用于防 stale token）。
+         */
+        public long generation() {
+            return generation;
         }
 
         /**
@@ -118,7 +138,7 @@ public final class RegionState {
 
         @Override
         public String toString() {
-            return "Token{owner=" + owner + ", gen=" + generation + "}";
+            return "Token{region=" + regionId + ", owner=" + owner + ", gen=" + generation + "}";
         }
     }
 
@@ -131,10 +151,37 @@ public final class RegionState {
     private volatile Runnable closeCallback;
 
     /**
+     * RISK-01 修复：本 RegionState 关联的 regionId。
+     *
+     * <p>创建后由 {@link RegionQueue} 设置（因为 RegionState 可能先于 queue 构造）。
+     * 写入是不可变的（final field），因此 token 持有 regionId 是线程安全的。</p>
+     */
+    private final AtomicLong regionIdRef = new AtomicLong(0L);
+
+    /**
      * 创建 ACTIVE/IDLE 状态的 RegionState。
+     *
+     * <p>无参构造保持向后兼容。生产代码应在创建后立即调用
+     * {@link #bindRegionId(long)} 注入 regionId；未注入时 token.regionId() == 0L。
      */
     public RegionState() {
         this.snapshot = new AtomicReference<>(Snapshot.INITIAL);
+    }
+
+    /**
+     * RISK-01 修复：绑定 regionId（创建 token 时会读取）。
+     *
+     * <p>只能设置一次；多次调用会被忽略。</p>
+     */
+    public void bindRegionId(final long regionId) {
+        regionIdRef.compareAndSet(0L, regionId);
+    }
+
+    /**
+     * RISK-01 修复：获取绑定的 regionId。
+     */
+    public long regionId() {
+        return regionIdRef.get();
     }
 
     /**
@@ -255,7 +302,8 @@ public final class RegionState {
                     Phase.ACTIVE, ExecState.RUNNING, owner,
                     current.queued, newGen);
             if (snapshot.compareAndSet(current, next)) {
-                return new ExecutionToken(this, newGen, owner);
+                // RISK-01：token 携带 regionId
+                return new ExecutionToken(this, regionIdRef.get(), newGen, owner);
             }
         }
     }
@@ -310,7 +358,8 @@ public final class RegionState {
                     current.queued, newGen);
             if (snapshot.compareAndSet(current, next)) {
                 token.released.set(true); // 旧 token 失效（AtomicBoolean）
-                return new ExecutionToken(this, newGen, newOwner);
+                // RISK-01：新 token 也携带 regionId
+                return new ExecutionToken(this, regionIdRef.get(), newGen, newOwner);
             }
         }
     }

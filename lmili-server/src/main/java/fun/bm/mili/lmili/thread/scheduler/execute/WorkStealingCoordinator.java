@@ -330,6 +330,10 @@ public final class WorkStealingCoordinator {
      *
      * <p>调用者在任务完成后必须调用 {@link #release()} 释放执行权，
      * 或使用 {@link #transferTo(int)} 转移给其他 worker。
+     *
+     * <p>RISK-01：暴露 {@link #regionId()} 与 {@link #generation()} 用于
+     * {@link fun.bm.mili.lmili.thread.scheduler.MiliTickThread#setRegionOwnership(long, long)}
+     * —— 这是 TickThread 身份校验之外的"Region ownership" 二因素之一。
      */
     public static final class PollResult {
         public final RegionTask task;
@@ -340,6 +344,23 @@ public final class WorkStealingCoordinator {
             this.task = task;
             this.token = token;
             this.queue = queue;
+        }
+
+        /**
+         * RISK-01 修复：返回 token 持有的 regionId。
+         */
+        public long regionId() {
+            return token.regionId();
+        }
+
+        /**
+         * RISK-01 修复：返回 token 的 generation。
+         *
+         * <p>每个 ExecutionToken 都有一个唯一 generation，用于防止 stale token 被
+         * 同一线程重复验证通过。</p>
+         */
+        public long generation() {
+            return token.generation();
         }
 
         /**

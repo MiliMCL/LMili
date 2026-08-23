@@ -1,6 +1,7 @@
 package fun.bm.mili.lmili.thread.scheduler.execute;
 
 import com.mojang.logging.LogUtils;
+import fun.bm.mili.lmili.thread.scheduler.MiliTickThread;
 import fun.bm.mili.lmili.thread.scheduler.api.RegionTask;
 import org.slf4j.Logger;
 
@@ -16,6 +17,16 @@ import java.util.concurrent.locks.LockSupport;
  *   <li>任务完成后调用 {@link WorkStealingCoordinator.PollResult#release()} 释放 token</li>
  *   <li>阻塞任务通过 {@link WorkStealingCoordinator.PollResult#transferTo(int)} 转移 token</li>
  * </ul>
+ *
+ * <h3>RISK-01 修复</h3>
+ * <p>Worker 在执行 task 前，调用 {@link MiliTickThread#setRegionOwnership(long, long)} 把
+ * token 携带的 regionId + generation 写入当前 worker 线程。MiliTickThread.ownsRegion()
+ * 在执行 region 数据访问时被检查。任何被伪造的 TickThread 身份（generation=0 或
+ * ownedRegionId 不匹配）都会被 {@link MiliTickThread#verifyRegionOwnership(long)} 抛出
+ * IllegalStateException，从而阻止 region 并发执行。
+ *
+ * <p>阻塞任务的 token 由 BlockingWorker 接管；BlockingWorker 释放时也会调用
+ * clearRegionOwnership。
  */
 public final class SchedulerWorker implements Runnable {
 
@@ -78,6 +89,10 @@ public final class SchedulerWorker implements Runnable {
                 RegionTask task = result.task;
                 long regionId = task.regionId();
                 long startNanos = System.nanoTime();
+                // RISK-01：取出 token 后立即把 ownership 写到当前线程。
+                // blocking task 不写在这里 —— 它会通过 transferTo 由 BlockingWorker 接管 token，
+                // ownership 的写入也由 BlockingWorker 负责（见 BlockingTaskIsolation）。
+                boolean wroteOwnership = false;
 
                 try {
                     if (task.isBlocking()) {
@@ -85,6 +100,9 @@ public final class SchedulerWorker implements Runnable {
                         // BlockingWorker 完成任务后会释放 token
                         blockingIsolation.executeBlocking(task, result, workerId);
                     } else {
+                        // RISK-01：执行前先把 token ownership 写入当前 worker 线程
+                        writeOwnership(result);
+                        wroteOwnership = true;
                         // 普通任务：直接执行，完成后释放 token
                         task.execute();
                     }
@@ -95,6 +113,10 @@ public final class SchedulerWorker implements Runnable {
                     // 释放 token（如果是非阻塞任务；阻塞任务已由 BlockingWorker 释放）
                     if (!task.isBlocking()) {
                         result.release();
+                        // RISK-01：释放 token 后清除 ownership
+                        if (wroteOwnership) {
+                            clearOwnership();
+                        }
                     }
                     tasksExecuted++;
                     totalExecutionTimeNanos += System.nanoTime() - startNanos;
@@ -106,7 +128,32 @@ public final class SchedulerWorker implements Runnable {
             }
         }
 
+        // Worker 退出时确保不残留 ownership
+        clearOwnership();
         LOGGER.debug("[Worker-{}] Stopped (executed {} tasks)", workerId, tasksExecuted);
+    }
+
+    /**
+     * RISK-01 修复：把 PollResult 持有的 token ownership 写入当前 worker 线程。
+     *
+     * <p>只有当前线程是 MiliTickThread 时才写入（否则 Folia 线程安全检查
+     * 也无法将该线程识别为合法 tickThread）。非 TickThread 模式下，线程类型
+     * 校验在 Folia 端不会通过，因此也不需要 ownership 写入。</p>
+     */
+    private void writeOwnership(WorkStealingCoordinator.PollResult result) {
+        Thread self = Thread.currentThread();
+        if (self instanceof MiliTickThread mtt) {
+            // 通过反射 / 受控 API 从 PollResult 拿到 token 的 regionId + generation
+            // 为了避免暴露 token 内部状态，PollResult 提供 getRegionId()/getGeneration()
+            mtt.setRegionOwnership(result.regionId(), result.generation());
+        }
+    }
+
+    private void clearOwnership() {
+        Thread self = Thread.currentThread();
+        if (self instanceof MiliTickThread mtt) {
+            mtt.clearRegionOwnership();
+        }
     }
 
     private void parkLoop() {

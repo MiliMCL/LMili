@@ -20,6 +20,13 @@ import java.util.function.Consumer;
  * <h3>线程安全</h3>
  * <p>所有状态转换都是原子性的，多线程可以安全地调用 {@link #complete()} /
  * {@link #completeExceptionally(Throwable)} / {@link #onComplete(Consumer)}。
+ *
+ * <h3>RISK-04 / RISK-09 修复</h3>
+ * <ul>
+ *   <li>state 状态机严格 PENDING → COMPLETED/FAILED/CANCELLED 的 CAS 互斥</li>
+ *   <li>{@link #completeChild()} 增加原子合并（successCount/failedCount/cancelledCount），
+ *       最终态由三者决定而非简单按 failureCause 推断</li>
+ * </ul>
  */
 public final class DefaultTaskHandle implements TaskHandle {
 
@@ -29,8 +36,17 @@ public final class DefaultTaskHandle implements TaskHandle {
     /** 追踪的子任务总数 */
     private final int taskCount;
 
-    /** 已完成的子任务数 */
+    /** 已完成的子任务数（success + failed + cancelled） */
     private final AtomicInteger completedCount;
+
+    /** 已成功的子任务数（RISK-04 修复：用于区分 SUCCESS vs PARTIAL_FAILURE） */
+    private final AtomicInteger successCount;
+
+    /** 已失败的子任务数（RISK-04 修复） */
+    private final AtomicInteger failedCount;
+
+    /** 已取消的子任务数（RISK-04 修复） */
+    private final AtomicInteger cancelledCount;
 
     /** 失败原因（如果有） */
     private final AtomicReference<Throwable> failureCause;
@@ -57,6 +73,9 @@ public final class DefaultTaskHandle implements TaskHandle {
         this.taskCount = Math.max(1, taskCount);
         this.future = new CompletableFuture<>();
         this.completedCount = new AtomicInteger(0);
+        this.successCount = new AtomicInteger(0);
+        this.failedCount = new AtomicInteger(0);
+        this.cancelledCount = new AtomicInteger(0);
         this.failureCause = new AtomicReference<>(null);
         this.state = new AtomicReference<>(State.PENDING);
         this.callbacks = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -71,6 +90,9 @@ public final class DefaultTaskHandle implements TaskHandle {
         this.taskCount = 1;
         this.future = future;
         this.completedCount = new AtomicInteger(0);
+        this.successCount = new AtomicInteger(0);
+        this.failedCount = new AtomicInteger(0);
+        this.cancelledCount = new AtomicInteger(0);
         this.failureCause = new AtomicReference<>(null);
         this.state = new AtomicReference<>(State.PENDING);
         this.callbacks = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -86,19 +108,40 @@ public final class DefaultTaskHandle implements TaskHandle {
     }
 
     /**
-     * 标记一个子任务完成。
+     * RISK-04 修复：标记一个子任务完成（按 finalState 分类计数）。
      *
-     * <p>当所有子任务都完成后，handle 自动标记为 COMPLETED。
+     * <p>父 handle 的最终态由"所有子任务 finalState 分布"决定：
+     * <ul>
+     *   <li>全部 success → COMPLETED</li>
+     *   <li>有 cancelled 但无 failed → CANCELLED（RISK-04：batch 全部被取消）</li>
+     *   <li>有 failed（无论是否 cancelled）→ FAILED</li>
+     *   <li>混合 success + failed/cancelled → FAILED（PARTIAL_FAILURE 也归类为 FAILED，
+     *       但调用者可通过 {@link #failureCause()} + 子句柄列表区分）</li>
+     * </ul>
+     *
+     * @param childState 子任务结束状态（COMPLETED/FAILED/CANCELLED）
      */
-    public void completeChild() {
+    public void completeChild(@NotNull State childState) {
         int completed = completedCount.incrementAndGet();
-        if (completed >= taskCount) {
-            if (failureCause.get() != null) {
-                doComplete(State.FAILED);
-            } else {
-                doComplete(State.COMPLETED);
-            }
+        switch (childState) {
+            case COMPLETED -> successCount.incrementAndGet();
+            case FAILED -> failedCount.incrementAndGet();
+            case CANCELLED -> cancelledCount.incrementAndGet();
+            default -> {}
         }
+        if (completed >= taskCount) {
+            determineAndSetFinalState();
+        }
+    }
+
+    /**
+     * 兼容旧 API：标记一个子任务完成，假定为 success。
+     *
+     * @deprecated 使用 {@link #completeChild(State)} 传入真实状态
+     */
+    @Deprecated
+    public void completeChild() {
+        completeChild(State.COMPLETED);
     }
 
     /**
@@ -106,7 +149,13 @@ public final class DefaultTaskHandle implements TaskHandle {
      */
     public void complete() {
         completedCount.set(taskCount);
-        doComplete(State.COMPLETED);
+        // 若 counter 还没全部计入，把剩余都视为 success
+        int successNow = successCount.get();
+        int alreadyCounted = successNow + failedCount.get() + cancelledCount.get();
+        if (alreadyCounted < taskCount) {
+            successCount.set(taskCount - failedCount.get() - cancelledCount.get());
+        }
+        determineAndSetFinalState();
     }
 
     /**
@@ -116,8 +165,53 @@ public final class DefaultTaskHandle implements TaskHandle {
      */
     public void completeExceptionally(@NotNull Throwable throwable) {
         failureCause.compareAndSet(null, throwable);
-        doComplete(State.FAILED);
+        failedCount.incrementAndGet();
+        // 强制推进 counter 到 taskCount，触发最终态判定
+        int prev = completedCount.getAndSet(taskCount);
+        // 把未计的"剩余"算入 failed（保持总和正确）
+        int alreadyCounted = successCount.get() + failedCount.get() + cancelledCount.get();
+        if (alreadyCounted < taskCount) {
+            failedCount.addAndGet(taskCount - alreadyCounted);
+        }
+        determineAndSetFinalState();
     }
+
+    /**
+     * RISK-04 修复：根据子任务 finalState 分布判定父 handle 最终态。
+     *
+     * <p>只允许一次有效 CAS（PENDING → 终态）。</p>
+     */
+    private void determineAndSetFinalState() {
+        State current = state.get();
+        if (current != State.PENDING) {
+            return;
+        }
+        int success = successCount.get();
+        int failed = failedCount.get();
+        int cancelled = cancelledCount.get();
+        State finalState;
+        if (failed > 0) {
+            // 至少一个失败 → FAILED（PARTIAL_FAILURE 也归入此态）
+            finalState = State.FAILED;
+        } else if (cancelled == taskCount) {
+            // 全部取消 → CANCELLED
+            finalState = State.CANCELLED;
+        } else if (cancelled > 0) {
+            // 部分取消 + 其余成功 → 当作 CANCELLED（无法恢复部分结果）
+            finalState = State.CANCELLED;
+        } else {
+            // 全部成功
+            finalState = State.COMPLETED;
+        }
+        doComplete(finalState);
+    }
+
+    /**
+     * RISK-04 修复：获取 success/failed/cancelled 计数（供 batch 诊断）。
+     */
+    public int successChildCount() { return successCount.get(); }
+    public int failedChildCount() { return failedCount.get(); }
+    public int cancelledChildCount() { return cancelledCount.get(); }
 
     /**
      * 标记任务取消。

@@ -40,6 +40,9 @@ public final class DefaultBatchHandle implements fun.bm.mili.lmili.thread.schedu
     /**
      * 创建批量任务句柄。
      *
+     * <p>RISK-04 修复：每个 child 完成时把 child.state 传给 parent。
+     * 父 handle 的最终态由子句 finalState 分布决定（COMPLETED/FAILED/CANCELLED）。</p>
+     *
      * @param children 子任务句柄列表
      */
     public DefaultBatchHandle(@NotNull List<TaskHandle> children) {
@@ -52,10 +55,12 @@ public final class DefaultBatchHandle implements fun.bm.mili.lmili.thread.schedu
         for (int i = 0; i < batchSize; i++) {
             TaskHandle child = children.get(i);
             child.onComplete(handle -> {
-                if (handle.state() == TaskHandle.State.COMPLETED) {
-                    successCount.incrementAndGet();
+                // RISK-04：把 child.state 传给 parent，由 parent 决定最终态
+                TaskHandle.State st = handle.state();
+                if (st == TaskHandle.State.COMPLETED) {
+                    this.successCount.incrementAndGet();
                 }
-                parentHandle.completeChild();
+                parentHandle.completeChild(st);
             });
         }
     }

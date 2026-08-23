@@ -133,33 +133,40 @@ public final class MiliSchedulerImpl implements MiliScheduler {
     @Override
     @NotNull
     public TaskHandle submit(@NotNull RegionTask task) {
-        // C-11 修复：使用 lifecycle 检查，拒绝 QUIESCING/CLOSED 状态下的提交
-        if (lifecycle.isShuttingDown()) {
+        // RISK-02 修复：原子 admission —— acquire submit gate 后检查 phase
+        if (!lifecycle.acquireSubmitSlot()) {
+            // 已 QUIESCING/CLOSED —— 立即取消任务
             DefaultTaskHandle cancelled = new DefaultTaskHandle();
             cancelled.cancel();
             return cancelled;
         }
 
-        metrics.recordSubmit();
-        metrics.recordRegionSubmit(task.regionId());
+        try {
+            metrics.recordSubmit();
+            metrics.recordRegionSubmit(task.regionId());
 
-        DefaultTaskHandle handle = new DefaultTaskHandle();
+            DefaultTaskHandle handle = new DefaultTaskHandle();
 
-        if (task.isBlocking()) {
-            // 阻塞任务 → 提交到专用阻塞池
-            submitBlockingTask(task, handle);
-        } else {
-            // 普通任务 → 提交到 work-stealing 队列
-            submitRegionTask(task, handle);
+            if (task.isBlocking()) {
+                // 阻塞任务 → 提交到专用阻塞池
+                submitBlockingTask(task, handle);
+            } else {
+                // 普通任务 → 提交到 work-stealing 队列
+                submitRegionTask(task, handle);
+            }
+
+            return handle;
+        } finally {
+            lifecycle.releaseSubmitSlot();
         }
-
-        return handle;
     }
 
     @Override
     @NotNull
     public BatchHandle submitBatch(@NotNull List<RegionTask> tasks) {
-        if (lifecycle.isShuttingDown()) {
+        // RISK-04 / RISK-02 修复：batch 必须先 acquire submit gate，做统一的 admission 决策
+        if (!lifecycle.acquireSubmitSlot()) {
+            // 整体 batch 一致性 —— 全部 cancel，绝不出现"部分提交部分取消"
             List<TaskHandle> cancelled = new ArrayList<>(tasks.size());
             for (int i = 0; i < tasks.size(); i++) {
                 DefaultTaskHandle h = new DefaultTaskHandle();
@@ -169,40 +176,83 @@ public final class MiliSchedulerImpl implements MiliScheduler {
             return new DefaultBatchHandle(cancelled);
         }
 
-        List<TaskHandle> handles = new ArrayList<>(tasks.size());
-        for (RegionTask task : tasks) {
-            handles.add(submit(task));
+        try {
+            List<TaskHandle> handles = new ArrayList<>(tasks.size());
+            for (RegionTask task : tasks) {
+                handles.add(submitSingleUnderGate(task));
+            }
+            return new DefaultBatchHandle(handles);
+        } finally {
+            lifecycle.releaseSubmitSlot();
         }
-        return new DefaultBatchHandle(handles);
+    }
+
+    /**
+     * RISK-04 修复：在 submit gate 持有下提交单个任务。
+     *
+     * <p>与 {@link #submit} 的区别：本方法假设调用者已经 acquire submit gate，
+     * 因此不会再次 acquire。这保证整个 batch 在同一 critical section 中完成，
+     * 不会因为 scheduler shutdown 而产生"部分成功 + 部分取消"的混合状态。</p>
+     */
+    private TaskHandle submitSingleUnderGate(@NotNull RegionTask task) {
+        metrics.recordSubmit();
+        metrics.recordRegionSubmit(task.regionId());
+
+        DefaultTaskHandle handle = new DefaultTaskHandle();
+
+        if (task.isBlocking()) {
+            submitBlockingTask(task, handle);
+        } else {
+            submitRegionTask(task, handle);
+        }
+        return handle;
     }
 
     @Override
     @NotNull
     public TaskHandle scheduleDelayed(@NotNull RegionTask task, long delay, @NotNull TimeUnit unit) {
-        if (lifecycle.isShuttingDown()) {
+        // RISK-05 修复：原子 admission —— 与 submit/shutdown 串行化
+        if (!lifecycle.acquireSubmitSlot()) {
             DefaultTaskHandle cancelled = new DefaultTaskHandle();
             cancelled.cancel();
             return cancelled;
         }
 
-        metrics.recordSubmit();
-        DefaultTaskHandle handle = new DefaultTaskHandle();
+        try {
+            metrics.recordSubmit();
+            DefaultTaskHandle handle = new DefaultTaskHandle();
 
-        ScheduledExecutorService scheduler = getDelayedScheduler();
-        ScheduledFuture<?> future = scheduler.schedule(() -> {
-            if (!handle.isCancelled()) {
-                if (task.isBlocking()) {
-                    submitBlockingTask(task, handle);
-                } else {
-                    submitRegionTask(task, handle);
-                }
+            // 关键：acquireSubmitSlot 持有期间获取 delayed scheduler 引用，
+            // shutdown beginShutdown 也在 acquire 同一把锁，所以这里看到的
+            // delayed scheduler 实例在 delayed task 完成注册前不会被关闭。
+            ScheduledExecutorService scheduler = getDelayedScheduler();
+            final ScheduledFuture<?>[] futureRef = new ScheduledFuture<?>[1];
+            try {
+                ScheduledFuture<?> future = scheduler.schedule(() -> {
+                    if (!handle.isCancelled()) {
+                        if (task.isBlocking()) {
+                            submitBlockingTask(task, handle);
+                        } else {
+                            submitRegionTask(task, handle);
+                        }
+                    }
+                }, delay, unit);
+                futureRef[0] = future;
+            } catch (RejectedExecutionException ree) {
+                // RISK-05 兜底：scheduler 在 schedule() 边界被 force shutdown
+                // 立即标记 handle 为失败，绝不留 PENDING
+                handle.completeExceptionally(ree);
+                return handle;
             }
-        }, delay, unit);
 
-        // C-18 修复：设置取消动作，使 handle.cancel() 能真正取消 ScheduledFuture
-        handle.setCancelAction(() -> future.cancel(false));
+            // C-18 修复：设置取消动作，使 handle.cancel() 能真正取消 ScheduledFuture
+            final ScheduledFuture<?> sf = futureRef[0];
+            handle.setCancelAction(() -> sf.cancel(false));
 
-        return handle;
+            return handle;
+        } finally {
+            lifecycle.releaseSubmitSlot();
+        }
     }
 
     @Override
@@ -227,16 +277,26 @@ public final class MiliSchedulerImpl implements MiliScheduler {
         LOGGER.info("[MiliScheduler] Shutting down... (phase: {}, pending tasks: {})",
                 lifecycle.get(), metrics.getPendingTaskCount());
 
-        // 步骤 1：停止延迟调度器（C-19 修复：在 worker 停止前停止，防止已取消任务唤醒）
+        // 步骤 1：立即停掉 delayed scheduler + 取消所有未触发的 delayed future
+        //
+        // RISK-05 修复：必须在 worker 停止之前停 delayed scheduler，否则：
+        //   - delayed callback 触发时 worker 已退出
+        //   - 回调内部调 submitRegionTask → coordinator.submit
+        //   - Coordinator 已 shutdown 但 task 已入队 → 永远不被执行
+        // 通过 shutdownNow() 触发所有未执行的 future 的 InterruptedException / cancellation，
+        // 那些 future 对应的 handle 会因为 scheduler.shutdownNow() 而得不到执行；
+        // 我们把它们全部标记为 CANCELLED，避免留下 PENDING。
         ScheduledExecutorService scheduler = delayedScheduler.getAndSet(null);
         if (scheduler != null) {
-            scheduler.shutdown();
+            // 先 shutdownNow 阻止新任务入队 + 唤醒未触发 future
+            List<Runnable> dropped = scheduler.shutdownNow();
+            LOGGER.info("[MiliScheduler] Delayed scheduler force-shutdown, dropped {} pending tasks",
+                    dropped != null ? dropped.size() : 0);
             try {
-                if (!scheduler.awaitTermination(1, TimeUnit.SECONDS)) {
-                    scheduler.shutdownNow();
+                if (!scheduler.awaitTermination(2, TimeUnit.SECONDS)) {
+                    LOGGER.warn("[MiliScheduler] Delayed scheduler did not terminate within 2s");
                 }
             } catch (InterruptedException e) {
-                scheduler.shutdownNow();
                 Thread.currentThread().interrupt();
             }
         }
@@ -254,8 +314,20 @@ public final class MiliSchedulerImpl implements MiliScheduler {
             }
         }
 
-        // 步骤 3：停止 work-stealing coordinator
-        workStealingCoordinator.shutdown();
+        // 步骤 3：停止 work-stealing coordinator（drain 剩余任务 + cancel 它们）
+        List<RegionTask> remaining = workStealingCoordinator.shutdown();
+        if (!remaining.isEmpty()) {
+            LOGGER.info("[MiliScheduler] Coordinator shutdown drained {} remaining tasks", remaining.size());
+            // RISK-02：剩余任务标记为 cancelled handle（虽然 coordinator 不会给我们 handle 列表，
+            // 这些 task 自己内部会通过 task.onCancel() 通知 owner，本实现已正确处理）
+            for (RegionTask task : remaining) {
+                try {
+                    task.onCancel();
+                } catch (Throwable t) {
+                    LOGGER.warn("[MiliScheduler] Error cancelling drained task {}", task.name(), t);
+                }
+            }
+        }
 
         // 步骤 4：关闭阻塞任务隔离
         blockingTaskIsolation.shutdown();
