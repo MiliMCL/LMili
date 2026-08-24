@@ -16,7 +16,7 @@ import fun.bm.mili.lmili.runtime.policy.RuntimePolicySnapshot;
 import fun.bm.mili.lmili.runtime.task.TickTaskType;
 import fun.bm.mili.lmili.thread.runtime.metrics.RuntimeMetrics;
 import fun.bm.mili.lmili.thread.scheduler.MiliTickRegionScheduler;
-import fun.bm.mili.lmili.thread.scheduler.api.MiliSchedulerHolder;
+import fun.bm.mili.lmili.thread.scheduler.MiliSchedulerHolder;
 import fun.bm.mili.utils.performance.AdaptiveTPSManager;
 import org.slf4j.Logger;
 

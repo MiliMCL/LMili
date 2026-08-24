@@ -14,7 +14,7 @@ public record ParallelExecutionBudget(
         boolean serial
 ) {
 
-    public static ParallelExecutionBudget serial() {
+    public static ParallelExecutionBudget serialBudget() {
         return new ParallelExecutionBudget(1, 0, true);
     }
 }

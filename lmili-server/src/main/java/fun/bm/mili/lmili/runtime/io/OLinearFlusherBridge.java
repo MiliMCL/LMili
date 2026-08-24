@@ -167,7 +167,7 @@ public final class OLinearFlusherBridge implements IOStateProbe, FlusherObserver
     }
 
     /** 确定性分级映射（§4.2 公式） */
-    static IoSaturationLevel computeLevel(long queueDepth, long p99Nanos) {
+    public static IoSaturationLevel computeLevel(long queueDepth, long p99Nanos) {
         if (queueDepth >= 5000 || p99Nanos >= 200_000_000L) {
             return IoSaturationLevel.CRITICAL;
         }

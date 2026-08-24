@@ -4,7 +4,7 @@ import com.mojang.logging.LogUtils;
 import fun.bm.mili.lmili.data.OptimizedLinearRegionFile;
 import fun.bm.mili.lmili.runtime.io.FlusherObserver;
 import fun.bm.mili.lmili.runtime.io.OLinearFlusherBridge;
-import fun.bm.mili.lmili.thread.scheduler.api.MiliSchedulerHolder;
+import fun.bm.mili.lmili.thread.scheduler.MiliSchedulerHolder;
 import fun.bm.mili.lmili.utils.OptimizedLinearRegionFileFlusher;
 import org.slf4j.Logger;
 

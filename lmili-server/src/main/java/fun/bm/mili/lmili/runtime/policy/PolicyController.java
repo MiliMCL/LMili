@@ -623,7 +623,8 @@ public final class PolicyController {
     public void initialize() {
         final RuntimePolicySnapshot init = current.get();
         if (init.version() == 0) {
-            final RuntimePolicySnapshot v1 = init.derive(1L, x -> x).build(1L);
+            // derive(newVersion, mutate) 返回已带 newVersion 的 RuntimePolicySnapshot（不是 Builder，无须 .build）
+            final RuntimePolicySnapshot v1 = init.derive(1L, x -> x);
             current.set(v1);
             runtime.publishPolicy(v1);
             auditLog.append(CommandSource.STATE_MACHINE, "SYSTEM", null, Collections.emptyMap(),
