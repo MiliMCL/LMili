@@ -573,10 +573,15 @@ public final class MiliTickRegionScheduler {
 
                     consecutiveRetries++;
                     if (consecutiveRetries > MAX_CONSECUTIVE_RETRIES) {
-                        // R3-FIX: 连续重试次数超限 —— 放弃本次 tick 但不关闭服务器
-                        LOGGER.warn("[MiliTickRegionScheduler] Region #{} not acquirable after {} retries, "
-                                        + "skipping this tick (server will not shut down)",
-                                regionId(), consecutiveRetries);
+                        // R3-FIX: 连续重试次数超限 —— 放弃本次 tick 但不关闭服务器。
+                        // Mili (噪音治理): 该路径在生产中典型场景是 region 被 Folia 原生调度器或
+                        // Mili 另一执行路径短暂持有 —— 不是真正的失败，按 debug 级别记录；
+                        // 每 tick 一条 warn 在持续争抢时会刷屏。调试时通过提升 logger 级别可见。
+                        if (LOGGER.isDebugEnabled()) {
+                            LOGGER.debug("[MiliTickRegionScheduler] Region #{} not acquirable after {} retries, "
+                                            + "skipping this tick (server will not shut down)",
+                                    regionId(), consecutiveRetries);
+                        }
                         consecutiveRetries = 0;
                         currentBackoffMs = RETRY_BACKOFF_INITIAL_MS;
                         // 仍然重新调度下一次 tick（region 释放后即可恢复）

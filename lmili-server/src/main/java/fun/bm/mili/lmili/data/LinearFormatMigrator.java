@@ -62,6 +62,14 @@ public class LinearFormatMigrator {
      * @param mainFile path to the master file
      */
     public void writeMainFileBucketed(@NotNull Path mainFile) throws IOException {
+        this.writeMainFileBucketed(mainFile, false);
+    }
+
+    /**
+     * @param forceOverride {@code true} = always fsync + fsync parent dir (overrides config);
+     *   used by close path for graceful-shutdown durability. {@code false} = honor {@code linearForceOnEverySync}.
+     */
+    public void writeMainFileBucketed(@NotNull Path mainFile, final boolean forceOverride) throws IOException {
         final Path tmpFilePath = Path.of(mainFile + ".tmp");
         final boolean[] syncedBuckets = new boolean[BUCKET_COUNT];
         final long[] newPositionTable = new long[BUCKET_COUNT];
@@ -199,7 +207,16 @@ public class LinearFormatMigrator {
                 posTableBuf.flip();
                 writeFullyAt(outChannel, posTableBuf, V3_POS_TABLE_OFFSET);
 
-                outChannel.force(true);
+                // Mili start - Stage C1 fsync 频率控制：默认跳过 force + 父目录 fsync，
+                // 由 olinearMaxSyncAgeMs（默认 15s）兜底保证 durability。开启 linearForceOnEverySync
+                // 恢复原版行为（每次 sync 都 fsync —— 高 durability 但慢）。forceOverride=true 用于
+                // graceful shutdown 强制 force（与 config 无关）。
+                if (forceOverride
+                    || (fun.bm.mili.config.modules.function.RegionFormatConfig.isLinearOptimizationsActive()
+                        && fun.bm.mili.config.modules.function.RegionFormatConfig.linearForceOnEverySync)) {
+                    outChannel.force(true);
+                }
+                // Mili end
             } finally {
                 if (oldChannel != null) {
                     oldChannel.close();
@@ -225,7 +242,14 @@ public class LinearFormatMigrator {
             // power loss, not just a process crash. Best-effort: some platforms/filesystems do not
             // support opening a directory as a file channel (e.g. Windows), which is safe to ignore
             // because those filesystems handle rename durability themselves.
-            fsyncDirectory(mainFile.getParent());
+            // Mili start - Stage C1：与 outChannel.force(true) 同步受 linearForceOnEverySync 控制
+            // （forceOverride=true 用于 graceful shutdown 强制 force，与 config 无关）
+            if (forceOverride
+                || (fun.bm.mili.config.modules.function.RegionFormatConfig.isLinearOptimizationsActive()
+                    && fun.bm.mili.config.modules.function.RegionFormatConfig.linearForceOnEverySync)) {
+                fsyncDirectory(mainFile.getParent());
+            }
+            // Mili end
         } finally {
             this.masterFileLock.writeLock().unlock();
         }

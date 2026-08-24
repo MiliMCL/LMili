@@ -134,6 +134,20 @@ public class OptimizedLinearRegionFile extends AbstractRegionFile {
     private final ByteBuffer swapFileHeaderBuffer = ByteBuffer.allocate(this.headerSize());
     // Mili end
 
+    // Mili start - Stage A2 读取优化：gather read batch buffer 复用。
+    // 每次 tryReadWithGather() 默认会 ByteBuffer.allocate(batchTotalBytes)，在线程局部回收可避免反复 GC 压力。
+    // 仅在线性 Gather Read 开启时由 tryReadWithGather() 触达；关闭时本字段闲置但占用 1 个 ThreadLocal 槽位（<1KB）。
+    // closeInternal() 末尾 BATCH_BUFFER.remove() 防 region 关闭后 ThreadLocal 仍持有 buffer。
+    private final ThreadLocal<ByteBuffer> BATCH_BUFFER = new ThreadLocal<>();
+    // Mili end
+
+    // Mili start - Stage B 写路径优化：chunkSectionBuilder 复用。
+    // 每次 writeChunk() 默认会 ByteBuffer.allocate(data.remaining() + 16)，在线程局部回收可避免反复 GC 压力。
+    // 由 writeChunk() 在 regionObjectLock.writeLock() 外调（LZ4 压缩一样在锁外），无锁竞争。
+    // closeInternal() 末尾 WRITE_BUFFER.remove() 防 region 关闭后 ThreadLocal 仍持有 buffer。
+    private final ThreadLocal<ByteBuffer> WRITE_BUFFER = new ThreadLocal<>();
+    // Mili end
+
     private final byte compressionLevel;
     private final LinearFormatMigrator masterFileParser;
     private final ChunkCompressor compressingOps;
@@ -500,13 +514,23 @@ public class OptimizedLinearRegionFile extends AbstractRegionFile {
     // Mili end
 
     void syncToMasterFile() throws IOException {
+        this.syncToMasterFile(false);
+    }
+
+    /**
+     * @param forceOnWriteEnabledOverride {@code true} = override {@code linearForceOnEverySync=false}
+     *   and force fsync on this call (used by close path to guarantee graceful-shutdown durability).
+     *   {@code false} = honor config.
+     */
+    void syncToMasterFile(final boolean forceOnWriteEnabledOverride) throws IOException {
         // prevent multiple syncs in the same time
         if (!SYNCED_HANDLE.compareAndSet(this, false, true)) {
             return;
         }
 
         try {
-            this.masterFileParser.writeMainFileBucketed(this.masterFilePath);
+            // Mili - Stage C1: pass override flag through to migrator for fsync control
+            this.masterFileParser.writeMainFileBucketed(this.masterFilePath, forceOnWriteEnabledOverride);
             // Mili - the master now exists on disk; cache this so flushInternal() avoids a
             // Files.exists() syscall on every chunk write.
             this.masterFileExists = true;
@@ -641,8 +665,15 @@ public class OptimizedLinearRegionFile extends AbstractRegionFile {
 
             final long spareSize = this.currentAcquiredIndex - this.headerSize() - this.trackedSectorBytes;
 
-            final boolean compactRequested = spareSize > SWAP_FILE_AUTO_COMPACT_SIZE
-                    && (double) spareSize > ((double) this.trackedSectorBytes) * SWAP_FILE_AUTO_COMPACT_PERCENT;
+            // Mili - Stage D2：compact 阈值改读 config（暴露调参旋钮）。
+            // 默认值与原硬编码常量一致（1 MiB + 60%）。
+            final long compactSizeThreshold =
+                fun.bm.mili.config.modules.function.RegionFormatConfig.linearAutoCompactSizeBytes;
+            final double compactPercentThreshold =
+                fun.bm.mili.config.modules.function.RegionFormatConfig.linearAutoCompactPercent;
+
+            final boolean compactRequested = spareSize > compactSizeThreshold
+                    && (double) spareSize > ((double) this.trackedSectorBytes) * compactPercentThreshold;
 
             // try auto compact to clean the garbage area
             if (compactRequested) {
@@ -688,8 +719,10 @@ public class OptimizedLinearRegionFile extends AbstractRegionFile {
         }
 
         // Phase 2: final sync. Do NOT hold regionObjectLock here.
+        // Mili - Stage C1: pass forceOverride=true to guarantee graceful-shutdown durability
+        // regardless of linearForceOnEverySync setting (close must always fsync to be safe).
         try {
-            this.syncToMasterFile();
+            this.syncToMasterFile(true);
         } catch (IOException e) {
             com.mojang.logging.LogUtils.getLogger()
                     .error("[OptimizedLinearRegionFile] Final sync failed before close: {}",
@@ -704,6 +737,12 @@ public class OptimizedLinearRegionFile extends AbstractRegionFile {
         try {
             this.swapFileChannel.close();
             Files.deleteIfExists(this.swapFilePath);
+            // Mili - Stage A2：region 关闭后释放 ThreadLocal 持有的 batch buffer
+            // (典型 region 文件在数 GB 世界中数百个，长期持有 ThreadLocal 槽位 + 256KB buffer 可能泄漏)。
+            this.BATCH_BUFFER.remove();
+            // Mili - Stage B：同上，清理 writeChunk() 池的 ThreadLocal 槽位
+            this.WRITE_BUFFER.remove();
+            // Mili end
         } finally {
             this.regionObjectLock.writeLock().unlock();
         }
@@ -777,7 +816,16 @@ public class OptimizedLinearRegionFile extends AbstractRegionFile {
                 newSectorsToBeReplaced[sector.getIndex()] = newRecalculated; // update sector infos
             }
 
-            tempChannel.force(true);
+            // Mili start - Stage D1：跳过 compactSwapFile 内的 tempChannel.force(true)。
+            // 风险分析：tmp 文件 atomic rename 后由后续 syncToMasterFile / maxSyncAgeMs 兜底 fsync，
+            // 进程崩溃时若 tmp 未落盘 → 旧 swap 仍完整 → 下次启动 recovery 正常。
+            // 收益：每次 compact 节省 fsync 5-50ms（取决于存储设备）。
+            // 仅当 O_LINEAR + linear_optimizations_enabled + linearForceOnEverySync == true 时执行 force。
+            if (fun.bm.mili.config.modules.function.RegionFormatConfig.isLinearOptimizationsActive()
+                && fun.bm.mili.config.modules.function.RegionFormatConfig.linearForceOnEverySync) {
+                tempChannel.force(true);
+            }
+            // Mili end
 
             newAcquiredIndex = offsetPointer;
         } catch (Throwable ex) {
@@ -893,8 +941,6 @@ public class OptimizedLinearRegionFile extends AbstractRegionFile {
     }
 
     @Nullable ByteBuffer readChunkDataRaw(int chunkOrdinal) throws IOException {
-        final ByteBuffer raw;
-
         this.regionObjectLock.readLock().lock();
         try {
             // Mili - refuse to read from a closed/being-closed region file.
@@ -908,13 +954,241 @@ public class OptimizedLinearRegionFile extends AbstractRegionFile {
                 return null;
             }
 
-            raw = sector.read(this.swapFileChannel);
+            // Mili start - Stage A1 读取优化：相邻 sector 批量读（gather read）
+            // 探测从 chunkOrdinal 向后物理连续的 sector，一次 FileChannel.read 拉整个 batch
+            // 到堆 buffer（堆 buffer 触发 page cache），从中切出 chunkOrdinal 段返回。
+            // 任何 IOException → fallback 到原 sector.read 路径（行为不变）。
+            // 仅当 O_LINEAR + linear_optimizations_enabled + linearGatherReadEnabled == true 时启用。
+            // （"切换 regionFormat = O_LINEAR 即自动生效"）
+            if (fun.bm.mili.config.modules.function.RegionFormatConfig.isLinearOptimizationsActive()
+                && fun.bm.mili.config.modules.function.RegionFormatConfig.linearGatherReadEnabled) {
+                try {
+                    final ByteBuffer gathered = this.tryReadWithGather(chunkOrdinal);
+                    if (gathered != null) {
+                        return this.compressingOps.fromCommitedSection(gathered);
+                    }
+                } catch (IOException ioe) {
+                    // fallback: 原单 sector read
+                    org.slf4j.LoggerFactory.getLogger(OptimizedLinearRegionFile.class)
+                        .debug("[o_linear] gather read failed at ordinal {}, fallback to single-sector read: {}",
+                            chunkOrdinal, ioe.toString());
+                }
+            }
+            // Mili end
+
+            return this.compressingOps.fromCommitedSection(sector.read(this.swapFileChannel));
         } finally {
             this.regionObjectLock.readLock().unlock();
         }
-
-        return this.compressingOps.fromCommitedSection(raw);
     }
+
+    /**
+     * 尝试 gather read：从 {@code startOrdinal} 开始，向后探测物理连续的 sector，
+     * 一次 {@link FileChannel#read(ByteBuffer, long)} 拉整个 batch 并从 batch buffer 中切出
+     * {@code startOrdinal} 段返回。
+     *
+     * <p><b>前提</b>：调用方必须已持有 {@link #regionObjectLock} 的 read lock；
+     * 本方法不做锁获取。
+     *
+     * <p><b>失败模式</b>：
+     * <ul>
+     *   <li>关闭 / / chunkOrdinal 无数据 → 返回 null（让调用方走默认路径或返回 null）</li>
+     *   <li>batch 总字节 0 / 或 batch 仅含 startOrdinal 自身 → 仍执行（单 sector read 等价）</li>
+     *   <li>任何 {@link IOException}（含 partial read 切到 chunkOrdinal 段）→ 上抛，
+     *   由 {@link #readChunkDataRaw} catch 后 fallback 到单 sector read</li>
+     * </ul>
+     *
+     * <p><b>batch 探测规则</b>：
+     * <ol>
+     *   <li>仅向后（更高 ordinal）扩展；保证原 chunkOrdinal 段是 batch 的第一段</li>
+     *   <li>下一 sector 必须 {@code hasData()} 且 {@code offset == prevOffset + prevLength}（物理连续）</li>
+     *   <li>batch sector 数 ≤ {@link RegionFormatConfig#linearGatherReadBatchSize}</li>
+     *   <li>batch 总字节累加 ≤ {@link RegionFormatConfig#linearGatherReadMaxBatchBytes}</li>
+     * </ol>
+     */
+    @Nullable
+    private ByteBuffer tryReadWithGather(final int startOrdinal) throws IOException {
+        final Sector startSector = this.sectors[startOrdinal];
+        if (!startSector.hasData()) {
+            return null;
+        }
+
+        final int maxBatchSectors = Math.max(1,
+            fun.bm.mili.config.modules.function.RegionFormatConfig.linearGatherReadBatchSize);
+        final long maxBatchBytes = Math.max(
+            (long) startSector.getLength(),
+            fun.bm.mili.config.modules.function.RegionFormatConfig.linearGatherReadMaxBatchBytes);
+
+        // 探测 batch 终点：第一个不连续 / hasData=false / 超过限额的 sector 即终止
+        int batchEndOrdinal = startOrdinal; // exclusive end (next sector to consider)
+        long batchTotalBytes = 0L;
+        long expectedNextOffset = startSector.getOffset() + startSector.getLength();
+        final int maxOrdinal = this.sectors.length;
+
+        for (int probe = startOrdinal + 1;
+             probe < maxOrdinal
+                 && (probe - startOrdinal) < maxBatchSectors
+                 && (batchTotalBytes + startSector.getLength()) < maxBatchBytes;
+             probe++) {
+            final Sector next = this.sectors[probe];
+            if (!next.hasData()) {
+                break;
+            }
+            if (next.getOffset() != expectedNextOffset) {
+                break; // 物理不连续 → 终止
+            }
+            // 累加前一个 sector 的长度（probe 是被纳入的 sector，但其长度在下一轮才用）
+            final Sector included = this.sectors[probe - 1];
+            batchTotalBytes += included.getLength();
+            expectedNextOffset = next.getOffset() + next.getLength();
+            batchEndOrdinal = probe + 1;
+        }
+        // 累加最后纳入的 sector 长度
+        if (batchEndOrdinal > startOrdinal) {
+            batchTotalBytes += this.sectors[batchEndOrdinal - 1].getLength();
+        } else {
+            // 不可能（startSector 必有数据），但 defensive
+            return null;
+        }
+
+        // 防御：batchTotalBytes 必须 >= startSector 长度
+        if (batchTotalBytes < startSector.getLength()) {
+            return null;
+        }
+
+        // 防御：(int) 转型溢出（maxBatchBytes 配置大于 Integer.MAX_VALUE 时静默溢出）。
+        // ByteBuffer.allocate 接受 int，超过 Integer.MAX_VALUE 是配置错误，回退到原 sector.read。
+        if (batchTotalBytes > Integer.MAX_VALUE) {
+            return null;
+        }
+
+        // 堆 buffer（重要：堆 buffer 让 page cache 生效；direct buffer 可能绕过）
+        // Mili - Stage A2：优先从 ThreadLocal 池中复用，避免重复 ByteBuffer.allocate。
+        // 池 buffer 容量 = maxBatchBytes；本次所需 <= 容量 → 直接 wrap 复用；否则分配一次性 buffer（不归还）。
+        final ByteBuffer batchBuf = this.acquireBatchBuffer((int) batchTotalBytes);
+        try {
+            int bytesRead = 0;
+            while (bytesRead < batchTotalBytes && batchBuf.hasRemaining()) {
+                final int n = this.swapFileChannel.read(batchBuf, startSector.getOffset() + bytesRead);
+                if (n <= 0) {
+                    throw new IOException("Unexpected short read during gather: expected "
+                        + batchTotalBytes + " bytes, got " + bytesRead + " at offset "
+                        + (startSector.getOffset() + bytesRead));
+                }
+                bytesRead += n;
+            }
+
+            // 从 batchBuf.array() 拷贝 startSector 段到一个新的独立 ByteBuffer（堆）
+            final byte[] batchArr = batchBuf.array();
+            final byte[] chunkArr = new byte[(int) startSector.getLength()];
+            System.arraycopy(batchArr, 0, chunkArr, 0, chunkArr.length);
+            // batchBuf 引用离开本栈后 GC，page cache 保留
+            return ByteBuffer.wrap(chunkArr);
+        } finally {
+            // Mili - Stage A2：异常路径也必须归还，否则下次 acquire 会新建。
+            this.releaseBatchBuffer(batchBuf, (int) batchTotalBytes);
+            // Mili end
+        }
+    }
+
+    // Mili start - Stage A2：gather read batch buffer 回收池（ThreadLocal，无锁）
+    /**
+     * 从 ThreadLocal 池获取一个容量至少 {@code neededBytes} 的堆 buffer。
+     * <ul>
+     *   <li>若当前线程池中的 buffer 容量 ≥ needed → 直接复用（clear + position=0）</li>
+     *   <li>否则新建一次性 buffer（<b>不会被归还</b>，避免池容量超过 maxBatchBytes 限制）</li>
+     * </ul>
+     * <p>返回的 buffer 必须通过 {@link #releaseBatchBuffer} 显式归还（除了新建的一次性 buffer）。
+     */
+    private ByteBuffer acquireBatchBuffer(final int neededBytes) {
+        final int maxBatchBytes = Math.max(
+            neededBytes,
+            fun.bm.mili.config.modules.function.RegionFormatConfig.linearGatherReadMaxBatchBytes);
+        final ByteBuffer pooled = this.BATCH_BUFFER.get();
+        if (pooled != null && pooled.capacity() >= neededBytes) {
+            pooled.clear();
+            return pooled;
+        }
+        // 池未初始化 / 容量不足 → 新建一次性 buffer（不会被归还，避免池容量超过上限）
+        return ByteBuffer.allocate(maxBatchBytes);
+    }
+
+    /**
+     * 归还 batch buffer 到 ThreadLocal 池。仅当 buffer 容量等于当前配置的
+     * {@link RegionFormatConfig#linearGatherReadMaxBatchBytes} 时才归还。
+     *
+     * <p><b>为什么检查 capacity == maxBatchBytes？</b>
+     * <ul>
+     *   <li>{@link #acquireBatchBuffer} 的"池路径"始终返回 capacity = maxBatchBytes 的 buffer</li>
+     *   <li>"一次性"路径（neededBytes > maxBatchBytes 或池空）返回的 buffer 容量可能 > maxBatchBytes</li>
+     *   <li>显式比较 capacity 避免把"一次性大 buffer"塞回池（会超过池容量上限）</li>
+     * </ul>
+     *
+     * <p><b>配置变更兼容</b>：若运行时修改 {@code linearGatherReadMaxBatchBytes}（{@code @HotReloadUnsupported}，
+     * 本配置不支持热重载），池中旧 buffer 容量 ≠ 新值 → 不归还 → 被 GC；下次 acquire 按新值新建一次性 buffer。
+     */
+    private void releaseBatchBuffer(final ByteBuffer buf, final int usedBytes) {
+        final int maxBatchBytes = fun.bm.mili.config.modules.function.RegionFormatConfig.linearGatherReadMaxBatchBytes;
+        // 仅回收"恰好 = maxBatchBytes"的 buffer —— 这是 acquireBatchBuffer 池路径创建的
+        if (buf.capacity() == maxBatchBytes && maxBatchBytes >= usedBytes) {
+            buf.clear();
+            this.BATCH_BUFFER.set(buf);
+        }
+        // 否则是"一次性大 buffer"（或 config 变更后的旧 buffer），自然 GC
+    }
+    // Mili end
+
+    // Mili start - Stage B：writeChunk() chunkSectionBuilder 回收池（ThreadLocal，无锁）
+    /**
+     * 写池的硬上限（单线程持有），防异常 chunk 大小导致池无限增长。
+     * <p>4 MiB 远大于单 chunk 上限（一个 chunk ≈ 16 KiB 解压前），超过此值视为异常 → 一次性分配不归还。
+     */
+    private static final int WRITE_BUFFER_HARD_CAP = 4 * 1024 * 1024;
+
+    /**
+     * 从 ThreadLocal 池获取一个容量至少 {@code neededBytes} 的堆 buffer，position=0, limit=neededBytes
+     * （即 {@code remaining()==neededBytes}，可直接 fill）。
+     *
+     * <p><b>策略</b>：
+     * <ul>
+     *   <li>池中 buffer 容量 ≥ needed → 复用（clear + limit=needed）</li>
+     *   <li>池中 buffer 容量 < needed 且 needed ≤ 硬上限 → 新建并写入池（grow，单调增长，永不缩）</li>
+     *   <li>池中 buffer 容量 < needed 且 needed > 硬上限 → 一次性 buffer（不写入池，不被归还）</li>
+     * </ul>
+     */
+    private ByteBuffer acquireWriteBuffer(final int neededBytes) {
+        final ByteBuffer pooled = this.WRITE_BUFFER.get();
+        if (pooled != null && pooled.capacity() >= neededBytes) {
+            pooled.clear();
+            pooled.limit(neededBytes);
+            return pooled;
+        }
+        if (neededBytes <= WRITE_BUFFER_HARD_CAP) {
+            // grow 路径：新建更大 buffer 替换池中旧 buffer
+            final ByteBuffer fresh = ByteBuffer.allocate(neededBytes);
+            this.WRITE_BUFFER.set(fresh);
+            return fresh;
+        }
+        // 异常 chunk 大小 → 一次性分配
+        return ByteBuffer.allocate(neededBytes);
+    }
+
+    /**
+     * 归还 chunkSectionBuilder 到 ThreadLocal 池。
+     *
+     * <p>本方法在 {@link #acquireWriteBuffer} 已经管理了池容量，release 只需确保 buffer
+     * 是"grow 路径"创建的（即 {@code buf.capacity() == usedBytes} 或池当前无值）才归还。
+     * 一次性大 buffer（> 硬上限）不归还，让其 GC。
+     */
+    private void releaseWriteBuffer(final ByteBuffer buf, final int usedBytes) {
+        // 仅当"grow 路径"创建的 buffer 才归还（容量 == usedBytes 且未超过硬上限）
+        if (buf.capacity() == usedBytes && usedBytes <= WRITE_BUFFER_HARD_CAP && usedBytes > 0) {
+            buf.clear();
+            this.WRITE_BUFFER.set(buf);
+        }
+        // 否则是"一次性大 buffer"，自然 GC
+    }
+    // Mili end
 
     private void clearChunkData(int chunkOrdinal) throws IOException {
         this.ensureBucketLoaded(chunkOrdinal);
@@ -967,16 +1241,35 @@ public class OptimizedLinearRegionFile extends AbstractRegionFile {
         // Mili end
         data.position(oldPositionOfData);
 
-        // uncompressed length(int) + timestamp(long) + xxhash32(int)
-        final ByteBuffer chunkSectionBuilder = ByteBuffer.allocate(data.remaining() + 4 + 8 + 4);
+        // uncompressed length(int) + timestamp(long) + xxhash32(int) = 16 bytes overhead
+        final int payloadBytes = data.remaining();
+        final int needed = payloadBytes + 16;
+        // Mili - Stage B 写路径优化：从 ThreadLocal 池复用 chunkSectionBuilder
+        // 池 buffer 在 acquire 时被设 position=0, limit=needed（remaining()==needed），ready to fill。
+        // 仅当 O_LINEAR + linear_optimizations_enabled + linearWriteBufferPoolEnabled == true 时启用。
+        final boolean writePoolEnabled =
+            fun.bm.mili.config.modules.function.RegionFormatConfig.isLinearOptimizationsActive()
+                && fun.bm.mili.config.modules.function.RegionFormatConfig.linearWriteBufferPoolEnabled;
+        final ByteBuffer chunkSectionBuilder = writePoolEnabled
+            ? this.acquireWriteBuffer(needed)
+            : ByteBuffer.allocate(needed);
+        try {
+            chunkSectionBuilder.putInt(payloadBytes); // Length(int)
+            chunkSectionBuilder.putLong(System.currentTimeMillis()); // Timestamp(long)
+            chunkSectionBuilder.putInt(xxHash32OfData); // xxHash32 of the original data(int)
+            chunkSectionBuilder.put(data); // Data(bytes)
+            chunkSectionBuilder.flip();
 
-        chunkSectionBuilder.putInt(data.remaining()); // Length(int)
-        chunkSectionBuilder.putLong(System.currentTimeMillis()); // Timestamp(long)
-        chunkSectionBuilder.putInt(xxHash32OfData); // xxHash32 of the original data(int)
-        chunkSectionBuilder.put(data); // Data(bytes)
-        chunkSectionBuilder.flip();
-
-        this.writeChunkDataRaw(chunkIndex, chunkSectionBuilder, false);
+            this.writeChunkDataRaw(chunkIndex, chunkSectionBuilder, false);
+        } finally {
+            // Mili - Stage B：归还 buffer 到 ThreadLocal 池（仅当本次启用了 pool 路径）
+            // 注意：writeChunkDataRaw 内部走 regionObjectLock.writeLock() 并调 Sector.store，
+            // 已消费 chunkSectionBuilder 的所有字节（position == limit）。归还前 clear 即可。
+            if (writePoolEnabled) {
+                this.releaseWriteBuffer(chunkSectionBuilder, needed);
+            }
+            // Mili end
+        }
     }
 
     private @Nullable ByteBuffer readChunk(int x, int z) throws IOException {
