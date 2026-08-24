@@ -29,6 +29,35 @@ jobs:
         with:
           cache-read-only: true
 
+      - name: Build Hyacinthusweight plugin from source
+        run: |
+          set -eux
+          # repo.menthamc.org added JavaScript fingerprinting protection,
+          # so we build the plugin from source and install to mavenLocal
+          cd /tmp
+          git clone --depth 1 https://github.com/LuminolCustomArchive/Hyacinthusweight.git
+          cd Hyacinthusweight
+          chmod +x gradlew
+          ./gradlew publishToMavenLocal --no-daemon
+          echo "Hyacinthusweight plugin installed to mavenLocal"
+
+      - name: Download Hyacinthusclip
+        run: |
+          mkdir -p libs
+          CLIP_VERSION=$(grep clipVersion gradle.properties | cut -d= -f2)
+          echo "Downloading hyacinthusclip v${CLIP_VERSION}"
+          curl -sL "https://github.com/xucy10/Hyacinthusclip/releases/download/v${CLIP_VERSION}/hyacinthusclip-${CLIP_VERSION}.jar" -o libs/hyacinthusclip.jar
+          if [ ! -s libs/hyacinthusclip.jar ]; then
+            echo "ERROR: Failed to download hyacinthusclip jar"
+            exit 1
+          fi
+          ls -la libs/hyacinthusclip.jar
+          # Validate the downloaded JAR is a real, non-corrupted zip
+          if ! python3 -c "import zipfile,sys; zipfile.ZipFile('libs/hyacinthusclip.jar').testzip(); print('OK: valid zip')"; then
+            echo "ERROR: hyacinthusclip.jar is corrupted (invalid zip)"
+            exit 1
+          fi
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
@@ -36,6 +65,25 @@ jobs:
         run: |
           git config --global user.email "282142033+xucy10@users.noreply.github.com"
           git config --global user.name "Mili CI"
+          git config --global advice.mergeConflict false
+          git config --global init.defaultBranch main
+
+      - name: Clean build output only
+        run: |
+          set -eux
+          # Clean build outputs — keep committed lmili-server/src/minecraft/ intact
+          rm -rf lmili-server/build lmili-api/build
+          rm -rf .gradle/configuration-cache
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY || '' }}
+          gradle-home-cache-cleanup: true
+          cache-exclude: |
+            **/paperweight/**
+            **/caches/paperweight/**
 
       - name: Apply All Patches
         run: ./gradlew applyAllPatches --no-configuration-cache
