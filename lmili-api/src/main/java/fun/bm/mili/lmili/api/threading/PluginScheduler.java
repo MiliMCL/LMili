@@ -48,7 +48,7 @@ public interface PluginScheduler {
 
         @Override public @NotNull ScheduledFuture<?> schedule(@NotNull Runnable task, long delay, @NotNull TimeUnit unit) {
             try { Thread.sleep(unit.toMillis(delay)); task.run(); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-            return new Done();
+            return new Done<Void>(null);
         }
         @Override public @NotNull <V> ScheduledFuture<V> schedule(@NotNull Callable<V> task, long delay, @NotNull TimeUnit unit) {
             try { Thread.sleep(unit.toMillis(delay)); V r = task.call(); return new Done<>(r); }
@@ -65,13 +65,15 @@ public interface PluginScheduler {
         @Override public int activeTaskCount() { return 0; }
 
         private static class Done<T> implements ScheduledFuture<T> {
+            private final T value;
+            Done(T value) { this.value = value; }
             @Override public long getDelay(TimeUnit u) { return 0; }
             @Override public int compareTo(java.util.concurrent.Delayed o) { return 0; }
             @Override public boolean cancel(boolean a) { return false; }
             @Override public boolean isCancelled() { return false; }
             @Override public boolean isDone() { return true; }
-            @Override public T get() { return null; }
-            @Override public T get(long t, TimeUnit u) { return null; }
+            @Override public T get() { return value; }
+            @Override public T get(long t, TimeUnit u) { return value; }
         }
     }
 }
