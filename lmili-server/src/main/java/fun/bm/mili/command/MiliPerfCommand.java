@@ -2,6 +2,7 @@ package fun.bm.mili.command;
 
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import fun.bm.mili.chunk.MiliChunkSystem;
+import fun.bm.mili.lmili.i18n.I18nManager;
 import fun.bm.mili.utils.region.RegionBalancer;
 import fun.bm.mili.utils.region.SmartRegionManager;
 import fun.bm.mili.utils.performance.MemoryOptimizer;
@@ -24,6 +25,11 @@ import org.leavesmc.leaves.command.RootNode;
 
 import java.util.Map;
 
+/**
+ * Operator command for the Mili performance monitor.
+ *
+ * <p>All user-visible strings are routed through {@link I18nManager}.</p>
+ */
 public class MiliPerfCommand extends RootNode {
     private static final String PERM_BASE = "mili.admin.perf";
 
@@ -39,7 +45,7 @@ public class MiliPerfCommand extends RootNode {
     @Override
     protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
         CommandSender sender = context.getSender();
-        sender.sendMessage(Component.text("=== Mili Performance Monitor ===", NamedTextColor.GOLD));
+        sender.sendMessage(Component.text(I18nManager.get("miperf.title"), NamedTextColor.GOLD));
         sender.sendMessage(Component.empty());
 
         sendRegionStats(sender);
@@ -57,41 +63,41 @@ public class MiliPerfCommand extends RootNode {
     }
 
     private static void sendRegionStats(CommandSender sender) {
-        sender.sendMessage(Component.text("-- Region System --", NamedTextColor.YELLOW));
+        sender.sendMessage(Component.text(I18nManager.get("miperf.region.system"), NamedTextColor.YELLOW));
         printStats(sender, "", RegionBalancer.getStats());
-        printStats(sender, "[Smart] ", SmartRegionManager.getStats());
+        printStats(sender, I18nManager.get("miperf.prefix.smart"), SmartRegionManager.getStats());
     }
 
     private static void sendChunkStats(CommandSender sender) {
-        sender.sendMessage(Component.text("-- Chunk System --", NamedTextColor.YELLOW));
+        sender.sendMessage(Component.text(I18nManager.get("miperf.chunk.system"), NamedTextColor.YELLOW));
         printStats(sender, "", MiliChunkSystem.getStats());
     }
 
     private static void sendMemoryStats(CommandSender sender) {
-        sender.sendMessage(Component.text("-- Memory System --", NamedTextColor.YELLOW));
+        sender.sendMessage(Component.text(I18nManager.get("miperf.memory.system"), NamedTextColor.YELLOW));
         printStats(sender, "", MemoryOptimizer.getStats());
     }
 
     private static void sendCrossRegionStats(CommandSender sender) {
-        sender.sendMessage(Component.text("-- Cross-Region Communication --", NamedTextColor.YELLOW));
+        sender.sendMessage(Component.text(I18nManager.get("miperf.cross.region"), NamedTextColor.YELLOW));
         printStats(sender, "", CrossRegionHelper.getStats());
     }
 
     private static void sendOptimizationStats(CommandSender sender) {
-        sender.sendMessage(Component.text("-- Optimizations --", NamedTextColor.YELLOW));
-        printStats(sender, "Entity Dirty", EntityDirtyTracker.getStats());
-        printStats(sender, "Dynamic VD", DynamicViewDistanceManager.getStats());
-        printStats(sender, "Cross-Dim Teleport", CrossDimensionTeleportQueue.getStats());
-        printStats(sender, "Async Pathfinder", AsyncPathfinder.getStats());
-        printStats(sender, "Chunk Delta", ChunkDeltaCompressor.getStats());
-        printStats(sender, "Light Callback", LightCallbackManager.getStats());
-        printStats(sender, "Entity Density", EntityDensityTracker.getStats());
-        printStats(sender, "Network", NetworkOptimizer.getStats());
+        sender.sendMessage(Component.text(I18nManager.get("miperf.optimizations"), NamedTextColor.YELLOW));
+        printStats(sender, I18nManager.get("miperf.prefix.entity_dirty"), EntityDirtyTracker.getStats());
+        printStats(sender, I18nManager.get("miperf.prefix.dynamic_vd"), DynamicViewDistanceManager.getStats());
+        printStats(sender, I18nManager.get("miperf.prefix.cross_dim_teleport"), CrossDimensionTeleportQueue.getStats());
+        printStats(sender, I18nManager.get("miperf.prefix.async_pathfinder"), AsyncPathfinder.getStats());
+        printStats(sender, I18nManager.get("miperf.prefix.chunk_delta"), ChunkDeltaCompressor.getStats());
+        printStats(sender, I18nManager.get("miperf.prefix.light_callback"), LightCallbackManager.getStats());
+        printStats(sender, I18nManager.get("miperf.prefix.entity_density"), EntityDensityTracker.getStats());
+        printStats(sender, I18nManager.get("miperf.prefix.network"), NetworkOptimizer.getStats());
     }
 
     private static void sendFeatureStats(CommandSender sender) {
-        sender.sendMessage(Component.text("-- Features --", NamedTextColor.YELLOW));
-        printStats(sender, "Player Heatmap", PlayerHeatmap.getStats());
+        sender.sendMessage(Component.text(I18nManager.get("miperf.features"), NamedTextColor.YELLOW));
+        printStats(sender, I18nManager.get("miperf.prefix.player_heatmap"), PlayerHeatmap.getStats());
     }
 
     private static void printStats(CommandSender sender, String prefix, Map<String, Object> stats) {

@@ -12,6 +12,7 @@ import fun.bm.mili.lmili.api.identity.PluginRuntimeContext;
 import fun.bm.mili.lmili.api.identity.PluginStatus;
 import fun.bm.mili.lmili.api.identity.ResourceQuota;
 import fun.bm.mili.lmili.api.identity.conflict.PluginIdentityConflict;
+import fun.bm.mili.lmili.i18n.I18nManager;
 import fun.bm.mili.lmili.thread.scheduler.PluginSchedulerBridge;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -42,6 +43,12 @@ import java.util.concurrent.CompletableFuture;
  * {@code plugins} because Paper's {@code PaperPluginsCommand} already owns
  * that literal. Using it would cause Paper's later registration to overwrite
  * ours during server startup.</p>
+ *
+ * <p>All user-visible strings are routed through {@link I18nManager} so that
+ * the operator experience follows the server's current locale (configured via
+ * {@code function.language.lang} in {@code mili.properties}). When the locale
+ * is {@code zh_cn} / {@code zh_tw} / etc., operators see translated text;
+ * otherwise they fall back to {@code en_us}.</p>
  */
 public final class PluginIdCommand extends RootNode {
 
@@ -66,23 +73,23 @@ public final class PluginIdCommand extends RootNode {
     }
 
     private static void sendHelp(final CommandSender sender) {
-        sender.sendMessage(Component.text("=== LMili Plugin Identity ===", NamedTextColor.GOLD));
+        sender.sendMessage(Component.text(I18nManager.get("pluginid.help.title"), NamedTextColor.GOLD));
         sender.sendMessage(Component.text("  /pluginid list", NamedTextColor.GRAY)
-                .append(Component.text("                 List all registered plugin identities", NamedTextColor.WHITE)));
+                .append(Component.text("                 " + I18nManager.get("pluginid.help.list"), NamedTextColor.WHITE)));
         sender.sendMessage(Component.text("  /pluginid info <id>", NamedTextColor.GRAY)
-                .append(Component.text("           Show one identity in detail", NamedTextColor.WHITE)));
+                .append(Component.text("           " + I18nManager.get("pluginid.help.info"), NamedTextColor.WHITE)));
         sender.sendMessage(Component.text("  /pluginid conflicts", NamedTextColor.GRAY)
-                .append(Component.text("              Show all recorded conflicts", NamedTextColor.WHITE)));
+                .append(Component.text("              " + I18nManager.get("pluginid.help.conflicts"), NamedTextColor.WHITE)));
         sender.sendMessage(Component.text("  /pluginid observe <id>", NamedTextColor.GRAY)
-                .append(Component.text("          Move plugin into OBSERVE state", NamedTextColor.WHITE)));
+                .append(Component.text("          " + I18nManager.get("pluginid.help.observe"), NamedTextColor.WHITE)));
         sender.sendMessage(Component.text("  /pluginid enable <id>", NamedTextColor.GRAY)
-                .append(Component.text("           Restore a plugin to ACTIVE", NamedTextColor.WHITE)));
+                .append(Component.text("           " + I18nManager.get("pluginid.help.enable"), NamedTextColor.WHITE)));
         sender.sendMessage(Component.text("  /pluginid disable <id>", NamedTextColor.GRAY)
-                .append(Component.text("          Disable a plugin (cancels tasks)", NamedTextColor.WHITE)));
+                .append(Component.text("          " + I18nManager.get("pluginid.help.disable"), NamedTextColor.WHITE)));
         sender.sendMessage(Component.text("  /pluginid tasks <id>", NamedTextColor.GRAY)
-                .append(Component.text("           Show task summary for a plugin", NamedTextColor.WHITE)));
+                .append(Component.text("           " + I18nManager.get("pluginid.help.tasks"), NamedTextColor.WHITE)));
         sender.sendMessage(Component.text("  /pluginid status <id>", NamedTextColor.GRAY)
-                .append(Component.text("          Show runtime status for a plugin", NamedTextColor.WHITE)));
+                .append(Component.text("          " + I18nManager.get("pluginid.help.status"), NamedTextColor.WHITE)));
     }
 
     private static NamedTextColor statusColor(final PluginStatus status) {
@@ -170,7 +177,8 @@ public final class PluginIdCommand extends RootNode {
         protected boolean execute(@NotNull final CommandContext context) throws CommandSyntaxException {
             final CommandSender sender = context.getSender();
             final Collection<PluginIdentity> all = LMili.getPluginIdentityManager().getAll();
-            sender.sendMessage(Component.text("=== Plugin Identities (" + all.size() + ") ===",
+            sender.sendMessage(Component.text(
+                    I18nManager.get("pluginid.list.title", all.size()),
                     NamedTextColor.GOLD));
             for (final PluginIdentity p : all) {
                 sender.sendMessage(
@@ -200,27 +208,37 @@ public final class PluginIdCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final PluginId pid = PluginIdArgument.resolve(context);
             if (pid == null) {
-                sender.sendMessage(Component.text("Invalid or missing id.", NamedTextColor.RED));
-                sender.sendMessage(Component.text("Usage: /pluginid info <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.invalid_id"), NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.usage_info"), NamedTextColor.RED));
                 return true;
             }
             final PluginIdentity p = LMili.getPluginIdentityManager().find(pid).orElse(null);
             if (p == null) {
-                sender.sendMessage(Component.text("No identity registered: " + pid.value(), NamedTextColor.RED));
+                sender.sendMessage(Component.text(
+                        I18nManager.get("pluginid.error.not_registered", pid.value()), NamedTextColor.RED));
                 return true;
             }
-            sender.sendMessage(Component.text("=== " + p.id().value() + " ===", NamedTextColor.GOLD));
-            sender.sendMessage(Component.text("  name:      ", NamedTextColor.GRAY).append(Component.text(p.name(), NamedTextColor.WHITE)));
-            sender.sendMessage(Component.text("  version:   ", NamedTextColor.GRAY).append(Component.text(p.version(), NamedTextColor.WHITE)));
-            sender.sendMessage(Component.text("  publisher: ", NamedTextColor.GRAY).append(Component.text(p.publisher(), NamedTextColor.WHITE)));
-            sender.sendMessage(Component.text("  type:      ", NamedTextColor.GRAY).append(Component.text(p.type().name(), NamedTextColor.WHITE)));
-            sender.sendMessage(Component.text("  parent:    ", NamedTextColor.GRAY).append(Component.text(
-                    p.parentId().map(PluginId::value).orElse("-"), NamedTextColor.WHITE)));
-            sender.sendMessage(Component.text("  status:    ", NamedTextColor.GRAY).append(
-                    Component.text(p.status().name(), statusColor(p.status()))));
-            sender.sendMessage(Component.text("  trust:     ", NamedTextColor.GRAY).append(Component.text(p.trustLevel().name(), NamedTextColor.WHITE)));
-            sender.sendMessage(Component.text("  source:    ", NamedTextColor.GRAY).append(Component.text(p.source(), NamedTextColor.WHITE)));
-            sender.sendMessage(Component.text("  registered:", NamedTextColor.GRAY).append(Component.text(p.registeredAt().toString(), NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text(
+                    I18nManager.get("pluginid.info.title", p.id().value()), NamedTextColor.GOLD));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.info.field.name") + "      ", NamedTextColor.GRAY)
+                    .append(Component.text(p.name(), NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.info.field.version") + "   ", NamedTextColor.GRAY)
+                    .append(Component.text(p.version(), NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.info.field.publisher") + " ", NamedTextColor.GRAY)
+                    .append(Component.text(p.publisher(), NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.info.field.type") + "      ", NamedTextColor.GRAY)
+                    .append(Component.text(p.type().name(), NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.info.field.parent") + "    ", NamedTextColor.GRAY)
+                    .append(Component.text(
+                            p.parentId().map(PluginId::value).orElse("-"), NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.info.field.status") + "    ", NamedTextColor.GRAY)
+                    .append(Component.text(p.status().name(), statusColor(p.status()))));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.info.field.trust") + "     ", NamedTextColor.GRAY)
+                    .append(Component.text(p.trustLevel().name(), NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.info.field.source") + "    ", NamedTextColor.GRAY)
+                    .append(Component.text(p.source(), NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.info.field.registered") + ":", NamedTextColor.GRAY)
+                    .append(Component.text(p.registeredAt().toString(), NamedTextColor.WHITE)));
             return true;
         }
     }
@@ -238,21 +256,22 @@ public final class PluginIdCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final PluginIdentityManager mgr = LMili.getPluginIdentityManager();
             final Collection<PluginIdentityConflict> conflicts = mgr.getConflicts();
-            sender.sendMessage(Component.text("=== Conflicts (" + conflicts.size() + ") ===",
+            sender.sendMessage(Component.text(
+                    I18nManager.get("pluginid.conflicts.title", conflicts.size()),
                     NamedTextColor.GOLD));
             if (conflicts.isEmpty()) {
-                sender.sendMessage(Component.text("  (none)", NamedTextColor.GRAY));
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.conflicts.none"), NamedTextColor.GRAY));
                 return true;
             }
             for (final PluginIdentityConflict c : conflicts) {
                 sender.sendMessage(
                         Component.text("  " + c.id().value(), NamedTextColor.RED)
-                                .append(Component.text(" reason=" + c.reason(), NamedTextColor.YELLOW))
-                                .append(Component.text(" existing=" + c.existing().name()
-                                        + "@" + c.existing().version(), NamedTextColor.WHITE))
-                                .append(Component.text(" incoming=" + c.incoming().name()
-                                        + "@" + c.incoming().version(), NamedTextColor.GRAY))
-                                .append(Component.text(" at=" + c.detectedAt(), NamedTextColor.DARK_GRAY)));
+                                .append(Component.text(" " + I18nManager.get("pluginid.conflicts.reason", c.reason()), NamedTextColor.YELLOW))
+                                .append(Component.text(" " + I18nManager.get("pluginid.conflicts.existing",
+                                        c.existing().name() + "@" + c.existing().version()), NamedTextColor.WHITE))
+                                .append(Component.text(" " + I18nManager.get("pluginid.conflicts.incoming",
+                                        c.incoming().name() + "@" + c.incoming().version()), NamedTextColor.GRAY))
+                                .append(Component.text(" " + I18nManager.get("pluginid.conflicts.at", c.detectedAt()), NamedTextColor.DARK_GRAY)));
             }
             return true;
         }
@@ -274,15 +293,17 @@ public final class PluginIdCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final PluginId pid = PluginIdArgument.resolve(context);
             if (pid == null) {
-                sender.sendMessage(Component.text("Invalid or missing id.", NamedTextColor.RED));
-                sender.sendMessage(Component.text("Usage: /pluginid observe <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.invalid_id"), NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.usage_observe"), NamedTextColor.RED));
                 return true;
             }
             if (LMili.getPluginIdentityManager().setStatus(pid, PluginStatus.OBSERVE).isEmpty()) {
-                sender.sendMessage(Component.text("Not registered: " + pid.value(), NamedTextColor.RED));
+                sender.sendMessage(Component.text(
+                        I18nManager.get("pluginid.error.not_registered", pid.value()), NamedTextColor.RED));
                 return true;
             }
-            sender.sendMessage(Component.text("Moved " + pid.value() + " into OBSERVE.", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text(
+                    I18nManager.get("pluginid.observe.moved", pid.value()), NamedTextColor.YELLOW));
             return true;
         }
     }
@@ -303,15 +324,17 @@ public final class PluginIdCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final PluginId pid = PluginIdArgument.resolve(context);
             if (pid == null) {
-                sender.sendMessage(Component.text("Invalid or missing id.", NamedTextColor.RED));
-                sender.sendMessage(Component.text("Usage: /pluginid enable <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.invalid_id"), NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.usage_enable"), NamedTextColor.RED));
                 return true;
             }
             if (LMili.getPluginIdentityManager().setStatus(pid, PluginStatus.ACTIVE).isEmpty()) {
-                sender.sendMessage(Component.text("Not registered: " + pid.value(), NamedTextColor.RED));
+                sender.sendMessage(Component.text(
+                        I18nManager.get("pluginid.error.not_registered", pid.value()), NamedTextColor.RED));
                 return true;
             }
-            sender.sendMessage(Component.text("Moved " + pid.value() + " back to ACTIVE.", NamedTextColor.GREEN));
+            sender.sendMessage(Component.text(
+                    I18nManager.get("pluginid.enable.restored", pid.value()), NamedTextColor.GREEN));
             return true;
         }
     }
@@ -332,29 +355,33 @@ public final class PluginIdCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final PluginId pid = PluginIdArgument.resolve(context);
             if (pid == null) {
-                sender.sendMessage(Component.text("Invalid or missing id.", NamedTextColor.RED));
-                sender.sendMessage(Component.text("Usage: /pluginid disable <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.invalid_id"), NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.usage_disable"), NamedTextColor.RED));
                 return true;
             }
 
             final PluginIdentityManager mgr = LMili.getPluginIdentityManager();
             if (!mgr.contains(pid)) {
-                sender.sendMessage(Component.text("Not registered: " + pid.value(), NamedTextColor.RED));
+                sender.sendMessage(Component.text(
+                        I18nManager.get("pluginid.error.not_registered", pid.value()), NamedTextColor.RED));
                 return true;
             }
 
             // 1. Update status to DISABLED (temporary — keeps context, identity)
             mgr.setStatus(pid, PluginStatus.DISABLED);
-            sender.sendMessage(Component.text("Disabled " + pid.value() + ".", NamedTextColor.GRAY));
+            sender.sendMessage(Component.text(
+                    I18nManager.get("pluginid.disable.disabled", pid.value()), NamedTextColor.GRAY));
 
             // 2. Cancel pending scheduler tasks via the bridge
             final int cancelled = PluginSchedulerBridge.disablePlugin(pid);
             if (cancelled > 0) {
-                sender.sendMessage(Component.text("  → cancelled " + cancelled + " pending task(s)", NamedTextColor.DARK_GRAY));
+                sender.sendMessage(Component.text(
+                        I18nManager.get("pluginid.disable.cancelled", cancelled), NamedTextColor.DARK_GRAY));
             }
 
             // 3. Runtime context is retained — /pluginid enable restores immediately
-            sender.sendMessage(Component.text("  → use /pluginid enable " + pid.value() + " to restore", NamedTextColor.DARK_GRAY));
+            sender.sendMessage(Component.text(
+                    I18nManager.get("pluginid.disable.hint_enable", pid.value()), NamedTextColor.DARK_GRAY));
 
             return true;
         }
@@ -376,51 +403,53 @@ public final class PluginIdCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final PluginId pid = PluginIdArgument.resolve(context);
             if (pid == null) {
-                sender.sendMessage(Component.text("Invalid or missing id.", NamedTextColor.RED));
-                sender.sendMessage(Component.text("Usage: /pluginid tasks <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.invalid_id"), NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.usage_tasks"), NamedTextColor.RED));
                 return true;
             }
 
             final PluginIdentityManager mgr = LMili.getPluginIdentityManager();
             final PluginIdentity identity = mgr.find(pid).orElse(null);
             if (identity == null) {
-                sender.sendMessage(Component.text("Not registered: " + pid.value(), NamedTextColor.RED));
+                sender.sendMessage(Component.text(
+                        I18nManager.get("pluginid.error.not_registered", pid.value()), NamedTextColor.RED));
                 return true;
             }
 
             final PluginRuntimeContext ctx = PluginRuntimeContext.forPluginId(pid);
 
-            sender.sendMessage(Component.text("=== Tasks: " + pid.value() + " ===", NamedTextColor.GOLD));
-            sender.sendMessage(Component.text("  Status: ", NamedTextColor.GRAY)
+            sender.sendMessage(Component.text(
+                    I18nManager.get("pluginid.tasks.title", pid.value()), NamedTextColor.GOLD));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.tasks.status") + " ", NamedTextColor.GRAY)
                     .append(Component.text(identity.status().name(), statusColor(identity.status()))));
 
             // Live tracked pending count
             final int pending = PluginSchedulerBridge.pendingTaskCount(pid);
-            sender.sendMessage(Component.text("  Pending (tracked): ", NamedTextColor.GRAY)
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.tasks.pending_tracked") + " ", NamedTextColor.GRAY)
                     .append(Component.text(String.valueOf(pending), NamedTextColor.WHITE)));
 
             // Cumulative counters from ResourceQuota
             if (ctx != null) {
                 final ResourceQuota q = ctx.resourceQuota();
-                sender.sendMessage(Component.text("  Submitted: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.tasks.submitted") + " ", NamedTextColor.GRAY)
                         .append(Component.text(String.valueOf(q.tasksSubmitted()), NamedTextColor.WHITE)));
-                sender.sendMessage(Component.text("  Completed: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.tasks.completed") + " ", NamedTextColor.GRAY)
                         .append(Component.text(String.valueOf(q.tasksCompleted()), NamedTextColor.WHITE)));
-                sender.sendMessage(Component.text("  Failed: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.tasks.failed") + " ", NamedTextColor.GRAY)
                         .append(Component.text(String.valueOf(q.tasksFailed()), NamedTextColor.WHITE)));
-                sender.sendMessage(Component.text("  Cancelled: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.tasks.cancelled") + " ", NamedTextColor.GRAY)
                         .append(Component.text(String.valueOf(q.tasksCancelled()), NamedTextColor.WHITE)));
 
                 // Scheduler domain info
                 final fun.bm.mili.lmili.api.identity.SchedulerDomain domain = ctx.schedulerDomain();
-                sender.sendMessage(Component.text("  Domain: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.tasks.domain") + " ", NamedTextColor.GRAY)
                         .append(Component.text(
                                 "priority=" + domain.priority()
                                         + " maxConcurrent=" + domain.maxConcurrentTasks()
                                         + " accepts=" + domain.acceptsSubmissions(),
                                 NamedTextColor.WHITE)));
             } else {
-                sender.sendMessage(Component.text("  (no runtime context)", NamedTextColor.DARK_GRAY));
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.tasks.no_runtime_ctx"), NamedTextColor.DARK_GRAY));
             }
 
             return true;
@@ -443,45 +472,47 @@ public final class PluginIdCommand extends RootNode {
             final CommandSender sender = context.getSender();
             final PluginId pid = PluginIdArgument.resolve(context);
             if (pid == null) {
-                sender.sendMessage(Component.text("Invalid or missing id.", NamedTextColor.RED));
-                sender.sendMessage(Component.text("Usage: /pluginid status <id>", NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.invalid_id"), NamedTextColor.RED));
+                sender.sendMessage(Component.text(I18nManager.get("pluginid.error.usage_status"), NamedTextColor.RED));
                 return true;
             }
 
             final PluginIdentityManager mgr = LMili.getPluginIdentityManager();
             final PluginIdentity identity = mgr.find(pid).orElse(null);
             if (identity == null) {
-                sender.sendMessage(Component.text("Not registered: " + pid.value(), NamedTextColor.RED));
+                sender.sendMessage(Component.text(
+                        I18nManager.get("pluginid.error.not_registered", pid.value()), NamedTextColor.RED));
                 return true;
             }
 
             final PluginRuntimeContext ctx = PluginRuntimeContext.forPluginId(pid);
 
-            sender.sendMessage(Component.text("=== Runtime Status: " + pid.value() + " ===", NamedTextColor.GOLD));
-            sender.sendMessage(Component.text("  Identity: ", NamedTextColor.GRAY)
+            sender.sendMessage(Component.text(
+                    I18nManager.get("pluginid.status.title", pid.value()), NamedTextColor.GOLD));
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.identity") + " ", NamedTextColor.GRAY)
                     .append(Component.text(identity.name() + " v" + identity.version(), NamedTextColor.WHITE)));
-            sender.sendMessage(Component.text("  Status: ", NamedTextColor.GRAY)
+            sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.status") + " ", NamedTextColor.GRAY)
                     .append(Component.text(identity.status().name(), statusColor(identity.status()))));
 
             if (ctx != null) {
-                sender.sendMessage(Component.text("  Lifecycle: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.lifecycle") + " ", NamedTextColor.GRAY)
                         .append(Component.text(ctx.lifecycleState().name(), NamedTextColor.WHITE)));
-                sender.sendMessage(Component.text("  Permission: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.permission") + " ", NamedTextColor.GRAY)
                         .append(Component.text(ctx.permissionContext().level().name(), NamedTextColor.WHITE)));
-                sender.sendMessage(Component.text("  Scheduler Domain: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.scheduler_domain") + " ", NamedTextColor.GRAY)
                         .append(Component.text(ctx.schedulerDomain().toString(), NamedTextColor.WHITE)));
 
                 // Observability snapshot
                 final fun.bm.mili.lmili.api.identity.ObservabilityContext obs = ctx.observability();
                 final fun.bm.mili.lmili.api.identity.ObservabilityContext.Snapshot snap = obs.snapshot();
-                sender.sendMessage(Component.text("  Observability:", NamedTextColor.GRAY));
-                sender.sendMessage(Component.text("    API requests: " + snap.apiRequests(), NamedTextColor.DARK_GRAY));
-                sender.sendMessage(Component.text("    Scheduler requests: " + snap.schedulerRequests(), NamedTextColor.DARK_GRAY));
-                sender.sendMessage(Component.text("    Tasks created: " + snap.tasksCreated(), NamedTextColor.DARK_GRAY));
-                sender.sendMessage(Component.text("    Tasks failed: " + snap.tasksFailed(), NamedTextColor.DARK_GRAY));
-                sender.sendMessage(Component.text("    Permission denials: " + snap.permissionDenials(), NamedTextColor.DARK_GRAY));
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.observability"), NamedTextColor.GRAY));
+                sender.sendMessage(Component.text("    " + I18nManager.get("pluginid.status.api_requests", snap.apiRequests()), NamedTextColor.DARK_GRAY));
+                sender.sendMessage(Component.text("    " + I18nManager.get("pluginid.status.scheduler_requests", snap.schedulerRequests()), NamedTextColor.DARK_GRAY));
+                sender.sendMessage(Component.text("    " + I18nManager.get("pluginid.status.tasks_created", snap.tasksCreated()), NamedTextColor.DARK_GRAY));
+                sender.sendMessage(Component.text("    " + I18nManager.get("pluginid.status.tasks_failed", snap.tasksFailed()), NamedTextColor.DARK_GRAY));
+                sender.sendMessage(Component.text("    " + I18nManager.get("pluginid.status.permission_denials", snap.permissionDenials()), NamedTextColor.DARK_GRAY));
             } else {
-                sender.sendMessage(Component.text("  (no runtime context — not registered by bootstrap)", NamedTextColor.DARK_GRAY));
+                sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.no_runtime_ctx"), NamedTextColor.DARK_GRAY));
             }
 
             return true;

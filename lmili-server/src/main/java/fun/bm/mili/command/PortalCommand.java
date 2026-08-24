@@ -1,6 +1,7 @@
 package fun.bm.mili.command;
 
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import fun.bm.mili.lmili.i18n.I18nManager;
 import fun.bm.mili.portal.PortalLinkManager;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -14,6 +15,13 @@ import org.leavesmc.leaves.command.RootNode;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * Operator command for portal link management.
+ *
+ * <p>All user-visible strings are routed through {@link I18nManager} so that the
+ * operator experience follows the server's current locale (configured via
+ * {@code function.language.lang} in {@code mili.properties}).</p>
+ */
 public class PortalCommand extends RootNode {
     private static final String PERM_BASE = "mili.admin.portal";
 
@@ -40,12 +48,17 @@ public class PortalCommand extends RootNode {
     }
 
     private static void sendHelp(CommandSender sender) {
-        sender.sendMessage(Component.text("=== Mili Portal ===", NamedTextColor.GOLD));
-        sender.sendMessage(Component.text("  /portal list ", NamedTextColor.GRAY).append(Component.text("- List all portal pairs", NamedTextColor.WHITE)));
-        sender.sendMessage(Component.text("  /portal remove <key> ", NamedTextColor.GRAY).append(Component.text("- Remove a portal pair", NamedTextColor.WHITE)));
-        sender.sendMessage(Component.text("  /portal clear ", NamedTextColor.GRAY).append(Component.text("- Remove all portal pairs", NamedTextColor.WHITE)));
-        sender.sendMessage(Component.text("  /portal info ", NamedTextColor.GRAY).append(Component.text("- Show portal info at your position", NamedTextColor.WHITE)));
-        sender.sendMessage(Component.text("  /portal reload ", NamedTextColor.GRAY).append(Component.text("- Reload portal links from disk", NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text(I18nManager.get("portal.help.title"), NamedTextColor.GOLD));
+        sender.sendMessage(Component.text("  /portal list ", NamedTextColor.GRAY).append(
+                Component.text("- " + I18nManager.get("portal.help.list"), NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /portal remove <key> ", NamedTextColor.GRAY).append(
+                Component.text("- " + I18nManager.get("portal.help.remove"), NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /portal clear ", NamedTextColor.GRAY).append(
+                Component.text("- " + I18nManager.get("portal.help.clear"), NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /portal info ", NamedTextColor.GRAY).append(
+                Component.text("- " + I18nManager.get("portal.help.info"), NamedTextColor.WHITE)));
+        sender.sendMessage(Component.text("  /portal reload ", NamedTextColor.GRAY).append(
+                Component.text("- " + I18nManager.get("portal.help.reload"), NamedTextColor.WHITE)));
     }
 
     private static class ListCommand extends org.leavesmc.leaves.command.LiteralNode {
@@ -62,13 +75,14 @@ public class PortalCommand extends RootNode {
         protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
             CommandSender sender = context.getSender();
             Map<String, PortalLinkManager.PortalPair> pairs = PortalLinkManager.getAllPairs();
-            sender.sendMessage(Component.text("=== Portal Links (" + pairs.size() + ") ===", NamedTextColor.GOLD));
+            sender.sendMessage(Component.text(
+                    I18nManager.get("portal.list.title", pairs.size()), NamedTextColor.GOLD));
             for (Map.Entry<String, PortalLinkManager.PortalPair> entry : pairs.entrySet()) {
                 PortalLinkManager.PortalPair p = entry.getValue();
                 sender.sendMessage(Component.text("  " + entry.getKey(), NamedTextColor.WHITE));
-                sender.sendMessage(Component.text("    From: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("    " + I18nManager.get("portal.list.from") + " ", NamedTextColor.GRAY)
                         .append(Component.text(p.getSourceWorld() + " (" + p.getSourceX() + ", " + p.getSourceY() + ", " + p.getSourceZ() + ")", NamedTextColor.AQUA)));
-                sender.sendMessage(Component.text("    To:   ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("    " + I18nManager.get("portal.list.to") + "   ", NamedTextColor.GRAY)
                         .append(Component.text(p.getDestWorld() + " (" + p.getDestX() + ", " + p.getDestY() + ", " + p.getDestZ() + ")", NamedTextColor.GREEN)));
             }
             return true;
@@ -89,8 +103,10 @@ public class PortalCommand extends RootNode {
         @Override
         protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
             // 无参数时回显用法
-            context.getSender().sendMessage(Component.text("Usage: /portal remove <key>", NamedTextColor.RED));
-            context.getSender().sendMessage(Component.text("Use /portal list to see keys", NamedTextColor.GRAY));
+            context.getSender().sendMessage(Component.text(
+                    I18nManager.get("portal.error.usage_remove"), NamedTextColor.RED));
+            context.getSender().sendMessage(Component.text(
+                    I18nManager.get("portal.error.hint_list"), NamedTextColor.GRAY));
             return true;
         }
 
@@ -119,9 +135,11 @@ public class PortalCommand extends RootNode {
                 CommandSender sender = context.getSender();
                 String key = context.getArgument(KeyArg.class);
                 if (PortalLinkManager.removePair(key)) {
-                    sender.sendMessage(Component.text("Removed portal pair: " + key, NamedTextColor.GREEN));
+                    sender.sendMessage(Component.text(
+                            I18nManager.get("portal.remove.success", key), NamedTextColor.GREEN));
                 } else {
-                    sender.sendMessage(Component.text("Portal pair not found: " + key, NamedTextColor.RED));
+                    sender.sendMessage(Component.text(
+                            I18nManager.get("portal.remove.not_found", key), NamedTextColor.RED));
                 }
                 return true;
             }
@@ -145,7 +163,8 @@ public class PortalCommand extends RootNode {
             for (String key : PortalLinkManager.getAllPairs().keySet()) {
                 PortalLinkManager.removePair(key);
             }
-            sender.sendMessage(Component.text("Cleared all " + count + " portal pairs.", NamedTextColor.GREEN));
+            sender.sendMessage(Component.text(
+                    I18nManager.get("portal.clear.success", count), NamedTextColor.GREEN));
             return true;
         }
     }
@@ -164,21 +183,25 @@ public class PortalCommand extends RootNode {
         protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
             CommandSender sender = context.getSender();
             if (!(sender instanceof Player player)) {
-                sender.sendMessage(Component.text("This command can only be used by players.", NamedTextColor.RED));
+                sender.sendMessage(Component.text(
+                        I18nManager.get("portal.error.player_only"), NamedTextColor.RED));
                 return true;
             }
             Location loc = player.getLocation();
             String key = PortalLinkManager.locationKey(loc);
             PortalLinkManager.PortalPair pair = PortalLinkManager.findPair(loc);
-            sender.sendMessage(Component.text("=== Portal Info ===", NamedTextColor.GOLD));
-            sender.sendMessage(Component.text("  Position: ", NamedTextColor.GRAY).append(Component.text(key, NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text(
+                    I18nManager.get("portal.info.title"), NamedTextColor.GOLD));
+            sender.sendMessage(Component.text("  " + I18nManager.get("portal.info.position") + " ", NamedTextColor.GRAY)
+                    .append(Component.text(key, NamedTextColor.WHITE)));
             if (pair != null) {
-                sender.sendMessage(Component.text("  Linked To: ", NamedTextColor.GRAY)
+                sender.sendMessage(Component.text("  " + I18nManager.get("portal.info.linked_to") + " ", NamedTextColor.GRAY)
                         .append(Component.text(pair.getDestWorld() + " (" + pair.getDestX() + ", " + pair.getDestY() + ", " + pair.getDestZ() + ")", NamedTextColor.GREEN)));
             } else {
-                sender.sendMessage(Component.text("  No portal link found at this position.", NamedTextColor.GRAY));
+                sender.sendMessage(Component.text("  " + I18nManager.get("portal.info.no_link"), NamedTextColor.GRAY));
             }
-            sender.sendMessage(Component.text("  Search Radius: ", NamedTextColor.GRAY).append(Component.text(PortalLinkManager.getSearchRadius(), NamedTextColor.WHITE)));
+            sender.sendMessage(Component.text("  " + I18nManager.get("portal.info.search_radius") + " ", NamedTextColor.GRAY)
+                    .append(Component.text(String.valueOf(PortalLinkManager.getSearchRadius()), NamedTextColor.WHITE)));
             return true;
         }
     }
@@ -196,7 +219,8 @@ public class PortalCommand extends RootNode {
         @Override
         protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
             PortalLinkManager.load();
-            context.getSender().sendMessage(Component.text("Portal links reloaded from disk.", NamedTextColor.GREEN));
+            context.getSender().sendMessage(Component.text(
+                    I18nManager.get("portal.reload.success"), NamedTextColor.GREEN));
             return true;
         }
     }

@@ -37,8 +37,28 @@ public final class I18nManager {
     private static volatile String currentLocale = DEFAULT_LOCALE;
 
     // Mili start - eager initialization so translations work even without explicit init()
-    // 支持的语言列表
-    private static final String[] SUPPORTED_LOCALES = {"en_us", "zh_cn"};
+    // 支持的语言列表（与 src/main/resources/i18n/ 下的 properties 文件一一对应）
+    private static final String[] SUPPORTED_LOCALES = {
+            "en_us", // English (US)             — base / fallback
+            "zh_cn", // Chinese (Simplified, China)
+            "zh_tw", // Chinese (Traditional, Taiwan)
+            "zh_hk", // Chinese (Traditional, Hong Kong)
+            "ja_jp", // Japanese (Japan)
+            "ko_kr", // Korean (Korea)
+            "de_de", // German (Germany)
+            "fr_fr", // French (France)
+            "es_es", // Spanish (Spain)
+            "it_it", // Italian (Italy)
+            "pt_br", // Portuguese (Brazil)
+            "ru_ru", // Russian (Russia)
+            "uk_ua", // Ukrainian (Ukraine)
+            "pl_pl", // Polish (Poland)
+            "tr_tr", // Turkish (Turkey)
+            "vi_vn", // Vietnamese (Vietnam)
+            "th_th", // Thai (Thailand)
+            "id_id", // Indonesian (Indonesia)
+            "ar_sa"  // Arabic (Saudi Arabia)
+    };
     static {
         // 加载所有支持的语言，这样无需调用 init() 也能切换语言
         for (String locale : SUPPORTED_LOCALES) {
@@ -157,6 +177,22 @@ public final class I18nManager {
      */
     public static String getCurrentLocale() {
         return currentLocale;
+    }
+
+    /**
+     * 包内访问：返回指定 locale 的全局翻译表（只读视图）。
+     *
+     * <p>仅供 {@code fun.bm.mili.lmili.i18n} 包内的类（如 {@link PluginI18n}）
+     * 用作兜底查找。不要在包外使用 —— 任何时刻都应优先通过 {@link #get(String)}、
+     * {@link #has(String)} 等公开 API 访问翻译。
+     *
+     * @param locale 语言代码；为 {@code null} 时返回 {@code null}
+     * @return 该 locale 下的只读 map，未加载时为 {@code null}
+     */
+    static Map<String, String> getTranslations(String locale) {
+        if (locale == null) return null;
+        Map<String, String> map = translations.get(locale.toLowerCase(Locale.ROOT));
+        return map == null ? null : Collections.unmodifiableMap(map);
     }
 
     /**

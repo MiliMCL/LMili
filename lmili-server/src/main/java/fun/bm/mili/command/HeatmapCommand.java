@@ -1,6 +1,7 @@
 package fun.bm.mili.command;
 
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import fun.bm.mili.lmili.i18n.I18nManager;
 import fun.bm.mili.utils.player.PlayerHeatmap;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -15,6 +16,11 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * Operator command for the player activity heatmap.
+ *
+ * <p>All user-visible strings are routed through {@link I18nManager}.</p>
+ */
 public class HeatmapCommand extends RootNode {
     private static final String PERM_BASE = "mili.admin.heatmap";
 
@@ -33,11 +39,11 @@ public class HeatmapCommand extends RootNode {
     }
 
     private static void sendStats(CommandSender sender) {
-        sender.sendMessage(Component.text("=== Player Activity Heatmap ===", NamedTextColor.GOLD));
+        sender.sendMessage(Component.text(I18nManager.get("heatmap.title"), NamedTextColor.GOLD));
         sender.sendMessage(Component.empty());
         Map<String, Object> stats = PlayerHeatmap.getStats();
         if (stats.isEmpty()) {
-            sender.sendMessage(Component.text("  No data collected yet.", NamedTextColor.GRAY));
+            sender.sendMessage(Component.text("  " + I18nManager.get("heatmap.no_data"), NamedTextColor.GRAY));
             return;
         }
         for (Map.Entry<String, Object> entry : stats.entrySet()) {
@@ -59,7 +65,8 @@ public class HeatmapCommand extends RootNode {
         @Override
         protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
             PlayerHeatmap.reset();
-            context.getSender().sendMessage(Component.text("Heatmap data reset.", NamedTextColor.GREEN));
+            context.getSender().sendMessage(Component.text(
+                    I18nManager.get("heatmap.reset.success"), NamedTextColor.GREEN));
             return true;
         }
     }
@@ -78,7 +85,8 @@ public class HeatmapCommand extends RootNode {
         @Override
         protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
             // 无参数时回显用法
-            context.getSender().sendMessage(Component.text("Usage: /heatmap export <world>", NamedTextColor.RED));
+            context.getSender().sendMessage(Component.text(
+                    I18nManager.get("heatmap.error.usage_export"), NamedTextColor.RED));
             return true;
         }
 
@@ -106,9 +114,11 @@ public class HeatmapCommand extends RootNode {
                 String worldName = context.getArgument(WorldArg.class);
                 try {
                     PlayerHeatmap.exportToFile(worldName);
-                    sender.sendMessage(Component.text("Heatmap exported for world: " + worldName, NamedTextColor.GREEN));
+                    sender.sendMessage(Component.text(
+                            I18nManager.get("heatmap.export.success", worldName), NamedTextColor.GREEN));
                 } catch (IOException e) {
-                    sender.sendMessage(Component.text("Export failed: " + e.getMessage(), NamedTextColor.RED));
+                    sender.sendMessage(Component.text(
+                            I18nManager.get("heatmap.export.failed", e.getMessage()), NamedTextColor.RED));
                 }
                 return true;
             }
