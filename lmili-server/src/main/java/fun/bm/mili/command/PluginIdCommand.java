@@ -101,10 +101,16 @@ public final class PluginIdCommand extends RootNode {
     /**
      * Argument node that provides tab-completion suggestions from all
      * registered plugin identities.
+     *
+     * <p>关键设计：本节点自身绑定 {@code executes}，使 {@code /pluginid <sub> <id>} 在 argument 节点
+     * 终止时即可找到执行入口（避免客户端显示"command incomplete"占位符）。
      */
     private static final class PluginIdArgument extends ArgumentNode<String> {
-        PluginIdArgument() {
+        private final java.util.function.Function<CommandContext, Boolean> executeHandler;
+
+        PluginIdArgument(final java.util.function.Function<CommandContext, Boolean> executeHandler) {
             super("id", StringArgumentType.word());
+            this.executeHandler = executeHandler;
         }
 
         @Override
@@ -118,6 +124,16 @@ public final class PluginIdCommand extends RootNode {
                 }
             }
             return builder.buildFuture();
+        }
+
+        @Override
+        protected boolean canExecute() {
+            return executeHandler != null;
+        }
+
+        @Override
+        protected boolean execute(@NotNull final CommandContext context) throws CommandSyntaxException {
+            return executeHandler != null && executeHandler.apply(context);
         }
 
         /**
@@ -162,7 +178,7 @@ public final class PluginIdCommand extends RootNode {
     private static final class InfoCommand extends LiteralNode {
         InfoCommand() {
             super("info");
-            children(new PluginIdArgument());
+            children(new PluginIdArgument(this::execute));
         }
 
         @Override
@@ -236,7 +252,7 @@ public final class PluginIdCommand extends RootNode {
     private static final class ObserveCommand extends LiteralNode {
         ObserveCommand() {
             super("observe");
-            children(new PluginIdArgument());
+            children(new PluginIdArgument(this::execute));
         }
 
         @Override
@@ -265,7 +281,7 @@ public final class PluginIdCommand extends RootNode {
     private static final class EnableCommand extends LiteralNode {
         EnableCommand() {
             super("enable");
-            children(new PluginIdArgument());
+            children(new PluginIdArgument(this::execute));
         }
 
         @Override
@@ -294,7 +310,7 @@ public final class PluginIdCommand extends RootNode {
     private static final class DisableCommand extends LiteralNode {
         DisableCommand() {
             super("disable");
-            children(new PluginIdArgument());
+            children(new PluginIdArgument(this::execute));
         }
 
         @Override
@@ -338,7 +354,7 @@ public final class PluginIdCommand extends RootNode {
     private static final class TasksCommand extends LiteralNode {
         TasksCommand() {
             super("tasks");
-            children(new PluginIdArgument());
+            children(new PluginIdArgument(this::execute));
         }
 
         @Override
@@ -405,7 +421,7 @@ public final class PluginIdCommand extends RootNode {
     private static final class StatusCommand extends LiteralNode {
         StatusCommand() {
             super("status");
-            children(new PluginIdArgument());
+            children(new PluginIdArgument(this::execute));
         }
 
         @Override

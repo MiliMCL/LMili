@@ -13,6 +13,7 @@ import org.leavesmc.leaves.command.RootNode;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 public class HeatmapCommand extends RootNode {
     private static final String PERM_BASE = "mili.admin.heatmap";
@@ -66,6 +67,7 @@ public class HeatmapCommand extends RootNode {
     private static class HeatmapExportCommand extends org.leavesmc.leaves.command.LiteralNode {
         HeatmapExportCommand() {
             super("export");
+            children(WorldArg::new);
         }
 
         @Override
@@ -75,19 +77,41 @@ public class HeatmapCommand extends RootNode {
 
         @Override
         protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
-            CommandSender sender = context.getSender();
-            String worldName = context.getStringOrDefault("world", null);
-            if (worldName == null) {
-                sender.sendMessage(Component.text("Usage: /heatmap export <world>", NamedTextColor.RED));
+            // 无参数时回显用法
+            context.getSender().sendMessage(Component.text("Usage: /heatmap export <world>", NamedTextColor.RED));
+            return true;
+        }
+
+        // Mili - terminal argument node that captures <world>; bind executes on the argument node
+        // itself so /heatmap export myworld dispatches correctly (fixes "command forces extra arg"
+        // UI artifact and makes the arg actually reachable).
+        private class WorldArg extends org.leavesmc.leaves.command.ArgumentNode<String> {
+            WorldArg() {
+                super("world", com.mojang.brigadier.arguments.StringArgumentType.word());
+            }
+
+            @Override
+            protected CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> getSuggestions(
+                    @NotNull CommandContext context,
+                    @NotNull com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+                for (final World world : Bukkit.getServer().getWorlds()) {
+                    builder.suggest(world.getName());
+                }
+                return builder.buildFuture();
+            }
+
+            @Override
+            protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
+                CommandSender sender = context.getSender();
+                String worldName = context.getArgument(WorldArg.class);
+                try {
+                    PlayerHeatmap.exportToFile(worldName);
+                    sender.sendMessage(Component.text("Heatmap exported for world: " + worldName, NamedTextColor.GREEN));
+                } catch (IOException e) {
+                    sender.sendMessage(Component.text("Export failed: " + e.getMessage(), NamedTextColor.RED));
+                }
                 return true;
             }
-            try {
-                PlayerHeatmap.exportToFile(worldName);
-                sender.sendMessage(Component.text("Heatmap exported for world: " + worldName, NamedTextColor.GREEN));
-            } catch (IOException e) {
-                sender.sendMessage(Component.text("Export failed: " + e.getMessage(), NamedTextColor.RED));
-            }
-            return true;
         }
     }
 }

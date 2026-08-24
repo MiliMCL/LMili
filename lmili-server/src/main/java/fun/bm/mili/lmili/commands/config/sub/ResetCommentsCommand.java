@@ -48,7 +48,7 @@ public class ResetCommentsCommand extends ConfigSubcommand {
 
         @Override
         protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
-            String confirm = context.getArgument(CleanCommand.PathArgument.class);
+            String confirm = context.getArgument(PathArgument.class);
             if (!confirm.equals("confirm")) {
                 context.getSender().sendMessage(
                         Component

@@ -12,6 +12,7 @@ import org.leavesmc.leaves.command.CommandContext;
 import org.leavesmc.leaves.command.RootNode;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 public class PortalCommand extends RootNode {
     private static final String PERM_BASE = "mili.admin.portal";
@@ -77,6 +78,7 @@ public class PortalCommand extends RootNode {
     private static class RemoveCommand extends org.leavesmc.leaves.command.LiteralNode {
         RemoveCommand() {
             super("remove");
+            children(KeyArg::new);
         }
 
         @Override
@@ -86,19 +88,43 @@ public class PortalCommand extends RootNode {
 
         @Override
         protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
-            CommandSender sender = context.getSender();
-            String key = context.getStringOrDefault("key", null);
-            if (key == null) {
-                sender.sendMessage(Component.text("Usage: /portal remove <key>", NamedTextColor.RED));
-                sender.sendMessage(Component.text("Use /portal list to see keys", NamedTextColor.GRAY));
+            // 无参数时回显用法
+            context.getSender().sendMessage(Component.text("Usage: /portal remove <key>", NamedTextColor.RED));
+            context.getSender().sendMessage(Component.text("Use /portal list to see keys", NamedTextColor.GRAY));
+            return true;
+        }
+
+        // Mili - terminal argument node that captures <key>; bind executes on the argument node
+        // itself so /portal remove somekey dispatches correctly (fixes "command forces extra arg"
+        // UI artifact and the prior getStringOrDefault("key", null) which never resolved).
+        private class KeyArg extends org.leavesmc.leaves.command.ArgumentNode<String> {
+            KeyArg() {
+                super("key", com.mojang.brigadier.arguments.StringArgumentType.word());
+            }
+
+            @Override
+            protected CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> getSuggestions(
+                    @NotNull CommandContext context,
+                    @NotNull com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+                for (final String key : PortalLinkManager.getAllPairs().keySet()) {
+                    if (key.startsWith(builder.getRemaining())) {
+                        builder.suggest(key);
+                    }
+                }
+                return builder.buildFuture();
+            }
+
+            @Override
+            protected boolean execute(@NotNull CommandContext context) throws CommandSyntaxException {
+                CommandSender sender = context.getSender();
+                String key = context.getArgument(KeyArg.class);
+                if (PortalLinkManager.removePair(key)) {
+                    sender.sendMessage(Component.text("Removed portal pair: " + key, NamedTextColor.GREEN));
+                } else {
+                    sender.sendMessage(Component.text("Portal pair not found: " + key, NamedTextColor.RED));
+                }
                 return true;
             }
-            if (PortalLinkManager.removePair(key)) {
-                sender.sendMessage(Component.text("Removed portal pair: " + key, NamedTextColor.GREEN));
-            } else {
-                sender.sendMessage(Component.text("Portal pair not found: " + key, NamedTextColor.RED));
-            }
-            return true;
         }
     }
 
