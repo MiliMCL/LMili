@@ -67,7 +67,12 @@ public final class AdaptiveRuntimeSecurityTests {
             testSoftHardBounds();
             testPersistencePriorityComposite();
             testD23Chain();
-            testConcurrencySingleWriter();
+            try {
+                testConcurrencySingleWriter();
+            } catch (Exception ex) {
+                failed++;
+                System.out.println("[FAIL] testConcurrencySingleWriter threw: " + ex);
+            }
         } finally {
             // 恢复全局静态（防止污染后续测试/服务器启动）
             MiliTickRegionScheduler.tpsTarget = 20.0;
