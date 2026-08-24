@@ -282,7 +282,6 @@ public final class LMili {
     // 不暴露 SPI 防止 plugin 误实现。
     // ---------------------------------------------------------------------
 
-    @FunctionalInterface
     public interface I18nFunctions {
         String getCurrentLocale();
         String tr(String key, Object[] args);
