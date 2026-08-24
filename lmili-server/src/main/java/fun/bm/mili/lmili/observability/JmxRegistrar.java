@@ -61,7 +61,7 @@ public final class JmxRegistrar {
         if (source instanceof SchedulerMetricsMXBean bean) {
             return register(bean);
         }
-        return register(new JmxSchedulerMetricsMXBean(source));
+        return register((SchedulerMetricsMXBean) new JmxSchedulerMetricsMXBean(source));
     }
 
     public static synchronized boolean unregister() {

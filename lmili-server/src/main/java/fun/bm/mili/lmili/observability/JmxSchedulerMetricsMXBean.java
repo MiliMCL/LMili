@@ -93,9 +93,9 @@ public final class JmxSchedulerMetricsMXBean implements SchedulerMetrics, Schedu
     public long getHardBudgetTrips() { return n(source, SchedulerMetrics::hardBudgetTrips); }
 
     @Override
-    public long getCrossRegionAccessCount() { return n(source, m -> m.crossRegionAccessCount()); }
+    public long getCrossRegionAccessCount() { return n(source, SchedulerMetrics::crossRegionAccessCount); }
     @Override
-    public long getPluginTaskCount() { return n(source, m -> m.pluginTaskCount()); }
+    public long getPluginTaskCount() { return n(source, SchedulerMetrics::pluginTaskCount); }
     @Override
     public long pluginTaskCount() { return getPluginTaskCount(); }
 
