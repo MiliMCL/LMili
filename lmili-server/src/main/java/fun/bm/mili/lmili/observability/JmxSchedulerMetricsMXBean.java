@@ -108,7 +108,7 @@ public final class JmxSchedulerMetricsMXBean implements SchedulerMetricsMXBean {
                 0L, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 0, 0, 0, 0L, 0L, 0.0,
                 0L, 0L, 0L, 0L, 0L,
-                0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L,
+                0L, 0L, 0L, 0L, 0L, 0L, 0L,
                 0L, 0L
         );
     }

@@ -150,13 +150,13 @@ public final class PluginIdentityAutoDiscovery {
         // 强制 trust = UNVERIFIED 需要 register 后再 withTrustLevel。
         PluginIdentity base = PluginIdentity.of(
                 id, name, version, publisher,
-                PluginType.LIBRARY, // 外部 plugin 视为 LIBRARY；手动注册的保持原值
+                PluginType.LEGACY, // 外部 plugin 未声明 lmili.json，视为 LEGACY
                 java.util.Optional.empty(),
                 source,
                 plugin.getName()
         );
-        // 改为 UNVERIFIED（DISCOVERED → DISCOVERED 不变，trust 从 UNKNOWN → UNVERIFIED）
-        return base.withTrustLevel(fun.bm.mili.lmili.api.identity.PluginTrustLevel.UNVERIFIED);
+        // 外部 plugin 默认 LOCAL（未签名本地安装）
+        return base.withTrustLevel(fun.bm.mili.lmili.api.identity.PluginTrustLevel.LOCAL);
     }
 
     private static String safeVersion(Plugin plugin) {

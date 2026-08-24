@@ -1,5 +1,7 @@
 package fun.bm.mili.lmili.runtime.diagnostics;
 
+import fun.bm.mili.lmili.thread.runtime.diagnostics.LongTailTickDiagnostics;
+
 import java.util.concurrent.atomic.AtomicReference;
 
 /**

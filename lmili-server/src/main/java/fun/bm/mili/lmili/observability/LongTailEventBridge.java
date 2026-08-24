@@ -112,13 +112,59 @@ public final class LongTailEventBridge implements LongTailEvent {
         }
     }
 
-    private record BridgeAdapter(
-            long tickId, long regionId, String thread, String task,
-            Level level, double durationMs, BlockingReason reason,
-            double chunkWaitMs, int chunkWaitCount,
-            double dependencyWaitMs, int dependencyWaitCount,
-            boolean pluginTask, int entityCount, long timestampMs
-    ) implements LongTailEvent {}
+    private static final class BridgeAdapter implements LongTailEvent {
+        private final long tickId;
+        private final long regionId;
+        private final String thread;
+        private final String task;
+        private final Level level;
+        private final double durationMs;
+        private final BlockingReason reason;
+        private final double chunkWaitMs;
+        private final int chunkWaitCount;
+        private final double dependencyWaitMs;
+        private final int dependencyWaitCount;
+        private final boolean pluginTask;
+        private final int entityCount;
+        private final long timestampMs;
+
+        BridgeAdapter(long tickId, long regionId, String thread, String task,
+                      Level level, double durationMs, BlockingReason reason,
+                      double chunkWaitMs, int chunkWaitCount,
+                      double dependencyWaitMs, int dependencyWaitCount,
+                      boolean pluginTask, int entityCount, long timestampMs) {
+            this.tickId = tickId; this.regionId = regionId; this.thread = thread; this.task = task;
+            this.level = level; this.durationMs = durationMs; this.reason = reason;
+            this.chunkWaitMs = chunkWaitMs; this.chunkWaitCount = chunkWaitCount;
+            this.dependencyWaitMs = dependencyWaitMs; this.dependencyWaitCount = dependencyWaitCount;
+            this.pluginTask = pluginTask; this.entityCount = entityCount; this.timestampMs = timestampMs;
+        }
+
+        @Override public long tickId() { return tickId; }
+        @Override public long regionId() { return regionId; }
+        @Override public @NotNull String thread() { return thread; }
+        @Override public @NotNull String task() { return task; }
+        @Override public @NotNull Level level() { return level; }
+        @Override public double durationMs() { return durationMs; }
+        @Override public @NotNull BlockingReason reason() { return reason; }
+        @Override public double chunkWaitMs() { return chunkWaitMs; }
+        @Override public int chunkWaitCount() { return chunkWaitCount; }
+        @Override public double dependencyWaitMs() { return dependencyWaitMs; }
+        @Override public int dependencyWaitCount() { return dependencyWaitCount; }
+        @Override public boolean pluginTask() { return pluginTask; }
+        @Override public int entityCount() { return entityCount; }
+        @Override public long timestampMs() { return timestampMs; }
+
+        // not used as an event source (the bridge holds its own listener list)
+        @Override public boolean register(@NotNull Listener listener) { return false; }
+        @Override public boolean unregister(@NotNull Listener listener) { return false; }
+        @Override public @NotNull List<LongTailEvent> recentHardEvents(int max) { return Collections.emptyList(); }
+        @Override public @NotNull List<LongTailEvent> recentSoftEvents(int max) { return Collections.emptyList(); }
+        @Override public double softBudgetMs() { return 0; }
+        @Override public double hardBudgetMs() { return 0; }
+        @Override public long softTripCount() { return 0; }
+        @Override public long hardTripCount() { return 0; }
+    }
 
     private static LongTailEvent adapt(LongTailTickDiagnostics.HardTickEvent e) {
         return new BridgeAdapter(

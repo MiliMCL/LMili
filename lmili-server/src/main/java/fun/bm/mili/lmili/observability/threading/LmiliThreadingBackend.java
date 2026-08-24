@@ -231,7 +231,9 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         @Override
         public @NotNull <V> ScheduledFuture<V> schedule(@NotNull Callable<V> task, long delay, @NotNull TimeUnit unit) {
             active.incrementAndGet();
-            ScheduledFuture<V> f = pool.submit(task);
+            Future<V> raw = pool.submit(task);
+            // pool.submit returns Future<V>; we wrap into a simple ScheduledFuture-shaped future
+            ScheduledFuture<V> f = new PromotedScheduledFuture<>(raw, delay, unit);
             return new TrackedScheduledFuture<>(f, active);
         }
 
@@ -318,7 +320,9 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
             try {
                 java.lang.reflect.Method fork = scope.getClass().getMethod("fork", Callable.class);
                 Object subtask = fork.invoke(scope, task);
-                return new JdkSubTask<>(subtask);
+                @SuppressWarnings("unchecked")
+                StructuredConcurrency.SubTask<T> wrapper = new JdkSubTask<T>(subtask);
+                return wrapper;
             } catch (java.lang.reflect.InvocationTargetException e) {
                 throw new RuntimeException(e.getCause());
             } catch (Throwable t) {
@@ -349,7 +353,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
     }
 
-    private static final class JdkSubTask<T> implements SubTask<T> {
+    private static final class JdkSubTask<T> implements StructuredConcurrency.SubTask<T> {
         private final Object delegate;
 
         JdkSubTask(Object delegate) { this.delegate = delegate; }
@@ -383,22 +387,50 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
 
         @Override
-        public State state() {
+        public SubTask.State state() {
             try {
                 java.lang.reflect.Method state = delegate.getClass().getMethod("state");
                 Object v = state.invoke(delegate);
                 String name = String.valueOf(v);
                 return switch (name) {
-                    case "SUCCESS" -> State.SUCCESS;
-                    case "FAILED" -> State.FAILED;
-                    case "CANCELLED" -> State.CANCELLED;
-                    case "RUNNING" -> State.RUNNING;
-                    default -> State.UNAVAILABLE;
+                    case "SUCCESS" -> SubTask.State.SUCCESS;
+                    case "FAILED" -> SubTask.State.FAILED;
+                    case "CANCELLED" -> SubTask.State.CANCELLED;
+                    case "RUNNING" -> SubTask.State.RUNNING;
+                    default -> SubTask.State.UNAVAILABLE;
                 };
             } catch (Throwable t) {
-                return State.UNAVAILABLE;
+                return SubTask.State.UNAVAILABLE;
             }
         }
+    }
+
+    /** Wrap a plain Future<V> as a ScheduledFuture<V> for the Lmili delay+value case */
+    private static final class PromotedScheduledFuture<V> implements ScheduledFuture<V> {
+        private final Future<V> delegate;
+        private final long delayNanos;
+        private final TimeUnit unit;
+        private final long createdAt = System.nanoTime();
+
+        PromotedScheduledFuture(Future<V> delegate, long delay, TimeUnit unit) {
+            this.delegate = delegate;
+            this.delayNanos = unit.toNanos(delay);
+            this.unit = unit;
+        }
+
+        @Override public long getDelay(TimeUnit u) {
+            long remaining = delayNanos - (System.nanoTime() - createdAt);
+            return Math.max(0, u.convert(remaining, java.util.concurrent.TimeUnit.NANOSECONDS));
+        }
+        @Override public int compareTo(java.util.concurrent.Delayed o) {
+            return Long.compare(getDelay(java.util.concurrent.TimeUnit.NANOSECONDS),
+                    o.getDelay(java.util.concurrent.TimeUnit.NANOSECONDS));
+        }
+        @Override public boolean cancel(boolean a) { return delegate.cancel(a); }
+        @Override public boolean isCancelled() { return delegate.isCancelled(); }
+        @Override public boolean isDone() { return delegate.isDone(); }
+        @Override public V get() throws java.util.concurrent.ExecutionException, InterruptedException { return delegate.get(); }
+        @Override public V get(long t, TimeUnit u) throws java.util.concurrent.ExecutionException, InterruptedException, java.util.concurrent.TimeoutException { return delegate.get(t, u); }
     }
 
     private static final class LatchedStructuredScope implements StructuredConcurrency {
@@ -422,7 +454,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         public void join() throws Exception {
             for (java.util.concurrent.CountDownLatch l : latches.values()) l.await();
             for (SubTask<?> s : latches.keySet()) {
-                if (s.state() == State.FAILED) ((LatchedSubTask<?>) s).throwIfFailed();
+                if (s.state() == SubTask.State.FAILED) ((LatchedSubTask<?>) s).throwIfFailed();
             }
         }
 
@@ -446,8 +478,8 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
 
         void run() {
-            try { this.value = task.call(); this.state = State.SUCCESS; }
-            catch (Throwable t) { this.failure = t; this.state = State.FAILED; }
+            try { this.value = task.call(); this.state = SubTask.State.SUCCESS; }
+            catch (Throwable t) { this.failure = t; this.state = SubTask.State.FAILED; }
         }
 
         void throwIfFailed() throws Exception {
