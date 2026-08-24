@@ -20,7 +20,7 @@ import fun.bm.mili.lmili.api.observability.SchedulerMetrics;
  *
  * <p>注册时机：MiliRuntime 启动后（fail-safe；注册失败仅日志，不阻断）。
  */
-public final class JmxSchedulerMetricsMXBean implements SchedulerMetricsMXBean {
+public final class JmxSchedulerMetricsMXBean implements SchedulerMetrics, SchedulerMetricsMXBean {
 
     /** Source of truth —— LMili 内部 RuntimeMetrics。 */
     private volatile SchedulerMetrics source;
@@ -93,15 +93,45 @@ public final class JmxSchedulerMetricsMXBean implements SchedulerMetricsMXBean {
     public long getHardBudgetTrips() { return n(source, SchedulerMetrics::hardBudgetTrips); }
 
     @Override
-    public long getCrossRegionAccessCount() { return n(source, SchedulerMetrics::crossRegionAccessCount); }
+    public long getCrossRegionAccessCount() { return n(source, m -> m.crossRegionAccessCount()); }
     @Override
-    public long getPluginTaskCount() { return n(source, SchedulerMetrics::pluginTaskCount); }
+    public long getPluginTaskCount() { return n(source, m -> m.pluginTaskCount()); }
+    @Override
+    public long pluginTaskCount() { return getPluginTaskCount(); }
 
     @Override
     public SchedulerMetrics.Snapshot snapshot() {
         final SchedulerMetrics s = source;
         return s != null ? s.snapshot() : emptySnapshot();
     }
+
+    // ---- SchedulerMetrics (no-get prefix) forwards ----
+    @Override public long totalTicks() { return getTotalTicks(); }
+    @Override public double msptMeanMs() { return getMsptMeanMs(); }
+    @Override public double msptMedianMs() { return getMsptMedianMs(); }
+    @Override public double msptP95Ms() { return getMsptP95Ms(); }
+    @Override public double msptP99Ms() { return getMsptP99Ms(); }
+    @Override public double msptMaxMs() { return getMsptMaxMs(); }
+    @Override public double currentTps() { return getCurrentTps(); }
+    @Override public int workerCount() { return getWorkerCount(); }
+    @Override public int activeWorkerCount() { return getActiveWorkerCount(); }
+    @Override public int idleWorkerCount() { return getIdleWorkerCount(); }
+    @Override public long totalSteals() { return getTotalSteals(); }
+    @Override public long totalStealFailures() { return getTotalStealFailures(); }
+    @Override public double averageWorkerUtilization() { return getAverageWorkerUtilization(); }
+    @Override public long tasksSubmitted() { return getTasksSubmitted(); }
+    @Override public long tasksCompleted() { return getTasksCompleted(); }
+    @Override public long tasksFailed() { return getTasksFailed(); }
+    @Override public long tasksCancelled() { return getTasksCancelled(); }
+    @Override public long tasksLateCompleted() { return getTasksLateCompleted(); }
+    @Override public long blockedRegionCount() { return getBlockedRegionCount(); }
+    @Override public long deferredQueueDepth() { return getDeferredQueueDepth(); }
+    @Override public long chunkWaitCount() { return getChunkWaitCount(); }
+    @Override public long chunkWaitNanosTotal() { return getChunkWaitNanosTotal(); }
+    @Override public long poiWaitCount() { return getPoiWaitCount(); }
+    @Override public long softBudgetTrips() { return getSoftBudgetTrips(); }
+    @Override public long hardBudgetTrips() { return getHardBudgetTrips(); }
+    @Override public long crossRegionAccessCount() { return getCrossRegionAccessCount(); }
 
     private static SchedulerMetrics.Snapshot emptySnapshot() {
         return new SchedulerMetrics.Snapshot(

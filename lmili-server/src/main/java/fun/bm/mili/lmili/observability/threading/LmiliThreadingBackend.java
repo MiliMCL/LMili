@@ -387,20 +387,20 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
 
         @Override
-        public SubTask.State state() {
+        public StructuredConcurrency.SubTask.State state() {
             try {
                 java.lang.reflect.Method state = delegate.getClass().getMethod("state");
                 Object v = state.invoke(delegate);
                 String name = String.valueOf(v);
                 return switch (name) {
-                    case "SUCCESS" -> SubTask.State.SUCCESS;
-                    case "FAILED" -> SubTask.State.FAILED;
-                    case "CANCELLED" -> SubTask.State.CANCELLED;
-                    case "RUNNING" -> SubTask.State.RUNNING;
-                    default -> SubTask.State.UNAVAILABLE;
+                    case "SUCCESS" -> StructuredConcurrency.SubTask.State.SUCCESS;
+                    case "FAILED" -> StructuredConcurrency.SubTask.State.FAILED;
+                    case "CANCELLED" -> StructuredConcurrency.SubTask.State.CANCELLED;
+                    case "RUNNING" -> StructuredConcurrency.SubTask.State.RUNNING;
+                    default -> StructuredConcurrency.SubTask.State.UNAVAILABLE;
                 };
             } catch (Throwable t) {
-                return SubTask.State.UNAVAILABLE;
+                return StructuredConcurrency.SubTask.State.UNAVAILABLE;
             }
         }
     }
@@ -478,8 +478,8 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
 
         void run() {
-            try { this.value = task.call(); this.state = SubTask.State.SUCCESS; }
-            catch (Throwable t) { this.failure = t; this.state = SubTask.State.FAILED; }
+            try { this.value = task.call(); this.state = StructuredConcurrency.SubTask.State.SUCCESS; }
+            catch (Throwable t) { this.failure = t; this.state = StructuredConcurrency.SubTask.State.FAILED; }
         }
 
         void throwIfFailed() throws Exception {
