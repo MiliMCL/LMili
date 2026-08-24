@@ -1,8 +1,8 @@
-﻿package fun.bm.mili.lmili.observability.threading;
+package fun.bm.mili.lmili.observability.threading;
 
 import com.mojang.logging.LogUtils;
-import fun.bm.mili.lmili.api.identity.PluginId;
 import fun.bm.mili.lmili.api.LMili;
+import fun.bm.mili.lmili.api.identity.PluginId;
 import fun.bm.mili.lmili.api.threading.PluginCancellable;
 import fun.bm.mili.lmili.api.threading.PluginExecutor;
 import fun.bm.mili.lmili.api.threading.PluginRegionScheduler;
@@ -25,39 +25,29 @@ import org.slf4j.Logger;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.WeakHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Threading 鍚庣鐨?server-side 瀹炵幇 鈥斺€?澶嶇敤 {@link VirtualThreadPool} 鍜? * {@link MiliSchedulerHolder}锛屼笉閲嶆柊鍙戞槑绾跨▼姹犮€? *
- * <p>绛栫暐锛? * <ul>
- *   <li>姣忎釜 (pluginId, namePrefix) 缁勫悎 鈫?涓€涓嫭绔嬬殑 {@link VirtualThreadPool}锛? *       缂撳瓨鍦?{@link #executorsByKey}銆?/li>
- *   <li>{@link PluginExecutor} 鍖?{@link VirtualThreadPool}锛屾湭鎹曡幏寮傚父璧? *       {@link PluginThreadSpec#uncaughtExceptionPolicy()}銆?/li>
- *   <li>{@link MiliScheduler} 鐩存帴杩斿洖 {@link MiliSchedulerHolder#get()}锛坧lugin 绔嬁
- *       鍒扮殑鏄?server 鍏变韩瀹炰緥锛宻ubmit/forEntity 閮藉畨鍏級銆?/li>
- *   <li>{@link #shutdown()} 鍏抽棴鎵€鏈夌紦瀛樼殑 pool銆?/li>
- * </ul>
+ * Threading backend server-side impl.
  *
- * <p><b>搂18.1 / 搂18.9</b>锛氬鐢ㄧ幇鏈夌粍浠讹紝鏈柊澧炵嚎绋嬫睜瀹炵幇銆? */
+ * <p>Reuses existing VirtualThreadPool + MiliSchedulerHolder + PluginSchedulerBridge
+ * (§18.1 reuse-first principle).
+ */
 public final class LmiliThreadingBackend implements ThreadingBackend {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    /** (pluginId, namePrefix) 鈫?PluginExecutorImpl */
     private final Map<String, PluginExecutorImpl> executorsByKey = new ConcurrentHashMap<>();
-    /** (pluginId, namePrefix) 鈫?PluginSchedulerImpl */
     private final Map<String, PluginSchedulerImpl> schedulersByKey = new ConcurrentHashMap<>();
 
+    private static final VirtualThreadPool REGION_DELAY_POOL = new VirtualThreadPool("PluginRegionScheduler-Delay");
+
     public LmiliThreadingBackend() {
-        // 鑷寕鍒?Threading
         Threading.installBackend(this);
         LOGGER.info("[Threading] backend installed (reuses VirtualThreadPool + MiliSchedulerHolder)");
     }
@@ -76,11 +66,9 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
 
     @Override
     public @NotNull StructuredConcurrency scope() {
-        // 鐢?JDK 21 StructuredTaskScope.ShutdownOnFailure锛堥涓け璐ユ椂鍙栨秷鍏朵綑锛?        // fallback 鐢ㄦ櫘閫?CountDownLatch 瀹炵幇
         try {
             return new JdkStructuredScope();
         } catch (Throwable t) {
-            LOGGER.debug("[Threading] JDK StructuredTaskScope unavailable, fallback to latched");
             return new LatchedStructuredScope();
         }
     }
@@ -97,24 +85,23 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
 
     @Override
     public @NotNull String version() {
-        return fun.bm.mili.lmili.runtime.MiliRuntimeHolder.get() != null ? "lmili-1.0" : "lmili-noop";
+        return "lmili-1.0";
     }
 
     @Override
-    public @org.jetbrains.annotations.Nullable Object snapshotMetrics() {
-        return fun.bm.mili.lmili.api.LMili.schedulerMetrics();
+    public @Nullable Object snapshotMetrics() {
+        return LMili.schedulerMetrics();
     }
 
     @Override
-    public @org.jetbrains.annotations.Nullable Object longTailEvents() {
-        return fun.bm.mili.lmili.api.LMili.longTailEvents();
+    public @Nullable Object longTailEvents() {
+        return LMili.longTailEvents();
     }
 
     @Override
     public void shutdown() {
         LOGGER.info("[Threading] shutting down (executors={}, schedulers={})",
                 executorsByKey.size(), schedulersByKey.size());
-        try { PluginSchedulerPoolRef.POOL.shutdown(); } catch (Throwable ignored) {}
         for (PluginExecutorImpl e : executorsByKey.values()) {
             try { e.shutdown(); } catch (Throwable ignored) {}
         }
@@ -123,13 +110,11 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
         executorsByKey.clear();
         schedulersByKey.clear();
+        try { REGION_DELAY_POOL.shutdown(); } catch (Throwable ignored) {}
     }
 
-    // ---- factories ----
-
     private PluginExecutorImpl createExecutor(PluginThreadSpec spec) {
-        String poolName = spec.namePrefix();
-        // 澶嶇敤鐜版湁 VirtualThreadPool锛埪?8.1 浼樺厛澶嶇敤锛?        VirtualThreadPool pool = new VirtualThreadPool(poolName);
+        VirtualThreadPool pool = new VirtualThreadPool(spec.namePrefix());
         return new PluginExecutorImpl(spec, pool);
     }
 
@@ -142,8 +127,6 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         Object pid = spec.pluginId();
         return (pid == null ? "global" : String.valueOf(pid)) + "::" + spec.namePrefix();
     }
-
-    // ===== Executor impl =====
 
     private static final class PluginExecutorImpl implements PluginExecutor {
         private final PluginThreadSpec spec;
@@ -173,14 +156,10 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
 
         @Override
-        public void shutdown() {
-            pool.shutdown();
-        }
+        public void shutdown() { pool.shutdown(); }
 
         @Override
-        public boolean isShutdown() {
-            return pool.toString().contains("shutdown");
-        }
+        public boolean isShutdown() { return pool.toString().contains("shutdown"); }
 
         @Override
         public boolean awaitTermination(long timeout, @NotNull TimeUnit unit) throws InterruptedException {
@@ -192,37 +171,24 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
 
         @Override
-        public int activeThreadCount() {
-            return active.get();
-        }
+        public int activeThreadCount() { return active.get(); }
 
         @Override
-        public boolean isVirtual() {
-            return spec.virtualThreads();
-        }
+        public boolean isVirtual() { return spec.virtualThreads(); }
 
         private Runnable wrap(Runnable task) {
             return () -> {
-                try {
-                    task.run();
-                } catch (Throwable t) {
-                    handleUncaught(t);
-                } finally {
-                    active.decrementAndGet();
-                }
+                try { task.run(); }
+                catch (Throwable t) { handleUncaught(t); }
+                finally { active.decrementAndGet(); }
             };
         }
 
         private <T> Callable<T> wrapCallable(Callable<T> task) {
             return () -> {
-                try {
-                    return task.call();
-                } catch (Throwable t) {
-                    handleUncaught(t);
-                    throw t;
-                } finally {
-                    active.decrementAndGet();
-                }
+                try { return task.call(); }
+                catch (Throwable t) { handleUncaught(t); throw t; }
+                finally { active.decrementAndGet(); }
             };
         }
 
@@ -231,12 +197,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
                 case LOG_ONLY -> LOGGER.warn("[Threading/{}] uncaught", spec.namePrefix(), t);
                 case LOG_AND_RECORD -> {
                     LOGGER.error("[Threading/{}] uncaught", spec.namePrefix(), t);
-                    try {
-                        if (MiliSchedulerHolder.get() != null) {
-                            // 绠€鍗曡褰曪細鐢?plugin capture 鍐欎竴娆?recordTaskFailed
-                            fun.bm.mili.lmili.api.LMili.schedulerCapture();
-                        }
-                    } catch (Throwable ignored) {}
+                    try { LMili.schedulerCapture(); } catch (Throwable ignored) {}
                 }
                 case LOG_AND_TERMINATE_PLUGIN_THREADS -> {
                     LOGGER.error("[Threading/{}] uncaught, terminating", spec.namePrefix(), t);
@@ -249,8 +210,6 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
             }
         }
     }
-
-    // ===== Scheduler impl =====
 
     private static final class PluginSchedulerImpl implements PluginScheduler {
         private final PluginThreadSpec spec;
@@ -272,8 +231,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         @Override
         public @NotNull <V> ScheduledFuture<V> schedule(@NotNull Callable<V> task, long delay, @NotNull TimeUnit unit) {
             active.incrementAndGet();
-            ScheduledFuture<V> f = pool.submit(asTask(task));
-            // delay 鐢?wrapper 妯℃嫙
+            ScheduledFuture<V> f = pool.submit(task);
             return new TrackedScheduledFuture<>(f, active);
         }
 
@@ -296,19 +254,13 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
 
         @Override
-        public void shutdown() {
-            pool.shutdown();
-        }
+        public void shutdown() { pool.shutdown(); }
 
         @Override
-        public boolean isVirtual() {
-            return spec.virtualThreads();
-        }
+        public boolean isVirtual() { return spec.virtualThreads(); }
 
         @Override
-        public int activeTaskCount() {
-            return active.get();
-        }
+        public int activeTaskCount() { return active.get(); }
 
         private Runnable wrap(Runnable task) {
             return () -> {
@@ -317,13 +269,8 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
                 finally { active.decrementAndGet(); }
             };
         }
-
-        private static <V> java.util.concurrent.Callable<V> asTask(java.util.concurrent.Callable<V> c) {
-            return c;
-        }
     }
 
-    /** ScheduledFuture 鍖呰锛宑ancel/寮傚父鏃舵洿鏂?active count */
     private static final class TrackedScheduledFuture<T> implements ScheduledFuture<T> {
         private final ScheduledFuture<T> delegate;
         private final AtomicInteger active;
@@ -338,9 +285,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         @Override public int compareTo(java.util.concurrent.Delayed o) { return delegate.compareTo(o); }
         @Override public boolean cancel(boolean a) {
             boolean r = delegate.cancel(a);
-            if (r && decremented.compareAndSet(false, true)) {
-                active.decrementAndGet();
-            }
+            if (r && decremented.compareAndSet(false, true)) active.decrementAndGet();
             return r;
         }
         @Override public boolean isCancelled() { return delegate.isCancelled(); }
@@ -355,15 +300,11 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
     }
 
-    // ===== Structured scope impls =====
-
     private static final class JdkStructuredScope implements StructuredConcurrency {
-        // 鍙嶅皠鍒涘缓 JDK 21 StructuredTaskScope.ShutdownOnFailure锛堥伩鍏嶇‖渚濊禆锛?        private final Object scope;
-        private final java.util.List<SubTask<?>> subtasks = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final Object scope;
 
         JdkStructuredScope() {
             try {
-                Class<?> cls = Class.forName("java.util.concurrent.StructuredTaskScope");
                 Class<?> sofClass = Class.forName("java.util.concurrent.StructuredTaskScope$ShutdownOnFailure");
                 java.lang.reflect.Constructor<?> ctor = sofClass.getDeclaredConstructor();
                 this.scope = ctor.newInstance();
@@ -377,9 +318,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
             try {
                 java.lang.reflect.Method fork = scope.getClass().getMethod("fork", Callable.class);
                 Object subtask = fork.invoke(scope, task);
-                SubTask<T> wrapper = new JdkSubTask<>(subtask);
-                subtasks.add(wrapper);
-                return wrapper;
+                return new JdkSubTask<>(subtask);
             } catch (java.lang.reflect.InvocationTargetException e) {
                 throw new RuntimeException(e.getCause());
             } catch (Throwable t) {
@@ -411,20 +350,17 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
     }
 
     private static final class JdkSubTask<T> implements SubTask<T> {
-        private final Object delegate; // Subtask<T>
+        private final Object delegate;
 
-        JdkSubTask(Object delegate) {
-            this.delegate = delegate;
-        }
+        JdkSubTask(Object delegate) { this.delegate = delegate; }
 
         @Override
         public T get() throws Exception {
             try {
                 java.lang.reflect.Method get = delegate.getClass().getMethod("get");
-                Object v = get.invoke(delegate);
                 @SuppressWarnings("unchecked")
-                T casted = (T) v;
-                return casted;
+                T v = (T) get.invoke(delegate);
+                return v;
             } catch (java.lang.reflect.InvocationTargetException e) {
                 Throwable c = e.getCause();
                 if (c instanceof Exception ex) throw ex;
@@ -436,10 +372,9 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         public T get(long timeout, TimeUnit unit) throws Exception {
             try {
                 java.lang.reflect.Method get = delegate.getClass().getMethod("get", long.class, TimeUnit.class);
-                Object v = get.invoke(delegate, timeout, unit);
                 @SuppressWarnings("unchecked")
-                T casted = (T) v;
-                return casted;
+                T v = (T) get.invoke(delegate, timeout, unit);
+                return v;
             } catch (java.lang.reflect.InvocationTargetException e) {
                 Throwable c = e.getCause();
                 if (c instanceof Exception ex) throw ex;
@@ -452,7 +387,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
             try {
                 java.lang.reflect.Method state = delegate.getClass().getMethod("state");
                 Object v = state.invoke(delegate);
-                String name = v.toString();
+                String name = String.valueOf(v);
                 return switch (name) {
                     case "SUCCESS" -> State.SUCCESS;
                     case "FAILED" -> State.FAILED;
@@ -466,7 +401,6 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
     }
 
-    /** Fallback锛堟棤 JDK 21 StructuredTaskScope锛?*/
     private static final class LatchedStructuredScope implements StructuredConcurrency {
         private final java.util.concurrent.ConcurrentHashMap<SubTask<?>, java.util.concurrent.CountDownLatch> latches = new java.util.concurrent.ConcurrentHashMap<>();
         private volatile boolean cancelled = false;
@@ -474,11 +408,11 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         @Override
         public @NotNull <T> SubTask<T> fork(@NotNull Callable<T> task) {
             java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
-            SubTask<T> handle = new LatchedSubTask<>(task, latch, this);
+            LatchedSubTask<T> handle = new LatchedSubTask<>(task, latch);
             latches.put(handle, latch);
             Thread.ofVirtual().name("lmili-scope-fork").start(() -> {
                 if (cancelled) { latch.countDown(); return; }
-                ((LatchedSubTask<T>) handle).run();
+                handle.run();
                 latch.countDown();
             });
             return handle;
@@ -486,47 +420,34 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
 
         @Override
         public void join() throws Exception {
-            for (java.util.concurrent.CountDownLatch l : latches.values()) {
-                l.await();
-            }
-            // 妫€鏌ュけ璐?            for (SubTask<?> s : latches.keySet()) {
-                if (s.state() == State.FAILED) {
-                    ((LatchedSubTask<?>) s).throwIfFailed();
-                }
+            for (java.util.concurrent.CountDownLatch l : latches.values()) l.await();
+            for (SubTask<?> s : latches.keySet()) {
+                if (s.state() == State.FAILED) ((LatchedSubTask<?>) s).throwIfFailed();
             }
         }
 
         @Override
         public void close() {
             cancelled = true;
-            for (java.util.concurrent.CountDownLatch l : latches.values()) {
-                l.countDown();
-            }
+            for (java.util.concurrent.CountDownLatch l : latches.values()) l.countDown();
         }
     }
 
     private static final class LatchedSubTask<T> implements StructuredConcurrency.SubTask<T> {
         private final Callable<T> task;
         private final java.util.concurrent.CountDownLatch latch;
-        private final LatchedStructuredScope scope;
         private volatile StructuredConcurrency.SubTask.State state = StructuredConcurrency.SubTask.State.RUNNING;
         private T value;
         private Throwable failure;
 
-        LatchedSubTask(Callable<T> task, java.util.concurrent.CountDownLatch latch, LatchedStructuredScope scope) {
+        LatchedSubTask(Callable<T> task, java.util.concurrent.CountDownLatch latch) {
             this.task = task;
             this.latch = latch;
-            this.scope = scope;
         }
 
         void run() {
-            try {
-                this.value = task.call();
-                this.state = StructuredConcurrency.SubTask.State.SUCCESS;
-            } catch (Throwable t) {
-                this.failure = t;
-                this.state = StructuredConcurrency.SubTask.State.FAILED;
-            }
+            try { this.value = task.call(); this.state = State.SUCCESS; }
+            catch (Throwable t) { this.failure = t; this.state = State.FAILED; }
         }
 
         void throwIfFailed() throws Exception {
@@ -534,11 +455,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
             if (failure != null) throw new RuntimeException(failure);
         }
 
-        @Override public T get() throws Exception {
-            latch.await();
-            if (failure != null) throwIfFailed();
-            return value;
-        }
+        @Override public T get() throws Exception { latch.await(); if (failure != null) throwIfFailed(); return value; }
         @Override public T get(long timeout, TimeUnit unit) throws Exception {
             if (!latch.await(timeout, unit)) throw new java.util.concurrent.TimeoutException();
             if (failure != null) throwIfFailed();
@@ -546,41 +463,38 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
         @Override public StructuredConcurrency.SubTask.State state() { return state; }
     }
-}
-
-    // ===== ServerPluginRegionScheduler锛歱lugin-facing 鍖哄煙浠诲姟 =====
 
     private static final class ServerPluginRegionScheduler implements PluginRegionScheduler {
         @Override
         public @NotNull Object submit(@NotNull PluginRegionTask task) {
             MiliScheduler s = MiliSchedulerHolder.get();
             if (s == null) {
-                // 娌″垵濮嬪寲 鈫?鐩存帴璺戯紙fallback锛?                task.runnable().run();
+                task.runnable().run();
                 return new Object();
             }
+            RegionTask internal = adapt(task);
             PluginId owner = currentOwnerOrNull();
             if (owner != null) {
-                return PluginSchedulerBridge.submit(owner, adapt(task));
+                return PluginSchedulerBridge.submit(owner, internal);
             }
-            return s.submit(adapt(task));
+            return s.submit(internal);
         }
 
         @Override
-        public @NotNull Object scheduleDelayed(@NotNull PluginRegionTask task, long delay, java.util.concurrent.TimeUnit unit) {
+        public @NotNull Object scheduleDelayed(@NotNull PluginRegionTask task, long delay, @NotNull TimeUnit unit) {
             MiliScheduler s = MiliSchedulerHolder.get();
             if (s == null) {
                 try { Thread.sleep(unit.toMillis(delay)); task.runnable().run(); } catch (InterruptedException ignored) {}
                 return new Object();
             }
-            PluginId owner = currentOwnerOrNull();
             RegionTask internal = adapt(task);
+            PluginId owner = currentOwnerOrNull();
             if (owner != null) {
                 TaskHandle h = PluginSchedulerBridge.submit(owner, internal);
-                // 寤惰繜锛氶€氳繃 VirtualThreadPool.schedule 绠€鍗曞疄鐜?                getSchedulerPool().schedule(h::cancel, delay, unit);
+                REGION_DELAY_POOL.schedule(h::cancel, delay, unit);
                 return h;
             }
-            TaskHandle h = s.scheduleDelayed(internal, delay, unit);
-            return h;
+            return s.scheduleDelayed(internal, delay, unit);
         }
 
         @Override
@@ -590,8 +504,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
 
         @Override
-        public void shutdown() {
-            // 涓嶅叧闂?MiliSchedulerHolder 鈥斺€?瀹冩槸 server 鍏变韩鐨?        }
+        public void shutdown() {}
 
         private static RegionTask adapt(PluginRegionTask task) {
             return new RegionTask() {
@@ -600,25 +513,13 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
                 @Override public boolean isBlocking() { return task.isBlocking(); }
                 @Override public long timeoutMillis() { return task.timeoutMillis(); }
                 @Override public @NotNull String name() { return task.name(); }
-                @Override public void onCancel() { /* no-op */ }
+                @Override public void onCancel() {}
             };
         }
 
         private static PluginId currentOwnerOrNull() {
-            try {
-                PluginId id = LMili.currentOwner();
-                return id == null ? null : id;
-            } catch (Throwable ignored) {
-                return null;
-            }
+            try { return LMili.currentOwner(); }
+            catch (Throwable ignored) { return null; }
         }
-
-        private static VirtualThreadPool getSchedulerPool() {
-            return PluginSchedulerPoolRef.POOL;
-        }
-    }
-
-    private static final class PluginSchedulerPoolRef {
-        static final VirtualThreadPool POOL = new VirtualThreadPool("PluginRegionScheduler");
     }
 }
