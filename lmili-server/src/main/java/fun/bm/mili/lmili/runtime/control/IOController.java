@@ -43,8 +43,8 @@ public final class IOController {
     /** 自动扩缩开关（Phase 5 §4.6 闭环；默认关闭，经测试/装配开启） */
     private volatile boolean autoScalingEnabled = false;
 
-    // ---- 测试/故障注入缝隙（默认走桥实现；circuit breaker 测试用）----
-    private volatile IntConsumer workerCountApplier = n -> bridge.setWorkerCount(n);
+    // ---- 测试/故障注入缝隙（默认 null → 使用点直接走 bridge；circuit breaker 测试用）----
+    private volatile IntConsumer workerCountApplier = null; // null = 走 bridge.setWorkerCount(n)
     private volatile Consumer<Long> flushPriorityApplier = null; // null = 直接走 bridge
 
     public IOController(OLinearFlusherBridge bridge) {
@@ -72,7 +72,11 @@ public final class IOController {
         final int clamped = Math.max(1, Math.min(maxWorkers, n));
         final IntConsumer applier = workerCountApplier;
         try {
-            applier.accept(clamped);
+            if (applier != null) {
+                applier.accept(clamped);
+            } else {
+                bridge.setWorkerCount(clamped); // 默认路径：直接走桥
+            }
             LOGGER.debug("[IOController] worker count -> {}", clamped);
         } catch (Throwable t) {
             throw new IllegalStateException("IO worker resize failed: " + t.getMessage(), t);
