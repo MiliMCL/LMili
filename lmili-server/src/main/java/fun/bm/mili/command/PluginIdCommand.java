@@ -104,11 +104,20 @@ public final class PluginIdCommand extends RootNode {
      *
      * <p>关键设计：本节点自身绑定 {@code executes}，使 {@code /pluginid <sub> <id>} 在 argument 节点
      * 终止时即可找到执行入口（避免客户端显示"command incomplete"占位符）。
+     *
+     * <p>handler 类型用 {@code ThrowingFunction}（自定义 SAM）以允许 {@code CommandSyntaxException} 透传 —
+     * {@code java.util.function.Function} 的 {@code apply} 不能抛 checked 异常，所以 {@code this::execute}
+     * 不能直接传给 {@code Function}。
      */
-    private static final class PluginIdArgument extends ArgumentNode<String> {
-        private final java.util.function.Function<CommandContext, Boolean> executeHandler;
+    @FunctionalInterface
+    private interface ThrowingFunction<T, R> {
+        R apply(T t) throws CommandSyntaxException;
+    }
 
-        PluginIdArgument(final java.util.function.Function<CommandContext, Boolean> executeHandler) {
+    private static final class PluginIdArgument extends ArgumentNode<String> {
+        private final ThrowingFunction<CommandContext, Boolean> executeHandler;
+
+        PluginIdArgument(final ThrowingFunction<CommandContext, Boolean> executeHandler) {
             super("id", StringArgumentType.word());
             this.executeHandler = executeHandler;
         }
