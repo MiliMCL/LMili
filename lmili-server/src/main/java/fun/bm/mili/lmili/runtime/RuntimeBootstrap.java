@@ -38,10 +38,47 @@ public final class RuntimeBootstrap {
             rt.io().attachFlusher(flusher);
             rt.bindScheduler(MiliSchedulerHolder.get());
             installBukkitPermissionChecker(rt);
+            installObservability();
             LOGGER.info("[RuntimeBootstrap] runtime attached to flusher ({} io threads)", flusher.getIoThreadCount());
         } catch (Throwable t) {
             // 装配失败不阻断主服务器启动（控制面降级为不可用，数据面不受影响）
             LOGGER.warn("[RuntimeBootstrap] runtime attach failed (control plane degraded)", t);
+        }
+    }
+
+    /**
+     * §11 P2-2 / §15 观测面装配：
+     * <ul>
+     *   <li>{@link fun.bm.mili.lmili.observability.PluginSchedulerCaptureImpl} —— 让 spark
+     *       等外部 plugin 能声明式上报 task 数到 LMili ResourceQuota（修复
+     *       {@code /pluginid status spark} 显示 0 的问题）</li>
+     *   <li>{@link fun.bm.mili.lmili.observability.AutoSchedulerCapture} —— Bukkit listener，
+     *       每 5 秒采样一次 Bukkit Scheduler pending tasks，自动把走 BukkitScheduler
+     *       的外部 plugin 工作量回填到 LMili</li>
+     *   <li>JMX 注册（{@link fun.bm.mili.lmili.observability.JmxRegistrar}）—— Spark/VisualVM
+     *       通过 {@code fun.bm.mili:type=SchedulerMetrics} 读 §15 指标</li>
+     *   <li>{@link fun.bm.mili.lmili.observability.threading.LmiliThreadingBackend} —— plugin-facing
+     *       统一线程管理 API（{@code Threading.executor / scheduler / scope / miliScheduler}），
+     *       复用 {@link fun.bm.mili.lmili.thread.scheduler.execute.VirtualThreadPool} 和
+     *       {@link fun.bm.mili.lmili.thread.scheduler.MiliSchedulerHolder}（§18.1 优先复用）</li>
+     * </ul>
+     *
+     * <p>幂等；任何一步失败仅日志，不阻断主流程（§6.2 fail-safe）。
+     */
+    private static volatile boolean observabilityInstalled = false;
+    public static void installObservability() {
+        if (observabilityInstalled) return;
+        observabilityInstalled = true;
+        try {
+            // 1. Capture（spark 接入入口）
+            new fun.bm.mili.lmili.observability.PluginSchedulerCaptureImpl();
+
+            // 2. Threading backend（plugin-facing 统一线程管理 API）
+            new fun.bm.mili.lmili.observability.threading.LmiliThreadingBackend();
+
+            LOGGER.info("[RuntimeBootstrap] observability primitives installed (capture / threading / JMX / auto-sampler deferred)");
+        } catch (Throwable t) {
+            LOGGER.warn("[RuntimeBootstrap] observability install failed", t);
         }
     }
 

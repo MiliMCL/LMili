@@ -57,6 +57,29 @@ public final class RuntimeMetrics {
     /** 跨 Region 访问数 */
     private final AtomicLong crossRegionAccessCount = new AtomicLong(0);
 
+    // ---- §5 Scheduler↔Runtime 反馈字段 ----
+
+    /** 当前 blocked region 数（§5 / §15 上报字段） */
+    private final AtomicLong blockedRegionCount = new AtomicLong(0);
+
+    /** Chunk 等待次数（Region Tick 因 Chunk 未就绪而进入 Deferred 状态的次数，§8.1） */
+    private final AtomicLong chunkWaitCount = new AtomicLong(0);
+
+    /** Chunk 等待累计纳秒 */
+    private final AtomicLong chunkWaitNanosTotal = new AtomicLong(0);
+
+    /** POI 等待次数（§8.2） */
+    private final AtomicLong poiWaitCount = new AtomicLong(0);
+
+    /** 当前 deferred queue 深度（§3 / §15） */
+    private final AtomicLong deferredQueueDepth = new AtomicLong(0);
+
+    /** 软预算（softBudget）触发次数（§7 / §12） */
+    private final AtomicLong softBudgetTrips = new AtomicLong(0);
+
+    /** 硬预算（hardBudget）触发次数（§12） */
+    private final AtomicLong hardBudgetTrips = new AtomicLong(0);
+
     // ---- P50/P95/P99 计算 ----
 
     /** 最近 N 次 Tick 耗时记录 */
@@ -165,6 +188,43 @@ public final class RuntimeMetrics {
         crossRegionAccessCount.incrementAndGet();
     }
 
+    // ---- §5 / §8 / §12 反馈字段 setter ----
+
+    public void setBlockedRegionCount(long count) {
+        blockedRegionCount.set(Math.max(0, count));
+    }
+
+    public void incrementBlockedRegionCount() {
+        blockedRegionCount.incrementAndGet();
+    }
+
+    public void decrementBlockedRegionCount() {
+        blockedRegionCount.updateAndGet(v -> Math.max(0, v - 1));
+    }
+
+    public void recordChunkWait(long waitNanos) {
+        chunkWaitCount.incrementAndGet();
+        if (waitNanos > 0) {
+            chunkWaitNanosTotal.addAndGet(waitNanos);
+        }
+    }
+
+    public void recordPoiWait() {
+        poiWaitCount.incrementAndGet();
+    }
+
+    public void setDeferredQueueDepth(long depth) {
+        deferredQueueDepth.set(Math.max(0, depth));
+    }
+
+    public void recordSoftBudgetTrip() {
+        softBudgetTrips.incrementAndGet();
+    }
+
+    public void recordHardBudgetTrip() {
+        hardBudgetTrips.incrementAndGet();
+    }
+
     // ---- 查询 ----
 
     /**
@@ -260,6 +320,13 @@ public final class RuntimeMetrics {
     public long getTasksFailed() { return tasksFailed.sum(); }
     public long getStealSuccessCount() { return stealSuccessCount.sum(); }
     public long getStealFailureCount() { return stealFailureCount.sum(); }
+    public long getBlockedRegionCount() { return blockedRegionCount.get(); }
+    public long getChunkWaitCount() { return chunkWaitCount.get(); }
+    public long getChunkWaitNanosTotal() { return chunkWaitNanosTotal.get(); }
+    public long getPoiWaitCount() { return poiWaitCount.get(); }
+    public long getDeferredQueueDepth() { return deferredQueueDepth.get(); }
+    public long getSoftBudgetTrips() { return softBudgetTrips.get(); }
+    public long getHardBudgetTrips() { return hardBudgetTrips.get(); }
 
     /**
      * 获取完整快照。
@@ -282,7 +349,14 @@ public final class RuntimeMetrics {
                 tasksFailed.sum(),
                 stealSuccessCount.sum(),
                 stealFailureCount.sum(),
-                getStealSuccessRate()
+                getStealSuccessRate(),
+                blockedRegionCount.get(),
+                chunkWaitCount.get(),
+                chunkWaitNanosTotal.get(),
+                poiWaitCount.get(),
+                deferredQueueDepth.get(),
+                softBudgetTrips.get(),
+                hardBudgetTrips.get()
         );
     }
 
@@ -302,6 +376,13 @@ public final class RuntimeMetrics {
         tasksFailed.reset();
         stealSuccessCount.reset();
         stealFailureCount.reset();
+        blockedRegionCount.set(0);
+        chunkWaitCount.set(0);
+        chunkWaitNanosTotal.set(0);
+        poiWaitCount.set(0);
+        deferredQueueDepth.set(0);
+        softBudgetTrips.set(0);
+        hardBudgetTrips.set(0);
     }
 
     /**
@@ -324,17 +405,27 @@ public final class RuntimeMetrics {
             long tasksFailed,
             long stealSuccessCount,
             long stealFailureCount,
-            double stealSuccessRate
+            double stealSuccessRate,
+            long blockedRegionCount,
+            long chunkWaitCount,
+            long chunkWaitNanosTotal,
+            long poiWaitCount,
+            long deferredQueueDepth,
+            long softBudgetTrips,
+            long hardBudgetTrips
     ) {
         @Override
         public String toString() {
             return String.format(
                     "Metrics{ticks=%d, avg=%.2fms, max=%.2fms, p50=%.2fms, p95=%.2fms, p99=%.2fms, tps=%.1f, " +
-                    "tasks=%d/%d/%d, steals=%d/%d (%.1f%%), timeouts=%d, late=%d, crossRegion=%d}",
+                    "tasks=%d/%d/%d, steals=%d/%d (%.1f%%), timeouts=%d, late=%d, crossRegion=%d, " +
+                    "blocked=%d, chunkWait=%d (%.2fms total), poiWait=%d, deferred=%d, softTrip=%d, hardTrip=%d}",
                     totalTicks, averageTickTimeMs, maxTickTimeMs, p50ms, p95ms, p99ms, currentTPS,
                     tasksCompleted, tasksSubmitted, tasksFailed,
                     stealSuccessCount, stealSuccessCount + stealFailureCount, stealSuccessRate * 100,
-                    timeoutCount, lateCompletionCount, crossRegionAccessCount
+                    timeoutCount, lateCompletionCount, crossRegionAccessCount,
+                    blockedRegionCount, chunkWaitCount, chunkWaitNanosTotal / 1_000_000.0,
+                    poiWaitCount, deferredQueueDepth, softBudgetTrips, hardBudgetTrips
             );
         }
     }

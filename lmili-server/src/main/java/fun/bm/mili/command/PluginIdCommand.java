@@ -12,11 +12,14 @@ import fun.bm.mili.lmili.api.identity.PluginRuntimeContext;
 import fun.bm.mili.lmili.api.identity.PluginStatus;
 import fun.bm.mili.lmili.api.identity.ResourceQuota;
 import fun.bm.mili.lmili.api.identity.conflict.PluginIdentityConflict;
+import fun.bm.mili.lmili.command.identity.PluginIdentityAutoDiscovery;
 import fun.bm.mili.lmili.i18n.I18nManager;
 import fun.bm.mili.lmili.thread.scheduler.PluginSchedulerBridge;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
+import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 import org.leavesmc.leaves.command.ArgumentNode;
 import org.leavesmc.leaves.command.CommandContext;
@@ -133,11 +136,24 @@ public final class PluginIdCommand extends RootNode {
         protected CompletableFuture<Suggestions> getSuggestions(
                 @NotNull final CommandContext context,
                 @NotNull final SuggestionsBuilder builder) {
+            // 1. 已注册 LMili identity
             for (final PluginIdentity identity : LMili.getPluginIdentityManager().getAll()) {
                 final String idValue = identity.id().value();
                 if (idValue.startsWith(builder.getRemainingLowerCase())) {
                     builder.suggest(idValue);
                 }
+            }
+            // 2. 兜底：Bukkit 已加载但 LMili 尚未识别的 plugin（外部 plugin 如 spark）
+            try {
+                final String remaining = builder.getRemainingLowerCase();
+                for (final Plugin p : Bukkit.getPluginManager().getPlugins()) {
+                    final String name = p.getName();
+                    if (name.toLowerCase().startsWith(remaining) && !name.isEmpty()) {
+                        builder.suggest(name);
+                    }
+                }
+            } catch (Throwable ignored) {
+                // Bukkit 不可用时静默跳过
             }
             return builder.buildFuture();
         }
@@ -153,11 +169,37 @@ public final class PluginIdCommand extends RootNode {
         }
 
         /**
-         * Resolve the argument to a PluginId, or null if invalid / not found.
+         * Resolve the argument to a PluginId.
+         *
+         * <p>策略（按顺序）：
+         * <ol>
+         *   <li>{@link PluginId#parseNullable} —— 严格格式（publisher.plugin）</li>
+         *   <li>{@link PluginId#tryNormalize} —— 单段输入（如 {@code spark}）回退为 {@code lmili.spark}</li>
+         *   <li>{@link PluginIdentityAutoDiscovery#resolveOrDiscover} —— 查 Bukkit 已加载
+         *       plugin，若 LMili 尚未注册则自动以 DISCOVERED 状态注册（修复 spark 等
+         *       外部 plugin 看不到的问题）</li>
+         * </ol>
+         *
+         * @return PluginId（保证非 null），但可能不在 identity registry 中
          */
         private static PluginId resolve(@NotNull final CommandContext context) {
             final String raw = context.getArgument(PluginIdArgument.class);
-            return PluginId.parseNullable(raw);
+            if (raw == null || raw.isBlank()) return null;
+
+            // 1. 严格格式
+            PluginId pid = PluginId.parseNullable(raw);
+            if (pid != null) return pid;
+
+            // 2. 单段 → lmili.<single>（修复 spark 这种简写）
+            pid = PluginId.tryNormalize(raw);
+            if (pid != null) return pid;
+
+            // 3. 查 Bukkit / 自动注册（这是 spark 等外部 plugin 走通的路径）
+            try {
+                return PluginIdentityAutoDiscovery.resolveOrDiscover(raw);
+            } catch (Throwable t) {
+                return null;
+            }
         }
     }
 
@@ -480,6 +522,7 @@ public final class PluginIdCommand extends RootNode {
             final PluginIdentityManager mgr = LMili.getPluginIdentityManager();
             final PluginIdentity identity = mgr.find(pid).orElse(null);
             if (identity == null) {
+                // PluginIdentityAutoDiscovery 已经处理了 Bukkit 自动注册；到这里说明 Bukkit 也没找到
                 sender.sendMessage(Component.text(
                         I18nManager.get("pluginid.error.not_registered", pid.value()), NamedTextColor.RED));
                 return true;
@@ -493,6 +536,27 @@ public final class PluginIdCommand extends RootNode {
                     .append(Component.text(identity.name() + " v" + identity.version(), NamedTextColor.WHITE)));
             sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.status") + " ", NamedTextColor.GRAY)
                     .append(Component.text(identity.status().name(), statusColor(identity.status()))));
+            sender.sendMessage(Component.text("  source: ", NamedTextColor.GRAY)
+                    .append(Component.text(identity.source(), NamedTextColor.WHITE)));
+
+            // Bukkit 实际状态（修复 spark 等外部 plugin 的可见性）
+            final Plugin bukkitPlugin = PluginIdentityAutoDiscovery.lookupBukkitPlugin(pid);
+            if (bukkitPlugin != null) {
+                sender.sendMessage(Component.text("  bukkit: ", NamedTextColor.GRAY)
+                        .append(Component.text(bukkitPlugin.getName() + " v" + safeBukkitVersion(bukkitPlugin)
+                                + " [" + (bukkitPlugin.isEnabled() ? "ENABLED" : "DISABLED") + "]",
+                                bukkitPlugin.isEnabled() ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
+                final int pendingTasks = PluginSchedulerBridge.pendingTaskCount(pid);
+                sender.sendMessage(Component.text("  pending lmili tasks: ", NamedTextColor.GRAY)
+                        .append(Component.text(String.valueOf(pendingTasks), NamedTextColor.WHITE)));
+                if (pendingTasks == 0 && PluginSchedulerBridge.hasBukkitSchedulerTasks(bukkitPlugin)) {
+                    sender.sendMessage(Component.text("    (note: plugin submits via BukkitScheduler, not LMili; "
+                            + "counters below only reflect LMili-tracked work)", NamedTextColor.YELLOW));
+                }
+            } else {
+                sender.sendMessage(Component.text("  bukkit: ", NamedTextColor.GRAY)
+                        .append(Component.text("(not loaded in Bukkit)", NamedTextColor.DARK_GRAY)));
+            }
 
             if (ctx != null) {
                 sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.lifecycle") + " ", NamedTextColor.GRAY)
@@ -502,7 +566,19 @@ public final class PluginIdCommand extends RootNode {
                 sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.scheduler_domain") + " ", NamedTextColor.GRAY)
                         .append(Component.text(ctx.schedulerDomain().toString(), NamedTextColor.WHITE)));
 
-                // Observability snapshot
+                // ResourceQuota（真实运行数字 —— 这是 plugin 实际"跑了多少次"的答案）
+                final ResourceQuota quota = ctx.resourceQuota();
+                sender.sendMessage(Component.text("  resource quota: ", NamedTextColor.GRAY));
+                sender.sendMessage(Component.text("    submitted=" + quota.tasksSubmitted()
+                        + " running=" + quota.tasksRunning()
+                        + " queued=" + quota.tasksQueued()
+                        + " completed=" + quota.tasksCompleted()
+                        + " failed=" + quota.tasksFailed()
+                        + " cancelled=" + quota.tasksCancelled()
+                        + " avgExecMs=" + String.format("%.2f", quota.averageExecutionNanos() / 1_000_000.0),
+                        NamedTextColor.DARK_GRAY));
+
+                // Observability snapshot（API 调用计数 —— plugin 调 LMili 调度的次数）
                 final fun.bm.mili.lmili.api.identity.ObservabilityContext obs = ctx.observability();
                 final fun.bm.mili.lmili.api.identity.ObservabilityContext.Snapshot snap = obs.snapshot();
                 sender.sendMessage(Component.text("  " + I18nManager.get("pluginid.status.observability"), NamedTextColor.GRAY));
@@ -516,6 +592,15 @@ public final class PluginIdCommand extends RootNode {
             }
 
             return true;
+        }
+
+        private static String safeBukkitVersion(Plugin p) {
+            try {
+                String v = p.getDescription().getVersion();
+                return v == null || v.isBlank() ? "unknown" : v;
+            } catch (Throwable ignored) {
+                return "unknown";
+            }
         }
     }
 }

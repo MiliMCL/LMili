@@ -62,6 +62,16 @@ public final class MiliOptimizations {
         // （更早的时机，且 worker 线程已就绪）。此处调用仍保留作为兜底路径：init() 是幂等的。
         RegionTickBootstrap.init();
 
+        // §11 P2-2 / §15 观测面：自动捕获 BukkitScheduler 上的外部 plugin 任务（修复
+        // spark 等"看不到调度次数/处理次数"问题）。需 plugin owner；幂等，失败仅日志。
+        try {
+            fun.bm.mili.lmili.observability.AutoSchedulerCapture auto =
+                    new fun.bm.mili.lmili.observability.AutoSchedulerCapture();
+            auto.registerSelf(plugin);
+        } catch (Throwable t) {
+            LOGGER.warning("[Mili] AutoSchedulerCapture register failed: " + t.getMessage());
+        }
+
         // 网络优化
         if (NetworkOptimizerConfig.enabled) {
             NetworkOptimizer.init();

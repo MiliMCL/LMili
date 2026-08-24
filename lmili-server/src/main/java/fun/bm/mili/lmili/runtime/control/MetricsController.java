@@ -306,6 +306,11 @@ public final class MetricsController {
         };
     }
 
+    /** 当前 RuntimeMetrics 实例（可空；§11 /lmili debug metrics 路径用） */
+    public RuntimeMetrics runtimeMetrics() {
+        return runtimeMetrics;
+    }
+
     /** RuntimeMetrics 适配器（面板维度；可空） */
     public MetricSource<RuntimeMetrics.Snapshot> runtimeMetricsSource() {
         return new MetricSource<>() {
