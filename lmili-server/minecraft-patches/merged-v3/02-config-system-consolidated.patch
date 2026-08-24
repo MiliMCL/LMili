@@ -110,7 +110,7 @@ diff --git a/ca/spottedleaf/moonrise/patches/collisions/CollisionUtil.java b/ca/
 +    // Leaves start - Configurable collision behavior
 +    private static boolean shouldSkip(AABB aabb, VoxelShape blockCollision, AABB singleAABB) {
 +        boolean isBlockShape = blockCollision == Shapes.block();
-+        return switch (fun.bm.mili.lmili.config.modules.fixes.CollisionBehaviorConfig.behaviorMode) {
++        return switch (fun.bm.mili.config.modules.fixes.CollisionBehaviorConfig.behaviorMode) {
 +            case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.VANILLA -> !voxelShapeIntersectVanilla(aabb, singleAABB);
 +            case fun.bm.mili.lmili.enums.EnumCollisionBehaviorMode.PAPER -> !voxelShapeIntersect(aabb, singleAABB);
 +            default -> isBlockShape && !voxelShapeIntersectVanilla(aabb, singleAABB) || !isBlockShape && !voxelShapeIntersect(aabb, singleAABB);
@@ -131,7 +131,7 @@ diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/pape
              for (final RunningTick tick : ticks) {
                  final long elapsed = now - tick.lastPrint;
 -                if (elapsed <= TimeUnit.SECONDS.toNanos(5L)) {
-+                if (elapsed <= TimeUnit.MILLISECONDS.toNanos(fun.bm.mili.lmili.config.modules.misc.FoliaWatchdogConfig.tickRegionTimeOutMs)) { // Luminol - Add config for watchdog timeout
++                if (elapsed <= TimeUnit.MILLISECONDS.toNanos(fun.bm.mili.config.modules.misc.FoliaWatchdogConfig.tickRegionTimeOutMs)) { // Luminol - Add config for watchdog timeout
                      continue;
                  }
                  tick.lastPrint = now;
@@ -144,7 +144,7 @@ diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Comma
          //CloneCommands.register(this.dispatcher, context); // Folia - region threading - TODO
          DamageCommand.register(this.dispatcher, context);
 -        //DataCommands.register(this.dispatcher); // Folia - region threading - TODO
-+        if(fun.bm.mili.lmili.config.modules.experiment.CommandConfig.data) { // Luminol - Config for data command
++        if(fun.bm.mili.config.modules.experiment.CommandConfig.data) { // Luminol - Config for data command
 +        DataCommands.register(this.dispatcher); // Folia - region threading - TODO // Luminol - Config for data command
 +        } // Luminol - Config for data command
          //DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO
@@ -155,7 +155,7 @@ diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Comma
          TitleCommand.register(this.dispatcher, context);
          //TriggerCommand.register(this.dispatcher); // Folia - region threading - TODO later
 -        //WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later
-+        if (fun.bm.mili.lmili.config.modules.experiment.CommandConfig.waypointsAndWaypointCommand) WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later // Luminol - Restore waypoints
++        if (fun.bm.mili.config.modules.experiment.CommandConfig.waypointsAndWaypointCommand) WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later // Luminol - Restore waypoints
          WeatherCommand.register(this.dispatcher);
          WorldBorderCommand.register(this.dispatcher);
          if (JvmProfiler.INSTANCE.isAvailable()) {
@@ -169,7 +169,7 @@ diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Conne
              }
 -            if (this.allPacketCounts != null ||
 -                io.papermc.paper.configuration.GlobalConfiguration.get().packetLimiter.overrides.containsKey(packet.getClass())) {
-+            if (!fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && (this.allPacketCounts != null || // Luminol - Add config to force disable the packet limiter of Paper
++            if (!fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && (this.allPacketCounts != null || // Luminol - Add config to force disable the packet limiter of Paper
 +                io.papermc.paper.configuration.GlobalConfiguration.get().packetLimiter.overrides.containsKey(packet.getClass()))) { // Luminol - Add config to force disable the packet limiter of Paper
                  long time = System.nanoTime();
                  synchronized (PACKET_LIMIT_LOCK) {
@@ -183,7 +183,7 @@ diff --git a/net/minecraft/network/chat/SignedMessageChain.java b/net/minecraft/
                  }
  
 -                if (body.timeStamp().isBefore(SignedMessageChain.this.lastTimeStamp)) {
-+                if (fun.bm.mili.lmili.config.modules.misc.InorderChatConfig.enabled && body.timeStamp().isBefore(SignedMessageChain.this.lastTimeStamp)) { // Luminol - Add config for out-of-order chat checks
++                if (fun.bm.mili.config.modules.misc.InorderChatConfig.enabled && body.timeStamp().isBefore(SignedMessageChain.this.lastTimeStamp)) { // Luminol - Add config for out-of-order chat checks
                      this.setChainBroken();
                      throw new SignedMessageChain.DecodeException(SignedMessageChain.DecodeException.OUT_OF_ORDER_CHAT, org.bukkit.event.player.PlayerKickEvent.Cause.OUT_OF_ORDER_CHAT); // Paper - kick event causes
                  }
@@ -196,7 +196,7 @@ diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/Mi
  
      public String getServerModName() {
 -        return io.papermc.paper.ServerBuildInfo.buildInfo().brandName(); // Paper
-+        return fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.fakeVanilla ? "vanilla" : fun.bm.mili.lmili.config.modules.misc.ServerModNameConfig.serverModName; // Paper // Luminol - Add config for this
++        return fun.bm.mili.config.modules.misc.ServerModNameConfig.fakeVanilla ? "vanilla" : fun.bm.mili.config.modules.misc.ServerModNameConfig.serverModName; // Paper // Luminol - Add config for this
      }
  
      public ServerClockManager clockManager() {
@@ -233,7 +233,7 @@ diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft
          String proxyLink = (io.papermc.paper.configuration.GlobalConfiguration.get().proxies.velocity.enabled) ? "https://docs.papermc.io/velocity/security" : "http://www.spigotmc.org/wiki/firewall-guide/";
          // Paper end - Add Velocity IP Forwarding Support
 -        if (!this.usesAuthentication()) {
-+        if (!this.usesAuthentication() && !fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableOfflineModeWarning) { //Luminol - Add config for offline mod warning
++        if (!this.usesAuthentication() && !fun.bm.mili.config.modules.misc.DisableWarningConfig.disableOfflineModeWarning) { //Luminol - Add config for offline mod warning
              LOGGER.warn("**** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!");
              LOGGER.warn("The server will make no attempt to authenticate usernames. Beware.");
              // Spigot start
@@ -273,7 +273,7 @@ diff --git a/net/minecraft/server/level/TicketType.java b/net/minecraft/server/l
      public static final TicketType PLAYER_SIMULATION = register("player_simulation", NO_TIMEOUT, FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
      public static final TicketType FORCED = register("forced", NO_TIMEOUT, FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
 -    public static final TicketType PORTAL = register("portal", 300L, FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
-+    public static final TicketType PORTAL = register("portal", 300L, fun.bm.mili.lmili.config.modules.misc.SavePortalTicketsConfig.doSave ? FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE : FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
++    public static final TicketType PORTAL = register("portal", 300L, fun.bm.mili.config.modules.misc.SavePortalTicketsConfig.doSave ? FLAG_PERSIST | FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE : FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
      public static final TicketType ENDER_PEARL = register("ender_pearl", 40L, FLAG_LOADING | FLAG_SIMULATION | FLAG_KEEP_DIMENSION_ACTIVE);
      public static final TicketType UNKNOWN = register("unknown", 1L, FLAG_CAN_EXPIRE_IF_UNLOADED | FLAG_LOADING);
      public static final TicketType PLUGIN = register("plugin", NO_TIMEOUT, FLAG_LOADING | FLAG_SIMULATION); // CraftBukkit
@@ -286,7 +286,7 @@ diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/ne
          // PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level()); // Paper - AsyncTabCompleteEvent; run this async
          // CraftBukkit start
 -        if (!this.tabSpamThrottler.isIncrementAndUnderThreshold() && !this.server.getPlayerList().isOp(this.player.nameAndId()) && !this.server.isSingleplayerOwner(this.player.nameAndId())) { // Paper - configurable tab spam limits
-+        if (!fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !this.tabSpamThrottler.isIncrementAndUnderThreshold() && !this.server.getPlayerList().isOp(this.player.nameAndId()) && !this.server.isSingleplayerOwner(this.player.nameAndId())) { // Paper - configurable tab spam limits // Leaves - can disable
++        if (!fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !this.tabSpamThrottler.isIncrementAndUnderThreshold() && !this.server.getPlayerList().isOp(this.player.nameAndId()) && !this.server.isSingleplayerOwner(this.player.nameAndId())) { // Paper - configurable tab spam limits // Leaves - can disable
              this.disconnectAsync(Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - Kick event cause // Paper - add proper async disconnect
              return;
          }
@@ -294,7 +294,7 @@ diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/ne
      private long lastLimitedPacket = -1;
  
      private boolean checkLimit(long timestamp) {
-+        if (fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return true; // Leaves - disable
++        if (fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return true; // Leaves - disable
          if (!io.papermc.paper.configuration.GlobalConfiguration.get().spamLimiter.incomingPacketThreshold.enabled()) {
              return true;
          }
@@ -302,7 +302,7 @@ diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/ne
  
      // Spigot start - spam exclusions
      private void detectRateSpam(final TickThrottler throttler, final String message) {
-+        if (fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return; // Leaves - disable
++        if (fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable) return; // Leaves - disable
          if (org.spigotmc.SpigotConfig.enableSpamExclusions) {
              for (String exclude : org.spigotmc.SpigotConfig.spamExclusions) {
                  if (exclude != null && message.startsWith(exclude)) {
@@ -311,7 +311,7 @@ diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/ne
      public void handlePlaceRecipe(final ServerboundPlaceRecipePacket packet) {
          // Paper start - auto recipe limit
 -        if (!org.bukkit.Bukkit.isPrimaryThread()) {
-+        if (!fun.bm.mili.lmili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !org.bukkit.Bukkit.isPrimaryThread()) { // Leaves - can disable
++        if (!fun.bm.mili.config.modules.misc.PaperPacketLimiterConfig.forceDisable && !org.bukkit.Bukkit.isPrimaryThread()) { // Leaves - can disable
              if (!this.recipeSpamPackets.isIncrementAndUnderThreshold()) {
                  this.disconnectAsync(net.minecraft.network.chat.Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - kick event cause // Paper - add proper async disconnect
                  return;
@@ -324,7 +324,7 @@ diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/n
          Validate.validState(this.state == ServerLoginPacketListenerImpl.State.HELLO, "Unexpected hello packet");
          // Paper start - Validate usernames
 -        if (io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
-+        if (fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled // Luminol - Add config for username check
++        if (fun.bm.mili.config.modules.misc.UsernameCheckConfig.enabled // Luminol - Add config for username check
 +            && io.papermc.paper.configuration.GlobalConfiguration.get().proxies.isProxyOnlineMode()
              && io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.performUsernameValidation
              && !this.iKnowThisMayNotBeTheBestIdeaButPleaseDisableUsernameValidation) {
@@ -353,7 +353,7 @@ diff --git a/net/minecraft/util/StringUtil.java b/net/minecraft/util/StringUtil.
 -    public static boolean isValidPlayerName(final String name) {
 +    // Luminol start - Add config for username checks
 +    public static boolean isValidPlayerName(final String username){
-+        return isValidPlayerName(username, !fun.bm.mili.lmili.config.modules.misc.UsernameCheckConfig.enabled);
++        return isValidPlayerName(username, !fun.bm.mili.config.modules.misc.UsernameCheckConfig.enabled);
 +    }
 +    // Luminol end
 +
@@ -371,7 +371,7 @@ diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity
      public double zOld;
      public boolean noPhysics;
 -    protected final RandomSource random = SHARED_RANDOM; // Paper - Share random for entities to make them more random
-+    protected final RandomSource random = fun.bm.mili.lmili.config.modules.fixes.VanillaRandomSourceConfig.useLegacyRandomSourceForPlayers ? RandomSource.create() : SHARED_RANDOM; // Paper - Share random for entities to make them more random // Luminol - Add config for vanilla random SHARED_RANDOM
++    protected final RandomSource random = fun.bm.mili.config.modules.fixes.VanillaRandomSourceConfig.useLegacyRandomSourceForPlayers ? RandomSource.create() : SHARED_RANDOM; // Paper - Share random for entities to make them more random // Luminol - Add config for vanilla random SHARED_RANDOM
      public int tickCount;
      private int remainingFireTicks;
      private final EntityFluidInteraction fluidInteraction = new EntityFluidInteraction(Set.of(FluidTags.WATER, FluidTags.LAVA));
@@ -403,7 +403,7 @@ diff --git a/net/minecraft/world/entity/ai/Brain.java b/net/minecraft/world/enti
 +                final net.minecraft.world.level.Level ownerLevel = owner.level();
 +
 +                // type: entity
-+                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForEntity && value instanceof LivingEntity entity) {
++                if (fun.bm.mili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForEntity && value instanceof LivingEntity entity) {
 +                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
 +                        this.eraseMemory(entry.getKey());
 +                        continue;
@@ -411,7 +411,7 @@ diff --git a/net/minecraft/world/entity/ai/Brain.java b/net/minecraft/world/enti
 +                }
 +
 +                // type: block_pos
-+                if (fun.bm.mili.lmili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForBlockPos && value instanceof net.minecraft.core.BlockPos blockPos) {
++                if (fun.bm.mili.config.modules.fixes.ForceCleanupEntityBrainMemoryConfig.enabledForBlockPos && value instanceof net.minecraft.core.BlockPos blockPos) {
 +                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(ownerLevel, blockPos)) {
 +                        this.eraseMemory(entry.getKey());
 +                        continue;
@@ -433,7 +433,7 @@ diff --git a/net/minecraft/world/entity/item/FallingBlockEntity.java b/net/minec
      public float fallDamagePerDistance = 0.0F;
      public @Nullable CompoundTag blockData;
 -    public boolean forceTickAfterTeleportToDuplicate;
-+    public boolean forceTickAfterTeleportToDuplicate = fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled; // Luminol - Unsafe teleportation
++    public boolean forceTickAfterTeleportToDuplicate = fun.bm.mili.config.modules.fixes.UnsafeTeleportationConfig.enabled; // Luminol - Unsafe teleportation
      protected static final EntityDataAccessor<BlockPos> DATA_START_POS = SynchedEntityData.defineId(FallingBlockEntity.class, EntityDataSerializers.BLOCK_POS);
      public boolean autoExpire = true; // Paper - Expand FallingBlock API
  
@@ -442,7 +442,7 @@ diff --git a/net/minecraft/world/entity/item/FallingBlockEntity.java b/net/minec
          boolean fromOrToEnd = (oldDimension == Level.END || newDimension == Level.END) && oldDimension != newDimension;
          Entity newEntity = super.teleport(transition);
 -        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation; // Paper
-+        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation || fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled); // Paper // Luminol - Unsafe teleportation
++        this.forceTickAfterTeleportToDuplicate = newEntity != null && fromOrToEnd && (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation || fun.bm.mili.config.modules.fixes.UnsafeTeleportationConfig.enabled); // Paper // Luminol - Unsafe teleportation
          return newEntity;
      }
  }
@@ -455,7 +455,7 @@ diff --git a/net/minecraft/world/entity/player/ProfilePublicKey.java b/net/minec
  
      public static ProfilePublicKey createValidated(final SignatureValidator validator, final UUID profileId, final ProfilePublicKey.Data data) throws ProfilePublicKey.ValidationException {
 -        if (!data.validateSignature(validator, profileId)) {
-+        if (!data.validateSignature(validator, profileId) && (org.bukkit.Bukkit.getServer().getOnlineMode() && fun.bm.mili.lmili.config.modules.misc.PublickeyVerifyConfig.enabled)) { // Luminol - Verify signature only in online-mode
++        if (!data.validateSignature(validator, profileId) && (org.bukkit.Bukkit.getServer().getOnlineMode() && fun.bm.mili.config.modules.misc.PublickeyVerifyConfig.enabled)) { // Luminol - Verify signature only in online-mode
              throw new ProfilePublicKey.ValidationException(INVALID_SIGNATURE, org.bukkit.event.player.PlayerKickEvent.Cause.INVALID_PUBLIC_KEY_SIGNATURE); // Paper - kick event causes
          } else {
              return new ProfilePublicKey(data);
@@ -468,7 +468,7 @@ diff --git a/net/minecraft/world/level/BaseCommandBlock.java b/net/minecraft/wor
  
      public boolean performCommand(final ServerLevel level) {
 -        if (true) return false; // Folia - region threading
-+        if (!fun.bm.mili.lmili.config.modules.experiment.CommandConfig.commandBlock) return false; // Folia - region threading // Luminol - Add experimental config for command block command execution
++        if (!fun.bm.mili.config.modules.experiment.CommandConfig.commandBlock) return false; // Folia - region threading // Luminol - Add experimental config for command block command execution
          if (level.getGameTime() == this.lastExecution) {
              return false;
          }
@@ -480,7 +480,7 @@ diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Le
          try {
              tick.accept(entity);
          } catch (Throwable t) {
-+            if (fun.bm.mili.lmili.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Luminol
++            if (fun.bm.mili.config.modules.experiment.DisableEntityCatchConfig.enabled) throw t; // Luminol
              // Paper start - Prevent block entity and entity crashes
              final String msg = String.format("Entity threw exception at %s:%s,%s,%s", io.papermc.paper.util.MCUtil.getLevelName(entity.level()), entity.getX(), entity.getY(), entity.getZ());
              MinecraftServer.LOGGER.error(msg, t);
@@ -493,7 +493,7 @@ diff --git a/net/minecraft/world/level/block/EndPortalBlock.java b/net/minecraft
                  player.showEndCredits();
              } else {
 +                // Luminol start - unsafe teleportation
-+                if (fun.bm.mili.lmili.config.modules.fixes.UnsafeTeleportationConfig.enabled && !(entity instanceof net.minecraft.world.entity.player.Player)) {
++                if (fun.bm.mili.config.modules.fixes.UnsafeTeleportationConfig.enabled && !(entity instanceof net.minecraft.world.entity.player.Player)) {
 +                    entity.endPortalLogicAsync(pos);
 +                }
 +                // Luminol end
@@ -512,7 +512,7 @@ diff --git a/net/minecraft/world/level/block/TripWireHookBlock.java b/net/minecr
 -                        if (testPosState.is(Blocks.TRIPWIRE) || testPosState.is(Blocks.TRIPWIRE_HOOK)) {
 -                            if (!io.papermc.paper.configuration.GlobalConfiguration.get().blockUpdates.disableTripwireUpdates || !testPosState.is(Blocks.TRIPWIRE)) level.setBlock(testPos, wireData.trySetValue(ATTACHED, attached), Block.UPDATE_ALL); // Paper - prevent tripwire from updating
 +                        // Luminol start - tripwire and tripwireHook dupe
-+                        if (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
++                        if (fun.bm.mili.config.modules.function.TripwireBehaviorConfig.enabled) {
 +                            level.setBlock(testPos, wireData.trySetValue(ATTACHED, attached), 3);
 +                            level.getBlockState(testPos);
 +                        } else {
@@ -619,7 +619,7 @@ diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/ne
      }
 +    // Luminol start - Configurable region file format
 +    public static abomination.IRegionFile createNew(RegionStorageInfo info, Path filePath, Path folder, boolean sync) throws IOException{
-+        final fun.bm.mili.lmili.enums.EnumRegionFormat regionFormat = fun.bm.mili.lmili.config.modules.function.RegionFormatConfig.regionFormat;
++        final fun.bm.mili.lmili.enums.EnumRegionFormat regionFormat = fun.bm.mili.config.modules.function.RegionFormatConfig.regionFormat;
 +        final String fullFileName = filePath.getFileName().toString();
 +        final String[] fullNameSplit = fullFileName.split("\\.");
 +        final String extensionName = fullNameSplit[fullNameSplit.length - 1];
@@ -632,7 +632,7 @@ diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/ne
 +    }
 +
 +    public static String getExtensionName() {
-+        return "." + fun.bm.mili.lmili.config.modules.function.RegionFormatConfig.regionFormat.getArgument();
++        return "." + fun.bm.mili.config.modules.function.RegionFormatConfig.regionFormat.getArgument();
 +    }
 +    // Luminol end
  
@@ -801,7 +801,7 @@ diff --git a/net/minecraft/world/level/levelgen/Heightmap.java b/net/minecraft/w
              System.arraycopy(data, 0, rawData, 0, data.length);
          } else {
 -            LOGGER.warn("Ignoring heightmap data for chunk {}, size does not match; expected: {}, got: {}", chunk.getPos(), rawData.length, data.length);
-+            if (!fun.bm.mili.lmili.config.modules.misc.DisableWarningConfig.disableHeightmapWarning)
++            if (!fun.bm.mili.config.modules.misc.DisableWarningConfig.disableHeightmapWarning)
 +                LOGGER.warn("Ignoring heightmap data for chunk {}, size does not match; expected: {}, got: {}", chunk.getPos(), rawData.length, data.length);
              primeHeightmaps(chunk, EnumSet.of(type));
          }
@@ -817,7 +817,7 @@ diff --git a/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java 
 +        // Luminol start - tripwire behavior modifier
 +        java.util.List<BlockPos> blockList1 = new java.util.ArrayList<>();
 +        java.util.List<BlockPos> blockList2 = new java.util.ArrayList<>();
-+        boolean flag21 = fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.behaviorMode == fun.bm.mili.lmili.enums.EnumTripwireBehavior.VANILLA21;
++        boolean flag21 = fun.bm.mili.config.modules.function.TripwireBehaviorConfig.behaviorMode == fun.bm.mili.lmili.enums.EnumTripwireBehavior.VANILLA21;
          for (int dz = -2; dz <= 2; dz++) {
              for (int dx = -2; dx <= 2; dx++) {
                  for (int dy = -1; dy < 3; dy++) {
@@ -827,8 +827,8 @@ diff --git a/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java 
                          if (dropResources) {
 -                            blockList.destroyBlock(blockPos, true, null); // CraftBukkit
 +                            boolean flag = false;
-+                            if (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
-+                                switch (fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.behaviorMode) {
++                            if (fun.bm.mili.config.modules.function.TripwireBehaviorConfig.enabled) {
++                                switch (fun.bm.mili.config.modules.function.TripwireBehaviorConfig.behaviorMode) {
 +                                    case fun.bm.mili.lmili.enums.EnumTripwireBehavior.VANILLA20: {
 +                                        flag = true;
 +                                    }
@@ -858,7 +858,7 @@ diff --git a/net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java 
  
 -        if (dropResources) {
 -            blockList.placeBlocks(state -> newLevel.destroyBlock(state.getPosition(), true, null));
-+        if (flag21 || !fun.bm.mili.lmili.config.modules.function.TripwireBehaviorConfig.enabled) {
++        if (flag21 || !fun.bm.mili.config.modules.function.TripwireBehaviorConfig.enabled) {
 +            if (dropResources) {
 +                blockList.placeBlocks(state -> newLevel.destroyBlock(state.getPosition(), true, null));
 +            } else {
