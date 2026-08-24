@@ -6,6 +6,7 @@ import fun.bm.mili.lmili.config.IllegalFormatConversionExceptionWithOrigin;
 import fun.bm.mili.lmili.config.flags.*;
 import fun.bm.mili.lmili.enums.EnumConfigCategory;
 import fun.bm.mili.lmili.enums.EnumRegionFormat;
+import fun.bm.mili.lmili.runtime.RuntimeBootstrap;
 import fun.bm.mili.lmili.utils.OptimizedLinearRegionFileFlusher;
 import net.minecraft.server.MinecraftServer;
 import org.jetbrains.annotations.Nullable;
@@ -56,7 +57,14 @@ public class RegionFormatConfig implements IConfigModule {
         }
 
         if (regionFormat == EnumRegionFormat.O_LINEAR) {
-            olinearFlusher = new OptimizedLinearRegionFileFlusher(olinearIoThreadCount, 20, olinearIoFlushDelayMs, olinearMaxSyncAgeMs);
+            // Mili start - AdaptiveRuntime §5.6 (D-08)：flusher 以观察者钩子方式接入反馈环。
+            // createFlusherObserver() 返回延迟转发观察者（runtime 未就绪时 no-op/fail-open）；
+            // onFlusherCreated() 在 flusher 创建后晚绑定到 runtime（幂等；失败不阻断启动）。
+            olinearFlusher = new OptimizedLinearRegionFileFlusher(
+                    olinearIoThreadCount, 20, olinearIoFlushDelayMs, olinearMaxSyncAgeMs,
+                    RuntimeBootstrap.createFlusherObserver());
+            RuntimeBootstrap.onFlusherCreated(olinearFlusher);
+            // Mili end
 
             checkCompressionLevel();
 

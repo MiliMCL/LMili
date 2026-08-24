@@ -104,4 +104,15 @@ public class AdaptiveTPSManager {
             t.interrupt();
         }
     }
+
+    /**
+     * 停用（AdaptiveRuntime §5.7 规则 10 / D-14）：检测到旧 AdaptiveTPSManager 时由
+     * {@code MiliRuntime.start()} 调用，避免新旧两条自适应路径同时改 tick 节奏。
+     *
+     * <p>不改动任何既有逻辑 —— 与 {@link #shutdown()} 语义完全一致（置 running=false +
+     * 中断线程），仅提供语义化的幂等入口，可与 shutdown() 重复调用。
+     */
+    public static void disable() {
+        shutdown();
+    }
 }

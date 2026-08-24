@@ -54,6 +54,49 @@ public final class MiliTickRegionScheduler {
     public static final int TICK_RATE = 20;
     public static long TIME_BETWEEN_TICKS = 1_000_000_000L / TICK_RATE; // ns
 
+    // Mili start - AdaptiveRuntime §5.3 (D-14)：TPS 治理目标（只读字段，禁止写 TIME_BETWEEN_TICKS）。
+    // TickController.applyTpsTarget() 只写本字段；本类的 tick 循环内部自行安全读取（volatile）。
+    // 默认 20.0 → 1000/20 = 50ms，与 TIME_BETWEEN_TICKS_MS 完全一致（未治理时零行为变化）。
+    public static volatile double tpsTarget = 20.0;
+    // Mili end
+
+    /**
+     * 预算闸门（D-10 / §5.3）：TickTask 包装层在 scheduler.submit(...) 前调用
+     * {@link #tryAcquire(long, int)}；null = 闸门关闭（默认 off，零行为变化）。
+     *
+     * <p>返回的 {@link AutoCloseable} 是预算租约（{@code BudgetLease}），任务执行完必须 close()。
+     * {@code tickTaskTypeOrdinal} 为 {@code TickTaskType} 的 ordinal —— 本类不 import 运行期
+     * 类型，由装配方（RuntimeBootstrap/MiliRuntime）做 ordinal → 类型映射。
+     */
+    @FunctionalInterface
+    public interface RegionTickBudgetGate {
+        /**
+         * 提交前预算申请（非阻塞；预算不足返回 null，调用方必须退避/aging，§6.3 R1）。
+         *
+         * @return 预算租约（任务执行后 close），或 null（预算不足）
+         */
+        AutoCloseable tryAcquire(long regionId, int tickTaskTypeOrdinal);
+    }
+
+    private static volatile RegionTickBudgetGate BUDGET_GATE;
+
+    /** 装配预算闸门（仅 MiliRuntime/RuntimeBootstrap 装配期调用；null = 关闭闸门） */
+    public static void setBudgetGate(@org.jetbrains.annotations.Nullable RegionTickBudgetGate gate) {
+        BUDGET_GATE = gate;
+    }
+
+    /** 当前预算闸门（null = 关闭） */
+    @org.jetbrains.annotations.Nullable
+    public static RegionTickBudgetGate budgetGate() {
+        return BUDGET_GATE;
+    }
+
+    // ---- 预算不足退避（非阻塞；5ms → 50ms，§5.3）----
+    private static final long BUDGET_RETRY_INITIAL_MS = 5L;
+    private static final long BUDGET_RETRY_MAX_MS = 50L;
+    /** 连续预算被拒 3 次 → aging 放行（防饥饿，§6.3 R1） */
+    private static final int BUDGET_AGING_THRESHOLD = 3;
+
     // Folia watchdog - 复用 Folia 的 watchdog
     public static final FoliaWatchdogThread WATCHDOG_THREAD = new FoliaWatchdogThread();
     static {
@@ -131,9 +174,34 @@ public final class MiliTickRegionScheduler {
             return; // 已在 QUEUED/RUNNING 状态
         }
 
+        // Mili start - AdaptiveRuntime §5.3 (D-10)：预算闸门（提交前检查；默认 off）。
+        // 预算不足 → 非阻塞退避（5ms→50ms）重试；连续被拒 3 次 aging 放行（防饥饿）。
+        final RegionTickBudgetGate gate = BUDGET_GATE;
+        AutoCloseable lease = null;
+        if (gate != null) {
+            try {
+                lease = gate.tryAcquire(task.regionId(), 0); // ordinal 0 = ENTITY（region tick 视为 entity 面）
+            } catch (Throwable t) {
+                // 闸门异常 fail-open（§6.3 R1：闸门误拒导致 region 饥饿 → 放行）
+                LOGGER.warn("[MiliTickRegionScheduler] budget gate failed (fail-open)", t);
+                lease = null;
+            }
+            if (lease == null) {
+                if (task.budgetRejected()) {
+                    // aging：连续被拒 3 次 → 放行（优先级上调一档的等价实现：本 tick 不再拦）
+                    task.resetBudgetRejections();
+                } else {
+                    task.state.forceCancel(); // 归还 IDLE，供延迟重试重新 CAS
+                    task.resubmitBudgetRetry();
+                    return;
+                }
+            }
+        }
+        // Mili end
+
         try {
             // R4-修复: getAndSet 原子交换 —— 旧 handle（若有）不会被新 handle 覆盖丢失
-            task.taskHandle.set(scheduler.submit(task.toRegionTask()));
+            task.taskHandle.set(scheduler.submit(task.toRegionTask(lease)));
             // Note: this is a system-level tick task — it does NOT go through
             // PluginSchedulerBridge because it is a region-tick (Folia-level)
             // task, not a plugin task. The owner is implicitly lmili.system.
@@ -142,8 +210,20 @@ public final class MiliTickRegionScheduler {
         } catch (Exception e) {
             // 提交失败，状态仍是 QUEUED（不是 RUNNING），tryMarkIdle() 无法工作，使用 forceCancel() 清理
             task.state.forceCancel();
+            closeQuietly(lease);
             LOGGER.warn("[MiliTickRegionScheduler] Failed to submit tick task for region #{}",
                     handle.region != null ? handle.region.id : -1, e);
+        }
+    }
+
+    /** 预算租约归还（幂等；失败静默） */
+    private static void closeQuietly(final AutoCloseable lease) {
+        if (lease != null) {
+            try {
+                lease.close();
+            } catch (Throwable ignored) {
+                // 归还失败仅记录（预算泄漏由 BudgetLease 幂等 close 兜底）
+            }
         }
     }
 
@@ -299,6 +379,10 @@ public final class MiliTickRegionScheduler {
         private volatile long currentBackoffMs = RETRY_BACKOFF_INITIAL_MS;
         // R3-FIX: 连续 region-not-acquirable 重试计数（成功 tick 后重置）
         private volatile int consecutiveRetries = 0;
+        // Mili start - AdaptiveRuntime §5.3：预算被拒计数（连续 3 次 → aging 放行）+ 预算退避
+        private volatile int consecutiveBudgetRejections = 0;
+        private volatile long currentBudgetBackoffMs = BUDGET_RETRY_INITIAL_MS;
+        // Mili end
 
         TickTask(final TickRegionScheduler.RegionScheduleHandle handle) {
             this.handle = handle;
@@ -308,7 +392,74 @@ public final class MiliTickRegionScheduler {
             return handle.region != null ? handle.region.id : GLOBAL_TICK_REGION_ID;
         }
 
+        // Mili start - AdaptiveRuntime §5.3：预算被拒计数与退避
+
+        /** 预算被拒：返回 true 表示已达 aging 阈值（本提交放行） */
+        boolean budgetRejected() {
+            return ++consecutiveBudgetRejections >= BUDGET_AGING_THRESHOLD;
+        }
+
+        void resetBudgetRejections() {
+            consecutiveBudgetRejections = 0;
+        }
+
+        /**
+         * 预算不足的非阻塞重试（5ms → 50ms 退避；§5.3 / §6.3 R1）。
+         *
+         * <p>延迟后<strong>重新走 {@link #scheduleRegion(handle)}</strong>（而非直接
+         * executeTask）：这样每次重试都重新过预算闸门，连续被拒计数才能累积到
+         * {@link #BUDGET_AGING_THRESHOLD} 触发 aging 放行 —— 若直接执行 tick，
+         * aging 计数永远停留在 1，防饥饿语义失效。
+         */
+        void resubmitBudgetRetry() {
+            final long backoff = currentBudgetBackoffMs;
+            currentBudgetBackoffMs = Math.min(currentBudgetBackoffMs * 2, BUDGET_RETRY_MAX_MS);
+            if (halted.get() || handle.isMarkedAsNonSchedulable()) {
+                return;
+            }
+            final long rid = regionId();
+            final RegionTask reentry = new RegionTask() {
+                @Override
+                public void execute() {
+                    if (!halted.get() && !handle.isMarkedAsNonSchedulable()) {
+                        MiliTickRegionScheduler.this.scheduleRegion(handle);
+                    }
+                }
+
+                @Override
+                public long regionId() {
+                    return rid;
+                }
+
+                @Override
+                public @org.jetbrains.annotations.NotNull String name() {
+                    return "BudgetRetry#" + rid;
+                }
+
+                @Override
+                public void onCancel() {
+                    // 预算重试被取消：不归还任何状态（scheduleRegion 自身 CAS 幂等）
+                }
+            };
+            try {
+                final TaskHandle newHandle = scheduler.scheduleDelayed(reentry,
+                        Math.max(1, backoff), TimeUnit.MILLISECONDS);
+                final TaskHandle previous = taskHandle.getAndSet(newHandle);
+                if (previous != null) {
+                    previous.cancel();
+                }
+            } catch (Exception e) {
+                // 调度失败：预算重试不可能无限堆积 —— 下一轮 scheduleRegion 自然会再走闸门
+                LOGGER.warn("[MiliTickRegionScheduler] budget retry scheduling failed for region #{}", rid, e);
+            }
+        }
+        // Mili end
+
         RegionTask toRegionTask() {
+            return toRegionTask(null);
+        }
+
+        RegionTask toRegionTask(final AutoCloseable lease) {
             final long rid = regionId();
             final Runnable r = this::executeTask;
             // RISK-FOLLOWUP：onCancel 把 task.state 从 QUEUED 还原为 IDLE，
@@ -319,7 +470,19 @@ public final class MiliTickRegionScheduler {
             return new RegionTask() {
                 @Override
                 public void execute() throws Exception {
-                    r.run();
+                    try {
+                        r.run();
+                    } finally {
+                        // Mili start - AdaptiveRuntime §5.3：预算租约 RAII 归还（幂等）
+                        if (lease != null) {
+                            try {
+                                lease.close();
+                            } catch (Throwable ignored) {
+                                // BudgetLease.close 幂等；异常不应影响 tick 完成路径
+                            }
+                        }
+                        // Mili end
+                    }
                 }
 
                 @Override
@@ -340,6 +503,15 @@ public final class MiliTickRegionScheduler {
                     // 允许 MiliTickRegionScheduler.scheduleRegion() 重新 CAS 成功。
                     // 不影响正常路径（state 是 RUNNING 时 tryMarkIdle 已经处理过）。
                     localState.resetQueuedToIdle();
+                    // Mili start - AdaptiveRuntime §5.3：取消时归还预算租约
+                    if (lease != null) {
+                        try {
+                            lease.close();
+                        } catch (Throwable ignored) {
+                            // 幂等 close；忽略
+                        }
+                    }
+                    // Mili end
                 }
             };
         }
@@ -409,7 +581,7 @@ public final class MiliTickRegionScheduler {
                         currentBackoffMs = RETRY_BACKOFF_INITIAL_MS;
                         // 仍然重新调度下一次 tick（region 释放后即可恢复）
                         if (!handle.isMarkedAsNonSchedulable() && !halted.get()) {
-                            resubmitDelayed(TIME_BETWEEN_TICKS_MS);
+                            resubmitDelayed(Math.max(1L, (long) (1000.0 / tpsTarget)));
                         }
                         return;
                     }
@@ -427,20 +599,26 @@ public final class MiliTickRegionScheduler {
                 // 成功执行了一次 tick —— 重置重试计数与退避延迟
                 consecutiveRetries = 0;
                 currentBackoffMs = RETRY_BACKOFF_INITIAL_MS;
+                // Mili start - AdaptiveRuntime §5.3：成功 tick 后重置预算被拒计数与退避（aging 窗口结束）
+                resetBudgetRejections();
+                currentBudgetBackoffMs = BUDGET_RETRY_INITIAL_MS;
+                // Mili end
                 state.tryMarkIdle();
 
                 // 如果需要继续调度，延迟提交到统壹队列
                 if (reschedule && !handle.isMarkedAsNonSchedulable() && !halted.get()) {
                     if (handle.region != null) {
-                        // TPS 修复：基于实际 tick 计算执行时间自适应延迟
-                        // 如果 tick 执行时间 < 50ms，等待剩余时间；如果超时，立即执行
-                        long delay = TIME_BETWEEN_TICKS_MS - tickElapsedMillis;
+                        // TPS 修复：基于实际 tick 计算执行时间自适应延迟。
+                        // Mili start - AdaptiveRuntime §5.3 (D-14)：目标间隔来自 tpsTarget（默认 20 → 50ms），
+                        // 只读 TIME_BETWEEN_TICKS 静态字段的替代方案 —— 禁止写 TIME_BETWEEN_TICKS。
+                        final long tickIntervalMs = Math.max(1L, (long) (1000.0 / tpsTarget));
+                        long delay = tickIntervalMs - tickElapsedMillis;
                         if (delay < 0) delay = 0;
                         handle.nextAllowedTickTimeMillis = System.currentTimeMillis() + delay;
                         resubmitDelayed(delay);
                     } else {
-                        // global region 仍使用固定延迟
-                        resubmitDelayed(TIME_BETWEEN_TICKS_MS);
+                        // global region 仍使用固定延迟（tpsTarget 一致口径）
+                        resubmitDelayed(Math.max(1L, (long) (1000.0 / tpsTarget)));
                     }
                 }
             } catch (Throwable thr) {
