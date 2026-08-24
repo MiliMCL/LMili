@@ -70,18 +70,21 @@ public final class I18nManager {
     private I18nManager() {}
 
     /**
-     * 初始化 i18n 系统。
+     * 初始化 i18n 系统（幂等；可重复调用以切换 locale）。
      *
      * @param locale 语言代码（如 "zh_cn"、"en_us"）
      */
     public static void init(String locale) {
-        currentLocale = locale.toLowerCase(Locale.ROOT);
-        loadTranslations(currentLocale);
+        if (locale == null || locale.isEmpty()) return;
+        String normalized = locale.toLowerCase(Locale.ROOT);
+        // 即使该 locale 已加载过，也允许切换 currentLocale（hot reload 用）
+        loadTranslations(normalized);
+        currentLocale = normalized;
         // 始终加载默认语言作为回退
-        if (!DEFAULT_LOCALE.equals(currentLocale)) {
+        if (!DEFAULT_LOCALE.equals(normalized)) {
             loadTranslations(DEFAULT_LOCALE);
         }
-        LOGGER.info("[I18n] Initialized with locale: {}", currentLocale);
+        LOGGER.info("[I18n] Initialized with locale: {}", normalized);
     }
 
     /**

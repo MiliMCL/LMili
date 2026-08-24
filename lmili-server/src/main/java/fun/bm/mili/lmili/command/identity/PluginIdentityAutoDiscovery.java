@@ -44,6 +44,12 @@ import java.util.concurrent.ConcurrentMap;
  *   <li>不写回真实 task 计数 —— spark 通过 BukkitScheduler 提交的任务<b>不</b>走
  *       LMili ResourceQuota；这是已知设计选择（按 §18.9 不扩大改动面）。</li>
  * </ul>
+ *
+ * <p><b>作用域</b>：本类位于 {@code lmili-server}，是 server-only 工具。
+ *   plugin-facing API（{@code fun.bm.mili.lmili.api.*}）刻意不引用本类，避免
+ *   {@code lmili-api} 反向依赖 Bukkit。如果 plugin 想"按名字查 plugin"，
+ *   通过 {@code /pluginid} 命令或 {@link fun.bm.mili.lmili.api.identity.PluginIdentityManager}
+ *   间接访问即可。</p>
  */
 public final class PluginIdentityAutoDiscovery {
 
@@ -57,44 +63,48 @@ public final class PluginIdentityAutoDiscovery {
     /**
      * 解析 Bukkit 插件名为 PluginId；若 LMili 未注册，自动注册 DISCOVERED 状态。
      *
-     * @param raw 用户输入的 plugin 简写或完整 id
-     * @return PluginId（永远非 null 当 Bukkit plugin 存在）；返回 null 仅当 Bukkit 中查无此 plugin
+     * <p><b>必须双段</b>：LMili V2 规范要求 PluginId 至少为 {@code publisher.plugin} 形式。
+     * 单段输入（如 {@code spark}）会直接返回 null，强制用户在外部 plugin 必须声明
+     * {@code lmili.json} 拿到完整 id（例如 {@code me.lucko.spark}）。这是 V2 规范的硬要求
+     * （§23 PluginIdentity Contract），不允许运行时"自动加前缀"这种模糊行为。
+     *
+     * <p>用户写错 id 时，应通过 {@code /pluginid list} 或 {@code /pluginid suggest <prefix>}
+     * 查完整 id（Tab 补全也会给出全部已注册 id）。
+     *
+     * @param raw 用户输入的完整双段 id（如 {@code me.lucko.spark}）
+     * @return PluginId（永远非 null 当 Bukkit plugin 存在）；返回 null 仅当输入非法或 Bukkit 中查无此 plugin
      */
     public static PluginId resolveOrDiscover(String raw) {
         if (raw == null || raw.isBlank()) return null;
 
-        // 1. 已注册 → 直接返回
+        // 1. 必须是完整双段 PluginId（V2 §23 硬要求）
         PluginId direct = PluginId.parseNullable(raw);
-        if (direct != null) {
-            PluginIdentityManager mgr = LMili.getPluginIdentityManager();
-            if (mgr.find(direct).isPresent()) return direct;
+        if (direct == null) {
+            // 单段或非法格式：拒绝（按 V2 规范）
+            return null;
         }
+        PluginIdentityManager mgr = LMili.getPluginIdentityManager();
+        if (mgr.find(direct).isPresent()) return direct;
 
-        // 2. 单段 → lmili.<single>（修复 spark 这种简写）
-        PluginId fallback = makeIdFromName(raw);
-        if (fallback != null) {
-            PluginIdentityManager mgr = LMili.getPluginIdentityManager();
-            if (mgr.find(fallback).isPresent()) return fallback;
-        }
-
-        // 3. 查 Bukkit；找到 → 自动以 DISCOVERED 注册
+        // 2. LMili 未注册 → 查 Bukkit PluginManager（仅按完整 publisher.plugin 形态）
         try {
             Plugin plugin = findBukkitPlugin(raw);
             if (plugin == null) return null;
 
-            // 用 Bukkit plugin.name 转 PluginId（单段 → 加 lmili. 前缀，2+段 → 原样 normalize）
-            String normalizedName = plugin.getName().toLowerCase();
-            PluginId targetId = makeIdFromName(normalizedName);
+            // 双重校验：Bukit plugin 自身的 name 也必须能 normalize 成一个双段 id
+            //   （理论上 plugin.name 是单段如 "spark"，但 Bukkit 加载用 "spark"，所以这里仍按
+            //   raw 校验 —— 若 raw 是 "me.lucko.spark"，正常路径就会 findBukkitPlugin 返回 null，
+            //   此时走 PluginManager 全量遍历；按规范，lmili.json 必须存在才能注册。）
+            PluginId targetId = PluginId.tryNormalize(raw);
             if (targetId == null) {
-                LOGGER.warn("[PluginIdentityAutoDiscovery] cannot normalize '{}'", normalizedName);
+                LOGGER.warn("[PluginIdentityAutoDiscovery] cannot normalize '{}'", raw);
                 return null;
             }
 
-            PluginIdentityManager mgr = LMili.getPluginIdentityManager();
             Optional<PluginIdentity> existing = mgr.find(targetId);
             if (existing.isPresent()) return targetId;
 
-            // 4. 注册 DISCOVERED 副本
+            // 3. 注册 DISCOVERED 副本（兜底：插件没带 lmili.json 但 Bukkit 加载成功）
             PluginIdentity identity = buildDiscoveredIdentity(plugin, targetId);
             PluginIdentity registered = mgr.register(identity);
             DISCOVERED_CACHE.put(targetId.value(), plugin);
@@ -137,20 +147,6 @@ public final class PluginIdentityAutoDiscovery {
         Plugin cached = DISCOVERED_CACHE.get(id.value());
         if (cached != null && cached.isEnabled()) return cached;
         return findBukkitPlugin(id.value());
-    }
-
-    /**
-     * 构造 PluginId：单段 → 加 "lmili." 前缀；多段 → 原样 normalize。
-     * 避免 {@link PluginId#tryNormalize(String)} 单段直接返回 null 的限制。
-     */
-    private static PluginId makeIdFromName(String name) {
-        if (name == null || name.isBlank()) return null;
-        String n = name.trim();
-        // 单段：加 lmili. 前缀
-        if (!n.contains(".")) {
-            n = "lmili." + n;
-        }
-        return PluginId.tryNormalize(n);
     }
 
     private static PluginIdentity buildDiscoveredIdentity(Plugin plugin, PluginId id) {

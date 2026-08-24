@@ -1,7 +1,12 @@
 package fun.bm.mili.lmili.runtime;
 
 import com.mojang.logging.LogUtils;
+import fun.bm.mili.config.modules.function.LanguageConfig;
+import fun.bm.mili.lmili.api.LMili;
+import fun.bm.mili.lmili.api.identity.PluginId;
 import fun.bm.mili.lmili.data.OptimizedLinearRegionFile;
+import fun.bm.mili.lmili.i18n.I18nManager;
+import fun.bm.mili.lmili.i18n.PluginI18n;
 import fun.bm.mili.lmili.runtime.io.FlusherObserver;
 import fun.bm.mili.lmili.runtime.io.OLinearFlusherBridge;
 import fun.bm.mili.lmili.thread.scheduler.MiliSchedulerHolder;
@@ -70,6 +75,49 @@ public final class RuntimeBootstrap {
         if (observabilityInstalled) return;
         observabilityInstalled = true;
         try {
+            // 0. I18n —— 必须先于所有命令 / 日志（确保 /pluginid 等输出按用户语言）
+            //     注意：MiliOptimizations.init() 是死代码（无人调用），这里补上
+            try {
+                I18nManager.init(LanguageConfig.lang);
+            } catch (Throwable ignored) {
+                // 装配失败时静默（用默认 locale en_us）
+            }
+
+            // 0.1 Plugin-facing i18n SPI —— 把 LMili.i18n.* 桥接到 I18nManager / PluginI18n
+            try {
+                LMili.installI18n(new LMili.I18nFunctions() {
+                    @Override public String getCurrentLocale() {
+                        return I18nManager.getCurrentLocale();
+                    }
+                    @Override public String tr(String key, Object[] args) {
+                        return I18nManager.get(key, args == null ? new Object[0] : args);
+                    }
+                    @Override public String trNs(PluginId id, String key, Object[] args) {
+                        return PluginI18n.get(id, key, args == null ? new Object[0] : args);
+                    }
+                    @Override public void registerProps(PluginId id, String locale, java.util.Properties props) {
+                        PluginI18n.registerTranslations(id, locale, props);
+                    }
+                    @Override public void registerClasspath(PluginId id, String locale, ClassLoader loader) {
+                        try {
+                            String path = "/i18n/" + id.value() + "." + locale + ".properties";
+                            try (java.io.InputStream is = loader.getResourceAsStream(path)) {
+                                if (is == null) return;
+                                java.util.Properties props = new java.util.Properties();
+                                props.load(new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8));
+                                PluginI18n.registerTranslations(id, locale, props);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                    @Override public java.util.Set<String> availableLocales() {
+                        return new java.util.HashSet<>(java.util.Arrays.asList(
+                                "en_us","zh_cn","zh_tw","zh_hk","ja_jp","ko_kr","de_de","fr_fr",
+                                "es_es","it_it","pt_br","ru_ru","uk_ua","pl_pl","tr_tr","vi_vn",
+                                "th_th","id_id","ar_sa"));
+                    }
+                });
+            } catch (Throwable ignored) {}
+
             // 1. Capture（spark 接入入口）
             new fun.bm.mili.lmili.observability.PluginSchedulerCaptureImpl();
 

@@ -17,7 +17,6 @@ import fun.bm.mili.lmili.i18n.I18nManager;
 import fun.bm.mili.lmili.thread.scheduler.PluginSchedulerBridge;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
@@ -136,24 +135,13 @@ public final class PluginIdCommand extends RootNode {
         protected CompletableFuture<Suggestions> getSuggestions(
                 @NotNull final CommandContext context,
                 @NotNull final SuggestionsBuilder builder) {
-            // 1. 已注册 LMili identity
+            // 仅补全已注册 / DISCOVERED 的完整 PluginId（双段 publisher.plugin 形式）。
+            // 单段 Bukkit plugin name 不再作为补全候选 —— V2 规范要求用户必须用完整 id。
             for (final PluginIdentity identity : LMili.getPluginIdentityManager().getAll()) {
                 final String idValue = identity.id().value();
                 if (idValue.startsWith(builder.getRemainingLowerCase())) {
                     builder.suggest(idValue);
                 }
-            }
-            // 2. 兜底：Bukkit 已加载但 LMili 尚未识别的 plugin（外部 plugin 如 spark）
-            try {
-                final String remaining = builder.getRemainingLowerCase();
-                for (final Plugin p : Bukkit.getPluginManager().getPlugins()) {
-                    final String name = p.getName();
-                    if (name.toLowerCase().startsWith(remaining) && !name.isEmpty()) {
-                        builder.suggest(name);
-                    }
-                }
-            } catch (Throwable ignored) {
-                // Bukkit 不可用时静默跳过
             }
             return builder.buildFuture();
         }
@@ -171,13 +159,16 @@ public final class PluginIdCommand extends RootNode {
         /**
          * Resolve the argument to a PluginId.
          *
+         * <p><b>V2 规范硬要求</b>：必须是完整双段 id（{@code publisher.plugin}），
+         * 单段输入（如 {@code spark}）会被拒绝。外部 plugin 应通过 {@code lmili.json}
+         * 声明完整 id，运行时通过 {@code /pluginid list} 或 Tab 补全查完整 id。
+         *
          * <p>策略（按顺序）：
          * <ol>
-         *   <li>{@link PluginId#parseNullable} —— 严格格式（publisher.plugin）</li>
-         *   <li>{@link PluginId#tryNormalize} —— 单段输入（如 {@code spark}）回退为 {@code lmili.spark}</li>
-         *   <li>{@link PluginIdentityAutoDiscovery#resolveOrDiscover} —— 查 Bukkit 已加载
-         *       plugin，若 LMili 尚未注册则自动以 DISCOVERED 状态注册（修复 spark 等
-         *       外部 plugin 看不到的问题）</li>
+         *   <li>{@link PluginId#parseNullable} —— 严格双段格式（publisher.plugin）</li>
+         *   <li>{@link PluginIdentityAutoDiscovery#resolveOrDiscover} —— 兜底查 Bukkit
+         *       PluginManager（仅按完整双段 id 形态），若 LMili 尚未注册则自动以 DISCOVERED
+         *       状态注册（修复外部 plugin 看不到的问题）</li>
          * </ol>
          *
          * @return PluginId（保证非 null），但可能不在 identity registry 中
@@ -186,15 +177,11 @@ public final class PluginIdCommand extends RootNode {
             final String raw = context.getArgument(PluginIdArgument.class);
             if (raw == null || raw.isBlank()) return null;
 
-            // 1. 严格格式
+            // 1. 严格双段格式（V2 §23 硬要求；单段直接拒绝）
             PluginId pid = PluginId.parseNullable(raw);
             if (pid != null) return pid;
 
-            // 2. 单段 → lmili.<single>（修复 spark 这种简写）
-            pid = PluginId.tryNormalize(raw);
-            if (pid != null) return pid;
-
-            // 3. 查 Bukkit / 自动注册（这是 spark 等外部 plugin 走通的路径）
+            // 2. 查 Bukkit / 自动注册（仅双段 id）
             try {
                 return PluginIdentityAutoDiscovery.resolveOrDiscover(raw);
             } catch (Throwable t) {
