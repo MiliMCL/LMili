@@ -112,7 +112,7 @@ public final class LongTailEventBridge implements LongTailEvent {
         }
     }
 
-    private static final class BridgeAdapter implements LongTailEvent {
+    public static final class BridgeAdapter implements LongTailEvent {
         private final long tickId;
         private final long regionId;
         private final String thread;

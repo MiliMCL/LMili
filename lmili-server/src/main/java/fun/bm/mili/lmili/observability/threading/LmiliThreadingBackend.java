@@ -128,7 +128,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         return (pid == null ? "global" : String.valueOf(pid)) + "::" + spec.namePrefix();
     }
 
-    private static final class PluginExecutorImpl implements PluginExecutor {
+    public static final class PluginExecutorImpl implements PluginExecutor {
         private final PluginThreadSpec spec;
         private final VirtualThreadPool pool;
         private final AtomicInteger active = new AtomicInteger(0);
@@ -211,7 +211,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
     }
 
-    private static final class PluginSchedulerImpl implements PluginScheduler {
+    public static final class PluginSchedulerImpl implements PluginScheduler {
         private final PluginThreadSpec spec;
         private final VirtualThreadPool pool;
         private final AtomicInteger active = new AtomicInteger(0);
@@ -273,7 +273,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
     }
 
-    private static final class TrackedScheduledFuture<T> implements ScheduledFuture<T> {
+    public static final class TrackedScheduledFuture<T> implements ScheduledFuture<T> {
         private final ScheduledFuture<T> delegate;
         private final AtomicInteger active;
         private final java.util.concurrent.atomic.AtomicBoolean decremented = new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -302,7 +302,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
     }
 
-    private static final class JdkStructuredScope implements StructuredConcurrency {
+    public static final class JdkStructuredScope implements StructuredConcurrency {
         private final Object scope;
 
         JdkStructuredScope() {
@@ -353,7 +353,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
     }
 
-    private static final class JdkSubTask<T> implements StructuredConcurrency.SubTask<T> {
+    public static final class JdkSubTask<T> implements StructuredConcurrency.SubTask<T> {
         private final Object delegate;
 
         JdkSubTask(Object delegate) { this.delegate = delegate; }
@@ -406,7 +406,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
     }
 
     /** Wrap a plain Future<V> as a ScheduledFuture<V> for the Lmili delay+value case */
-    private static final class PromotedScheduledFuture<V> implements ScheduledFuture<V> {
+    public static final class PromotedScheduledFuture<V> implements ScheduledFuture<V> {
         private final Future<V> delegate;
         private final long delayNanos;
         private final TimeUnit unit;
@@ -433,7 +433,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         @Override public V get(long t, TimeUnit u) throws java.util.concurrent.ExecutionException, InterruptedException, java.util.concurrent.TimeoutException { return delegate.get(t, u); }
     }
 
-    private static final class LatchedStructuredScope implements StructuredConcurrency {
+    public static final class LatchedStructuredScope implements StructuredConcurrency {
         private final java.util.concurrent.ConcurrentHashMap<SubTask<?>, java.util.concurrent.CountDownLatch> latches = new java.util.concurrent.ConcurrentHashMap<>();
         private volatile boolean cancelled = false;
 
@@ -465,7 +465,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         }
     }
 
-    private static final class LatchedSubTask<T> implements StructuredConcurrency.SubTask<T> {
+    public static final class LatchedSubTask<T> implements StructuredConcurrency.SubTask<T> {
         private final Callable<T> task;
         private final java.util.concurrent.CountDownLatch latch;
         private volatile StructuredConcurrency.SubTask.State state = StructuredConcurrency.SubTask.State.RUNNING;
@@ -496,7 +496,7 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         @Override public StructuredConcurrency.SubTask.State state() { return state; }
     }
 
-    private static final class ServerPluginRegionScheduler implements PluginRegionScheduler {
+    public static final class ServerPluginRegionScheduler implements PluginRegionScheduler {
         @Override
         public @NotNull Object submit(@NotNull PluginRegionTask task) {
             MiliScheduler s = MiliSchedulerHolder.get();

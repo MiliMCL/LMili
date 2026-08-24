@@ -71,7 +71,7 @@ public final class PluginIdentityAutoDiscovery {
         }
 
         // 2. 单段 → lmili.<single>（修复 spark 这种简写）
-        PluginId fallback = PluginId.tryNormalize(raw);
+        PluginId fallback = makeIdFromName(raw);
         if (fallback != null) {
             PluginIdentityManager mgr = LMili.getPluginIdentityManager();
             if (mgr.find(fallback).isPresent()) return fallback;
@@ -82,9 +82,9 @@ public final class PluginIdentityAutoDiscovery {
             Plugin plugin = findBukkitPlugin(raw);
             if (plugin == null) return null;
 
-            // 用 Bukkit plugin.name 转 PluginId（normalize，单段 → 加 lmili 前缀）
+            // 用 Bukkit plugin.name 转 PluginId（单段 → 加 lmili. 前缀，2+段 → 原样 normalize）
             String normalizedName = plugin.getName().toLowerCase();
-            PluginId targetId = PluginId.tryNormalize(normalizedName);
+            PluginId targetId = makeIdFromName(normalizedName);
             if (targetId == null) {
                 LOGGER.warn("[PluginIdentityAutoDiscovery] cannot normalize '{}'", normalizedName);
                 return null;
@@ -137,6 +137,20 @@ public final class PluginIdentityAutoDiscovery {
         Plugin cached = DISCOVERED_CACHE.get(id.value());
         if (cached != null && cached.isEnabled()) return cached;
         return findBukkitPlugin(id.value());
+    }
+
+    /**
+     * 构造 PluginId：单段 → 加 "lmili." 前缀；多段 → 原样 normalize。
+     * 避免 {@link PluginId#tryNormalize(String)} 单段直接返回 null 的限制。
+     */
+    private static PluginId makeIdFromName(String name) {
+        if (name == null || name.isBlank()) return null;
+        String n = name.trim();
+        // 单段：加 lmili. 前缀
+        if (!n.contains(".")) {
+            n = "lmili." + n;
+        }
+        return PluginId.tryNormalize(n);
     }
 
     private static PluginIdentity buildDiscoveredIdentity(Plugin plugin, PluginId id) {

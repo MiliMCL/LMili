@@ -98,7 +98,7 @@ public final class PluginSchedulerCaptureImpl implements PluginSchedulerCapture 
                 s.failures.get());
     }
 
-    private static final class LocalStats {
+    public static final class LocalStats {
         final AtomicLong submits = new AtomicLong();
         final AtomicLong completes = new AtomicLong();
         final AtomicLong execNanos = new AtomicLong();

@@ -368,7 +368,12 @@ fun TaskContainer.registerRunTask(
         // TODO - JB runtime 25 has issues with spark rn
         // vendor.set(JvmVendorSpec.JETBRAINS)
     })
-    jvmArgs("-XX:+AllowEnhancedClassRedefinition")
+    jvmArgs(
+        "-XX:+AllowEnhancedClassRedefinition",
+        // Allow plugins (e.g. spark) and our own backend to reflect into JDK internals
+        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    )
 
     if (rootProject.childProjects["test-plugin"] != null) {
         val testPluginJar = rootProject.project(":test-plugin").tasks.jar.flatMap { it.archiveFile }
