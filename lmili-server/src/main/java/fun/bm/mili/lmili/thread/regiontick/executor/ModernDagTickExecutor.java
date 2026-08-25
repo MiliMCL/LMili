@@ -96,12 +96,12 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
     }
 
     /**
-     * 创建现代 DAG 执行器（使用默认的 FoliaTickExecutor 作为回退）。
+     * 创建现代 DAG 执行器（使用默认的回退执行器）。
      *
      * @param nodeScheduler 节点路由器
      */
     public ModernDagTickExecutor(final @NotNull NodeScheduler nodeScheduler) {
-        this(nodeScheduler, new FoliaTickExecutor());
+        this(nodeScheduler, new LMiliTickExecutor());
     }
 
     /**
@@ -109,7 +109,7 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
      *
      * <p>典型用法：在 {@code RegionTickBootstrap.init()} 中调用本方法，把 DAG 节点
      * 从裸 {@link Executor} 切换到按 regionId 路由的 {@link NodeScheduler}，确保
-     * 跨 region 节点重新走 Folia 的 acquire 路径。</p>
+     * 跨 region 节点通过 Bukkit 主线程调度器路由。</p>
      *
      * <p>注意：此切换对正在执行的节点无效，仅影响后续 submit 的节点。</p>
      *
@@ -207,13 +207,9 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
     /**
      * 在 region tick 进入时执行积压的跨 region DAG 子任务。
      *
-     * <p><b>Mili 修复</b>：当 {@link FoliaRegionNodeScheduler} 把跨 region 节点
-     * 投递给目标 region 时，会调用 {@link TickRegionScheduler#getScheduler()#scheduleRegion}
-     * 触发 Folia 调度。Folia 自然进入该 region 的 tick —— 本方法在 tick 进入
-     * 入口被调用，先 drain 上次 tick 遗留的 pending 任务，再走正常的 DAG 执行。</p>
-     *
-     * <p>由 FoliaRegionNodeSchedulerHandleRegistry 找到 handle 后，region tick
-     * 触发时调用此方法。pending 列表空时此方法 no-op。</p>
+     * <p>当 CompositeNodeScheduler 把跨 region 节点投递给目标 region 时，
+     * 通过 Bukkit 主线程调度器触发目标 region 的任务执行。
+     * 本方法在 tick 进入入口被调用，先 drain 上次 tick 遗留的 pending 任务。</p>
      *
      * @param context 当前 region tick 上下文
      */
@@ -222,21 +218,7 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
         if (!(this.nodeScheduler instanceof CompositeNodeScheduler composite)) {
             return;
         }
-        final FoliaRegionNodeScheduler foliaSched = composite.foliaRegionScheduler();
-        final java.util.List<FoliaRegionNodeScheduler.PendingNodeTask> pending = foliaSched.drainPending(context.regionId);
-        if (pending.isEmpty()) return;
-        LOGGER.info("[ModernDagTickExecutor] Draining {} cross-region pending DAG nodes for region #{}",
-                pending.size(), context.regionId);
-        // 在当前线程同步执行 pending 节点 —— 上下文就是当前 region 的 acquire/tickingRegion
-        for (final FoliaRegionNodeScheduler.PendingNodeTask task : pending) {
-            try {
-                // pending 任务 body 内部已包含"节点执行 + 后继派发"逻辑
-                // 后继派发会再次进入 CompositeNodeScheduler 路由（可能再产生 pending）
-                task.body().run();
-            } catch (Throwable t) {
-                LOGGER.error("Failed to drain cross-region pending node {}", task.nodeId(), t);
-            }
-        }
+        composite.drainCrossRegionPending(context.regionId);
     }
 
     /**

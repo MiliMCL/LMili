@@ -95,6 +95,15 @@ public final class RuntimeBootstrap {
                     @Override public String trNs(PluginId id, String key, Object[] args) {
                         return PluginI18n.get(id, key, args == null ? new Object[0] : args);
                     }
+                    @Override public String trForPlayer(PluginId id, String playerLocale, String key, Object[] args) {
+                        if (playerLocale == null || playerLocale.isEmpty()) {
+                            return PluginI18n.get(id, key, args == null ? new Object[0] : args);
+                        }
+                        // 把 Bukkit locale（zh_cn / en_us / zh-CN）转成 properties 文件名（zh_cn）
+                        String norm = playerLocale.toLowerCase(java.util.Locale.ROOT).replace('-', '_');
+                        // 优先 player locale，否则 current
+                        return PluginI18n.get(id, norm, key, args == null ? new Object[0] : args);
+                    }
                     @Override public void registerProps(PluginId id, String locale, java.util.Properties props) {
                         PluginI18n.registerTranslations(id, locale, props);
                     }
@@ -124,10 +133,94 @@ public final class RuntimeBootstrap {
             // 2. Threading backend（plugin-facing 统一线程管理 API）
             new fun.bm.mili.lmili.observability.threading.LmiliThreadingBackend();
 
-            LOGGER.info("[RuntimeBootstrap] observability primitives installed (capture / threading / JMX / auto-sampler deferred)");
+            // 3. MetricsRegistry（plugin 自定义指标注册表）
+            try {
+                LMili.installMetricsRegistry(
+                        new fun.bm.mili.lmili.observability.PluginMetricsRegistryImpl());
+                // 自动清理：plugin unregister 时把它的 metrics 清空 + event bus 退订
+                LMili.pluginLifecycleBus().register(LMili.SYSTEM_OWNER_ID,
+                    new fun.bm.mili.lmili.api.identity.PluginLifecycleBus.Listener() {
+                        @Override
+                        public void onUnregistered(PluginId id) {
+                            fun.bm.mili.lmili.api.observability.MetricsRegistry r =
+                                    LMili.metricsRegistry();
+                            if (r != null) r.unregisterAll(id);
+                            fun.bm.mili.lmili.api.event.PluginEventBus bus = LMili.eventBus();
+                            if (bus != null) bus.unsubscribeAll(id);
+                        }
+                    });
+            } catch (Throwable t) {
+                LOGGER.warn("[RuntimeBootstrap] MetricsRegistry install failed", t);
+            }
+
+            // 4. identity manager → lifecycle bus wiring
+            //     桥接：每次 register / setStatus / unregister 时 fire 到 bus
+            try {
+                wireIdentityToBus();
+            } catch (Throwable t) {
+                LOGGER.warn("[RuntimeBootstrap] identity→bus wire failed", t);
+            }
+
+            LOGGER.info("[RuntimeBootstrap] observability primitives installed (capture / threading / JMX / MetricsRegistry / lifecycle bus)");
         } catch (Throwable t) {
             LOGGER.warn("[RuntimeBootstrap] observability install failed", t);
         }
+    }
+
+    /**
+     * 把 LMili 默认 {@link fun.bm.mili.lmili.api.identity.DefaultPluginIdentityManager}
+     * 包成"会 fire lifecycle bus"的事件源。
+     *
+     * <p>实现：保留原 manager 不变，注册一个 listener 在每次 register / setStatus /
+     * unregister 后调 fire* 方法。listener 自身用 last-seen 状态对比避免重复触发。
+     */
+    private static volatile boolean busWired = false;
+    private static void wireIdentityToBus() {
+        if (busWired) return;
+        busWired = true;
+        final fun.bm.mili.lmili.api.identity.PluginIdentityManager mgr = LMili.getPluginIdentityManager();
+        final fun.bm.mili.lmili.api.identity.PluginLifecycleBus bus = LMili.pluginLifecycleBus();
+        if (mgr == null || bus == null) return;
+
+        // last seen snapshot —— 用于检测 register / setStatus
+        final java.util.Map<PluginId, fun.bm.mili.lmili.api.identity.PluginStatus> lastSeen =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        final java.util.Set<PluginId> known = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+        // 仅 fire（包装型 manager 由 plugin-bootstrap 在 register 时手动 fire；这里负责监听
+        // "system-level" 修改（命令 / API 调用）。每 30 秒做一次轻量 reconcile。）
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "LMili-lifecycle-reconcile");
+            t.setDaemon(true);
+            return t;
+        }).scheduleAtFixedRate(() -> {
+            try {
+                for (fun.bm.mili.lmili.api.identity.PluginIdentity p : mgr.getAll()) {
+                    final PluginId id = p.id();
+                    if (!known.contains(id)) {
+                        known.add(id);
+                        lastSeen.put(id, p.status());
+                        bus.fireRegistered(p);
+                    } else {
+                        fun.bm.mili.lmili.api.identity.PluginStatus prev = lastSeen.get(id);
+                        if (prev != null && prev != p.status()) {
+                            lastSeen.put(id, p.status());
+                            bus.fireStatusChange(p, prev);
+                        }
+                    }
+                }
+                // 检测 unregister（id 在 mgr 消失但 known 里还有）
+                for (PluginId id : new java.util.ArrayList<>(known)) {
+                    if (mgr.find(id).isEmpty()) {
+                        known.remove(id);
+                        lastSeen.remove(id);
+                        bus.fireUnregistered(id);
+                    }
+                }
+            } catch (Throwable t) {
+                // §6.2 fail-safe
+            }
+        }, 5, 30, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     /**

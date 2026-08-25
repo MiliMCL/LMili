@@ -1,24 +1,23 @@
 package fun.bm.mili.config.modules.fixes;
 
-import fun.bm.mili.lmili.config.IConfigModule;
-import fun.bm.mili.lmili.config.flags.ConfigClassInfo;
-import fun.bm.mili.lmili.config.flags.ConfigInfo;
-import fun.bm.mili.lmili.config.flags.TransformedConfig;
-import fun.bm.mili.lmili.enums.EnumConfigCategory;
+/**
+ * Folia 实体移动修复配置 —— 兼容性保留类。
+ *
+ * <p>此类为兼容性保留，新功能请使用 {@link LMiliEntityMovingFixConfig}。
+ *
+ * @since 2.0.0
+ * @deprecated 使用 {@link LMiliEntityMovingFixConfig} 替代
+ */
+@Deprecated
+public final class FoliaEntityMovingFixConfig {
 
-@ConfigClassInfo(category = EnumConfigCategory.FIXES, name = "fix_high_velocity_issue")
-public class FoliaEntityMovingFixConfig implements IConfigModule {
-    @TransformedConfig(name = "enabled", directory = {"fixes", "fix_high_velocity_issue", "folia"})
-    @ConfigInfo(name = "enabled", comments =
-            """
-                    A simple fix of an issue on folia\s
-                    (Sometimes the entity would\s
-                    have a large moment that cross the\s
-                    different tick regions, and it would\s
-                    make the server crashed) but sometimes it might doesn't work""")
-    public static boolean enabled = false;
+    /** @deprecated 使用 {@link LMiliEntityMovingFixConfig#enabled} */
+    @Deprecated
+    public static volatile boolean enabled = LMiliEntityMovingFixConfig.enabled;
 
-    @TransformedConfig(name = "warn_on_detected", directory = {"fixes", "fix_high_velocity_issue", "folia"})
-    @ConfigInfo(name = "warn_on_detected")
-    public static boolean warnOnDetected = false;
+    /** @deprecated 使用 {@link LMiliEntityMovingFixConfig#warnOnDetected} */
+    @Deprecated
+    public static volatile boolean warnOnDetected = LMiliEntityMovingFixConfig.warnOnDetected;
+
+    private FoliaEntityMovingFixConfig() {}
 }

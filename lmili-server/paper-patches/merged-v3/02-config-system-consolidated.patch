@@ -107,7 +107,7 @@ diff --git a/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPlug
      public PaperPluginParent build(JarFile file, PaperPluginMeta configuration, Path source) {
          // Folia start - block plugins not marked as supported
 -        if (!configuration.isFoliaSupported()) {
-+        if (!configuration.isFoliaSupported() && !fun.bm.mili.config.modules.unsupported.DisableCheckForFoliaSupported.disableForPaper) { // Luminol - disable check for folia supported
++        if (!configuration.isFoliaSupported()) {
              throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
          }
          // Folia end - block plugins not marked as supported
@@ -120,7 +120,7 @@ diff --git a/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPl
      public SpigotPluginProvider build(JarFile file, PluginDescriptionFile configuration, Path source) throws InvalidDescriptionException {
          // Folia start - block plugins not marked as supported
 -        if (!configuration.isFoliaSupported()) {
-+        if (!configuration.isFoliaSupported() && !fun.bm.mili.config.modules.unsupported.DisableCheckForFoliaSupported.disableForPaper) { // Luminol - disable check for folia supported
++        if (!configuration.isFoliaSupported()) {
              throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
          }
          // Folia end - block plugins not marked as supported
@@ -133,7 +133,7 @@ diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java 
  
      private void updateWaypoint() {
 -        ServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager();
-+        fun.bm.mili.lmili.utils.FoliaServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager(); // Luminol - Restore waypoints
++        ServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager();
          manager.untrackWaypoint(getHandle());
          manager.trackWaypoint(getHandle());
      }
@@ -147,7 +147,7 @@ diff --git a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java b/
  
          // Folia start - block plugins not marked as supported
 -        if (!descriptionFile.isFoliaSupported()) {
-+        if (!descriptionFile.isFoliaSupported() && !fun.bm.mili.config.modules.unsupported.DisableCheckForFoliaSupported.disableForPaper) { // Luminol - disable check for folia supported
++        if (!descriptionFile.isFoliaSupported()) {
              throw new InvalidPluginException("Plugin " + descriptionFile.getFullName() + " is not marked as supporting regionised multithreading");
          }
          // Folia end - block plugins not marked as supported

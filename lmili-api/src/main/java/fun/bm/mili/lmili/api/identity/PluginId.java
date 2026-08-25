@@ -129,7 +129,12 @@ public final class PluginId implements Comparable<PluginId> {
         final char[] chars = s.toCharArray();
         for (int i = 0; i < chars.length; i++) {
             final char c = chars[i];
-            if (c >= 'A' && c <= 'Z') chars[i] = (char) (c + 32);
+            if (c >= 'A' && c <= 'Z') {
+                chars[i] = (char) (c + 32);
+            } else if (c == '_') {
+                // V2: normalize underscores to dashes for legacy compatibility
+                chars[i] = '-';
+            }
         }
         return new String(chars);
     }
@@ -141,6 +146,16 @@ public final class PluginId implements Comparable<PluginId> {
     /** @return the canonical id string. */
     @NotNull
     public String value() { return value; }
+
+    /**
+     * @return the publisher segment (first segment) of this id.
+     *         For "xucy.mili" this returns "xucy".
+     */
+    @NotNull
+    public String publisher() {
+        final int dot = value.indexOf('.');
+        return dot < 0 ? value : value.substring(0, dot);
+    }
 
     /** @return true if this id has one or more addon segments (i.e. &gt;= 3 total). */
     public boolean isAddon() {

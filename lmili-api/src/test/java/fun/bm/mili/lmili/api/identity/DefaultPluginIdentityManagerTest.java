@@ -115,7 +115,7 @@ class DefaultPluginIdentityManagerTest {
     @Test
     void noForceReplaceApi() {
         // Sanity: no such method exists on the interface.
-        final Class<?>[] declared = PluginIdentityManager.class.getDeclaredMethods();
+        final java.lang.reflect.Method[] declared = PluginIdentityManager.class.getDeclaredMethods();
         for (final java.lang.reflect.Method m : declared) {
             final String n = m.getName().toLowerCase();
             assertFalse(n.contains("replace"), "forbidden method on PluginIdentityManager: " + m.getName());

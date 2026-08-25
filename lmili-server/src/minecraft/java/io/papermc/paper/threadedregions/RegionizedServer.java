@@ -5,7 +5,7 @@ import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 import ca.spottedleaf.concurrentutil.completable.Completable;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import com.mojang.logging.LogUtils;
-import io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler;
+import io.papermc.paper.threadedregions.scheduler.LMiliGlobalRegionScheduler;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportedException;
 import net.minecraft.network.Connection;
@@ -267,7 +267,7 @@ public final class RegionizedServer {
         io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue((int)this.tickCount); // Paper // Folia - region threading - moved to global tick
 
         // scheduler
-        ((FoliaGlobalRegionScheduler)Bukkit.getGlobalRegionScheduler()).tick();
+        ((LMiliGlobalRegionScheduler)Bukkit.getGlobalRegionScheduler()).tick();
 
         // clock tick
         this.tickClocks();

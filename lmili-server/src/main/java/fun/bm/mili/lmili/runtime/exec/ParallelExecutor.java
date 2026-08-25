@@ -14,6 +14,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -57,45 +58,81 @@ public final class ParallelExecutor {
     /**
      * 执行一个计划（最多 3 轮：预算不足挂回重试；仍不足 → 留给调度器下一 tick）。
      * 返回的 future 在全部（或放弃）执行完成后完成。
+     *
+     * <p>性能优化：使用 CompletableFuture.allOf 批量等待，避免逐个 f.join() 阻塞 carrier thread；
+     * 精确追踪失败节点（而非整批挂回），提升并发利用率。
      */
     public CompletableFuture<Void> execute(long regionId, TickDagExecution plan) {
         if (plan == null || plan.isEmpty()) {
             return CompletableFuture.completedFuture(null);
         }
         final boolean serial = plan.nodeOrder().length <= 1 || plan.maxFanoutPerNode() <= 1 || !tick.isParallelTickEnabled();
-        List<Integer> pending = new ArrayList<>();
+
+        List<Integer> pending = new ArrayList<>(plan.nodeOrder().length);
         for (int nodeId : plan.nodeOrder()) {
             pending.add(nodeId);
         }
+
         for (int round = 0; round < 3 && !pending.isEmpty(); round++) {
             final List<Integer> current = new ArrayList<>(pending);
             pending.clear();
             if (serial) {
+                // 串行模式：直接顺序执行
                 for (int nodeId : current) {
                     if (!runNode(regionId, plan, nodeId)) {
                         pending.add(nodeId);
                     }
                 }
             } else {
+                // 并行模式：分批次执行，每批 allOf 批量等待
                 final int fanOut = Math.max(1, Math.min(plan.maxFanoutPerNode(), fanout.effectiveFanOut()));
                 for (int i = 0; i < current.size(); i += fanOut) {
-                    final List<Integer> batch = new ArrayList<>(current.subList(i, Math.min(i + fanOut, current.size())));
-                    final List<CompletableFuture<Boolean>> futures = batch.stream()
-                            .map(id -> CompletableFuture.supplyAsync(() -> runNode(regionId, plan, id), parallelPool))
-                            .toList();
-                    for (CompletableFuture<Boolean> f : futures) {
-                        final Boolean ok = f.join();
-                        if (ok != null && !ok) {
-                            pending.addAll(batch); // 简化：整批挂回（预算不足多为系统性）
-                            break;
+                    final int end = Math.min(i + fanOut, current.size());
+                    final List<Integer> batch = current.subList(i, end);
+                    final int batchSize = batch.size();
+                    // 性能优化：使用数组存储 future 与 nodeId 的对应关系，避免 map 开销
+                    @SuppressWarnings("unchecked")
+                    final CompletableFuture<Boolean>[] futures = new CompletableFuture[batchSize];
+                    for (int j = 0; j < batchSize; j++) {
+                        final int nodeId = batch.get(j);
+                        futures[j] = CompletableFuture.supplyAsync(() -> runNode(regionId, plan, nodeId), parallelPool);
+                    }
+                    // 性能优化：allOf 批量等待，不逐个 join 阻塞
+                    try {
+                        CompletableFuture.allOf(futures).get(500, TimeUnit.MILLISECONDS);
+                    } catch (Exception e) {
+                        // 超时或取消：整批挂回
+                        pending.addAll(batch);
+                        LOGGER.warn("[ParallelExecutor] batch execution timed out/incomplete, re-queueing batch", e);
+                        continue;
+                    }
+                    // 精确追踪失败节点
+                    for (int j = 0; j < batchSize; j++) {
+                        try {
+                            final Boolean ok = futures[j].getNow(Boolean.FALSE);
+                            if (!Boolean.TRUE.equals(ok)) {
+                                pending.add(batch.get(j));
+                            }
+                        } catch (Exception e) {
+                            pending.add(batch.get(j));
                         }
+                    }
+                    // 优化：如果绝大部分节点都失败（系统性预算不足），提前退出
+                    if (pending.size() >= current.size() / 2) {
+                        // 系统性预算不足，剩余批次也大概率失败，直接收集剩余节点后退出
+                        for (int k = end; k < current.size(); k++) {
+                            pending.add(current.get(k));
+                        }
+                        break;
                     }
                 }
             }
         }
+
         if (!pending.isEmpty()) {
             LOGGER.debug("[ParallelExecutor] {} nodes budget-starved after 3 rounds (region {}) — re-queued for next tick", pending.size(), regionId);
         }
+
         return CompletableFuture.completedFuture(null);
     }
 

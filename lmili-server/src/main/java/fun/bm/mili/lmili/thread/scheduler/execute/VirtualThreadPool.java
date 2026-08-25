@@ -4,8 +4,8 @@ import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * 虚拟线程池 —— 基于 Java 21+ 虚拟线程（Virtual Threads）的执行引擎。
@@ -49,17 +49,17 @@ public final class VirtualThreadPool {
     /**
      * 延迟任务计数。
      */
-    private final AtomicInteger delayedTaskCount = new AtomicInteger(0);
+    private final LongAdder delayedTaskCount = new LongAdder();
 
     /**
      * 周期任务计数。
      */
-    private final AtomicInteger periodicTaskCount = new AtomicInteger(0);
+    private final LongAdder periodicTaskCount = new LongAdder();
 
     /**
      * 已执行的任务总数。
      */
-    private final AtomicInteger executedCount = new AtomicInteger(0);
+    private final LongAdder executedCount = new LongAdder();
 
     /**
      * 线程池名称。
@@ -93,7 +93,7 @@ public final class VirtualThreadPool {
      * @return Future 用于等待或取消
      */
     public Future<?> submit(Runnable task) {
-        executedCount.incrementAndGet();
+        executedCount.increment();
         return virtualExecutor.submit(() -> {
             try {
                 task.run();
@@ -110,7 +110,7 @@ public final class VirtualThreadPool {
      * @return Future 用于获取结果或取消
      */
     public <T> Future<T> submit(Callable<T> task) {
-        executedCount.incrementAndGet();
+        executedCount.increment();
         return virtualExecutor.submit(() -> {
             try {
                 return task.call();
@@ -130,14 +130,14 @@ public final class VirtualThreadPool {
      * @return ScheduledFuture 用于等待或取消
      */
     public ScheduledFuture<?> schedule(Runnable task, long delay, TimeUnit unit) {
-        delayedTaskCount.incrementAndGet();
+        delayedTaskCount.increment();
         return scheduler.schedule(() -> {
             try {
                 task.run();
             } catch (Exception e) {
                 LOGGER.error("[VirtualThreadPool-{}] Delayed task execution error", name, e);
             } finally {
-                delayedTaskCount.decrementAndGet();
+                delayedTaskCount.decrement();
             }
         }, delay, unit);
     }
@@ -159,7 +159,7 @@ public final class VirtualThreadPool {
     public Cancellable scheduleWithFixedDelay(Runnable task, long period, TimeUnit unit) {
         AtomicReference<ScheduledFuture<?>> futureRef = new AtomicReference<>();
         // R2-10 修复：只递增一次
-        periodicTaskCount.incrementAndGet();
+        periodicTaskCount.increment();
 
         Runnable wrappedTask = new Runnable() {
             @Override
@@ -185,7 +185,7 @@ public final class VirtualThreadPool {
                 ScheduledFuture<?> f = futureRef.getAndSet(null);
                 if (f != null) {
                     f.cancel(false);
-                    periodicTaskCount.decrementAndGet();
+                    periodicTaskCount.decrement();
                 }
             }
 
@@ -247,7 +247,7 @@ public final class VirtualThreadPool {
                 if (f != null) {
                     f.cancel(false);
                     state.tryCancel(); // R2-11 修复：同步 TaskScheduleState
-                    periodicTaskCount.decrementAndGet();
+                    periodicTaskCount.decrement();
                 }
             }
 
@@ -262,22 +262,22 @@ public final class VirtualThreadPool {
     /**
      * 获取已执行的任务总数。
      */
-    public int getExecutedCount() {
-        return executedCount.get();
+    public long getExecutedCount() {
+        return executedCount.sum();
     }
 
     /**
      * 获取正在执行的延迟任务数。
      */
-    public int getDelayedTaskCount() {
-        return delayedTaskCount.get();
+    public long getDelayedTaskCount() {
+        return delayedTaskCount.sum();
     }
 
     /**
      * 获取正在执行的周期任务数。
      */
-    public int getPeriodicTaskCount() {
-        return periodicTaskCount.get();
+    public long getPeriodicTaskCount() {
+        return periodicTaskCount.sum();
     }
 
     /**
@@ -302,15 +302,15 @@ public final class VirtualThreadPool {
             Thread.currentThread().interrupt();
         }
 
-        LOGGER.info("[VirtualThreadPool-{}] Shutdown (executed: {})", name, executedCount.get());
+        LOGGER.info("[VirtualThreadPool-{}] Shutdown (executed: {})", name, executedCount.sum());
     }
 
     @Override
     public String toString() {
         return "VirtualThreadPool-" + name +
-                "{executed=" + executedCount.get() +
-                ", delayed=" + delayedTaskCount.get() +
-                ", periodic=" + periodicTaskCount.get() + "}";
+                "{executed=" + executedCount.sum() +
+                ", delayed=" + delayedTaskCount.sum() +
+                ", periodic=" + periodicTaskCount.sum() + "}";
     }
 
     /**

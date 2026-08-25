@@ -317,12 +317,12 @@ diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java 
 @@ -1152,7 +1152,7 @@
      }
  
-     private void updateWaypoint() {
+private void updateWaypoint() {
 -        fun.bm.mili.lmili.utils.FoliaServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager(); // Luminol - Restore waypoints
-+        fun.bm.mili.lmili.utils.FoliaServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager(); // Luminol - Restore waypoints
-         manager.untrackWaypoint(getHandle());
-         manager.trackWaypoint(getHandle());
-     }
++        ServerWaypointManager manager = ((ServerLevel) getHandle().level()).getWaypointManager();
+        manager.untrackWaypoint(getHandle());
+        manager.trackWaypoint(getHandle());
+    }
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
 --- a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java

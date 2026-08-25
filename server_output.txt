@@ -1,0 +1,38 @@
+Starting a Gradle Daemon, 21 busy and 1 incompatible Daemons could not be reused, use --status for details
+Reusing configuration cache.
+> Task :lmili-server:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :lmili-api:generateApiVersioningFile UP-TO-DATE
+> Task :lmili-api:processResources NO-SOURCE
+> Task :lmili-server:processLog4jPluginsResources NO-SOURCE
+> Task :lmili-api:compileJava UP-TO-DATE
+> Task :lmili-api:classes UP-TO-DATE
+> Task :lmili-api:jar UP-TO-DATE
+> Task :lmili-server:compileLog4jPluginsKotlin NO-SOURCE
+> Task :lmili-server:processResources UP-TO-DATE
+> Task :lmili-server:compileKotlin NO-SOURCE
+> Task :lmili-server:compileLog4jPluginsJava UP-TO-DATE
+> Task :lmili-server:log4jPluginsClasses UP-TO-DATE
+> Task :lmili-server:compileJava UP-TO-DATE
+> Task :lmili-server:classes UP-TO-DATE
+
+> Task :lmili-server:runDevServer FAILED
+[0.014s][warning][gc] Failed to reserve memory for increasing the overflow mark stack capacity with 4096 chunks and size 33554432B.
+[0.014s][warning][gc] Failed to reserve memory for new overflow mark stack with 4096 chunks and size 33554432B.
+Error occurred during initialization of VM
+Failed to allocate initial concurrent mark overflow mark stack.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':lmili-server:runDevServer'.
+> Process 'command 'C:\Users\Administrator\Downloads\jdk-25_windows-x64_bin\jdk-25.0.4\bin\java.exe'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 14s
+7 actionable tasks: 1 executed, 6 up-to-date
+Configuration cache entry reused.

@@ -103,5 +103,28 @@ public final class PluginSchedulerCaptureImpl implements PluginSchedulerCapture 
         final AtomicLong completes = new AtomicLong();
         final AtomicLong execNanos = new AtomicLong();
         final AtomicLong failures = new AtomicLong();
+
+        /** Flush local stats entry into the given runtime context; returns true if anything was flushed. */
+        public boolean flushTo(PluginRuntimeContext ctx) {
+            if (submits.get() == 0 && completes.get() == 0 && failures.get() == 0) return false;
+            synchronized (this) {
+                long s = submits.getAndSet(0);
+                long c = completes.getAndSet(0);
+                long exN = execNanos.getAndSet(0);
+                long f = failures.getAndSet(0);
+                if (s > 0) {
+                    for (int i = 0; i < s; i++) {
+                        ctx.resourceQuota().onTaskSubmit();
+                    }
+                }
+                if (exN > 0) ctx.resourceQuota().onTaskFinish(exN, true);
+                if (f > 0) {
+                    for (int i = 0; i < f; i++) {
+                        ctx.observability().recordTaskFailed();
+                    }
+                }
+                return s > 0 || c > 0 || f > 0;
+            }
+        }
     }
 }

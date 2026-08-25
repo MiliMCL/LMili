@@ -12,7 +12,9 @@ class PluginIdTest {
         final PluginId id = PluginId.parse("xucy.mili");
         assertEquals("xucy.mili", id.value());
         assertFalse(id.isAddon());
-        assertTrue(id.parentId().isEmpty());
+        // 2-segment id has parent (xucy)
+        assertTrue(id.parentId().isPresent());
+        assertEquals("xucy", id.parentId().get().value());
     }
 
     @Test

@@ -16,27 +16,27 @@ class PluginIdentityFallbackTest {
 
     @Test
     void collapsesMultipleDashes() {
-        assertEquals("legacy.my-plugin", PluginIdentityFallback.synthesizeLegacyId("my___plugin"));
-        assertEquals("legacy.my-plugin", PluginIdentityFallback.synthesizeLegacyId("my@@@plugin"));
+        assertEquals("legacy.my-plugin", PluginIdentityFallback.synthesizeLegacyId("my___plugin").value());
+        assertEquals("legacy.my-plugin", PluginIdentityFallback.synthesizeLegacyId("my@@@plugin").value());
     }
 
     @Test
     void stripsLeadingTrailingDashes() {
-        assertEquals("legacy.x", PluginIdentityFallback.synthesizeLegacyId("___x___"));
+        assertEquals("legacy.x", PluginIdentityFallback.synthesizeLegacyId("___x___").value());
     }
 
     @Test
     void stripsDots() {
         // plugin.yml names can't normally contain dots but be safe.
-        assertEquals("legacy.my-plugin", PluginIdentityFallback.synthesizeLegacyId(".my.plugin."));
+        assertEquals("legacy.my-plugin", PluginIdentityFallback.synthesizeLegacyId(".my.plugin.").value());
     }
 
     @Test
     void emptyNameBecomesUnknownPlugin() {
         assertEquals("legacy.unknown-plugin",
-                PluginIdentityFallback.synthesizeLegacyId(""));
+                PluginIdentityFallback.synthesizeLegacyId("").value());
         assertEquals("legacy.unknown-plugin",
-                PluginIdentityFallback.synthesizeLegacyId("___"));
+                PluginIdentityFallback.synthesizeLegacyId("___").value());
     }
 
     @Test

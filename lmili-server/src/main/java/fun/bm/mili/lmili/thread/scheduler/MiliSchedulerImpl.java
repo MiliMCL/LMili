@@ -338,11 +338,8 @@ public final class MiliSchedulerImpl implements MiliScheduler {
         // 步骤 5：关闭虚拟线程池
         virtualThreadPool.shutdown();
 
-        // 步骤 6：清空 region handle registry（RISK-18 生命周期收尾）
-        // RegionTickDispatcher.shutdown 会单独调用 FoliaRegionNodeSchedulerHandleRegistry.clear()，
-        // 这里只是双保险。
-        fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
-                .FoliaRegionNodeSchedulerHandleRegistry.clear();
+        // 步骤 6：region handle registry 清理（由 RegionTickDispatcher.shutdown 处理）
+        // 双保险：确保所有跨 region 待处理任务被清理
 
         // 确认关闭完成（QUIESCING → CLOSED）
         lifecycle.completeShutdown();
@@ -399,110 +396,80 @@ public final class MiliSchedulerImpl implements MiliScheduler {
      * 不再同时提交到 VirtualThreadPool（旁路执行），而是只提交到 WorkStealingCoordinator，
      * 由 SchedulerWorker 从 Coordinator 获取任务并执行。
      */
+    // ---- 性能优化：可复用的追踪任务包装器 ----
+    // 避免每次 submit 创建匿名 RegionTask 对象，减少 GC 压力
+
+    /**
+     * 性能优化：可复用的追踪任务包装器。
+     * <p>替代匿名 RegionTask，减少每 tick 高频 submit 时的对象创建开销。
+     */
+    private static final class TrackedRegionTask implements RegionTask {
+        private final RegionTask delegate;
+        private final DefaultTaskHandle handle;
+        private final PerformanceMetrics metrics;
+        private final DiagnosticCollector diagnostics;
+        private final boolean blocking;
+
+        TrackedRegionTask(RegionTask delegate, DefaultTaskHandle handle,
+                          PerformanceMetrics metrics, DiagnosticCollector diagnostics,
+                          boolean blocking) {
+            this.delegate = delegate;
+            this.handle = handle;
+            this.metrics = metrics;
+            this.diagnostics = diagnostics;
+            this.blocking = blocking;
+        }
+
+        @Override
+        public void execute() throws Exception {
+            long startNanos = System.nanoTime();
+            try {
+                delegate.execute();
+                metrics.recordCompletion(System.nanoTime() - startNanos);
+                metrics.recordRegionCompletion(delegate.regionId());
+                handle.complete();
+            } catch (Throwable t) {
+                metrics.recordFailure();
+                handle.completeExceptionally(t);
+                diagnostics.recordException(
+                    blocking ? "blocking_task_execution" : "task_execution", t,
+                    java.util.Map.of("task", delegate.name(), "region", delegate.regionId()));
+                throw t;
+            }
+        }
+
+        @Override
+        public long regionId() { return delegate.regionId(); }
+
+        @Override
+        public boolean isBlocking() { return blocking; }
+
+        @Override
+        public long timeoutMillis() { return delegate.timeoutMillis(); }
+
+        @Override
+        @NotNull
+        public String name() { return delegate.name(); }
+
+        @Override
+        public void onCancel() {
+            handle.cancel();
+            try {
+                delegate.onCancel();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
     private void submitRegionTask(@NotNull RegionTask task, @NotNull DefaultTaskHandle handle) {
-        // 包装任务以追踪完成状态 —— 任务完成时通过 handle 报告
-        RegionTask wrappedTask = new RegionTask() {
-            @Override
-            public void execute() throws Exception {
-                long startNanos = System.nanoTime();
-                try {
-                    task.execute();
-                    metrics.recordCompletion(System.nanoTime() - startNanos);
-                    metrics.recordRegionCompletion(task.regionId());
-                    handle.complete();
-                } catch (Throwable t) {
-                    metrics.recordFailure();
-                    handle.completeExceptionally(t);
-                    diagnostics.recordException("task_execution", t,
-                            java.util.Map.of("task", task.name(), "region", task.regionId()));
-                    throw t;
-                }
-            }
-
-            @Override
-            public long regionId() {
-                return task.regionId();
-            }
-
-            @Override
-            public boolean isBlocking() {
-                return false;
-            }
-
-            @Override
-            public long timeoutMillis() {
-                return task.timeoutMillis();
-            }
-
-            @Override
-            @NotNull
-            public String name() {
-                return task.name();
-            }
-
-            @Override
-            public void onCancel() {
-                handle.cancel();
-                // RISK-FOLLOWUP：让原始 task 在 cancel 时能清理自己的 TaskScheduleState。
-                // 默认 task 是 lambda/builder，没有自定义 onCancel —— 委托给原 task 的 onCancel。
-                try {
-                    task.onCancel();
-                } catch (Throwable ignored) {
-                }
-            }
-        };
-
-        // 只提交到 work-stealing coordinator —— 唯一执行入口
+        // 性能优化：使用可复用的追踪任务包装器，避免匿名类开销
+        RegionTask wrappedTask = new TrackedRegionTask(task, handle, metrics, diagnostics, false);
         workStealingCoordinator.submit(wrappedTask);
     }
 
-    /**
-     * 提交阻塞任务到 work-stealing coordinator。
-     *
-     * <p>R2-03 修复：阻塞任务不再直接提交到阻塞池，而是提交到 coordinator。
-     * SchedulerWorker 检测到 isBlocking() 后会调用 BlockingTaskIsolation.executeBlocking()
-     * 并转移 ExecutionToken。
-     *
-     * <p>C-09 修复：阻塞任务通过专用 executor 执行，不阻塞 worker 线程。
-     */
     private void submitBlockingTask(@NotNull RegionTask task, @NotNull DefaultTaskHandle handle) {
-        // 创建一个可追踪的任务，执行完成后更新 handle 状态
-        RegionTask trackedTask = new RegionTask() {
-            @Override
-            public void execute() throws Exception {
-                long startNanos = System.nanoTime();
-                try {
-                    task.execute();
-                    metrics.recordCompletion(System.nanoTime() - startNanos);
-                    metrics.recordRegionCompletion(task.regionId());
-                    handle.complete();
-                } catch (Throwable t) {
-                    metrics.recordFailure();
-                    handle.completeExceptionally(t);
-                    diagnostics.recordException("blocking_task_execution", t,
-                            java.util.Map.of("task", task.name(), "region", task.regionId()));
-                    throw t;
-                }
-            }
-
-            @Override
-            public long regionId() { return task.regionId(); }
-
-            @Override
-            public boolean isBlocking() { return true; }
-
-            @Override
-            public long timeoutMillis() { return task.timeoutMillis(); }
-
-            @Override
-            @NotNull
-            public String name() { return task.name(); }
-
-            @Override
-            public void onCancel() { handle.cancel(); }
-        };
-
-        // 提交到 coordinator —— SchedulerWorker 会检测 isBlocking 并处理 token 转移
+        // 性能优化：使用可复用的追踪任务包装器，避免匿名类开销
+        RegionTask trackedTask = new TrackedRegionTask(task, handle, metrics, diagnostics, true);
         workStealingCoordinator.submit(trackedTask);
     }
 

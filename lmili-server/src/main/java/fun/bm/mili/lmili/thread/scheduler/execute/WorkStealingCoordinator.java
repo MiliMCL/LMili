@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.LockSupport;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * 工作窃取协调器 —— 实现跨 region 的负载均衡。
@@ -34,6 +35,8 @@ public final class WorkStealingCoordinator {
 
     private final int workerCount;
     private final ConcurrentHashMap<Long, RegionSlot> regionSlots;
+    // 性能优化：维护 region 索引，避免 stealWork 遍历 ConcurrentHashMap.entrySet()
+    private final CopyOnWriteArrayList<RegionSlot> regionSlotIndex;
     private final WorkerState[] workers;
     private final LongAdder totalSteals = new LongAdder();
     private final LongAdder totalStealAttempts = new LongAdder();
@@ -65,6 +68,7 @@ public final class WorkStealingCoordinator {
     public WorkStealingCoordinator(int workerCount) {
         this.workerCount = Math.max(1, workerCount);
         this.regionSlots = new ConcurrentHashMap<>();
+        this.regionSlotIndex = new CopyOnWriteArrayList<>();
         this.workers = new WorkerState[this.workerCount];
         this.parkedWorkers = new AtomicBoolean[this.workerCount];
         for (int i = 0; i < this.workerCount; i++) {
@@ -132,12 +136,21 @@ public final class WorkStealingCoordinator {
             }
             // 替换旧的（已关闭的）slot
             if (regionSlots.replace(regionId, previous, newSlot)) {
+                // 性能优化：更新索引
+                int prevIndex = regionSlotIndex.indexOf(previous);
+                if (prevIndex >= 0) {
+                    regionSlotIndex.set(prevIndex, newSlot);
+                } else {
+                    regionSlotIndex.add(newSlot);
+                }
                 LOGGER.debug("[WorkStealingCoordinator] Re-registered region #{} (gen {} → {})",
                         regionId, previous.generation, gen);
                 return newQueue;
             }
             return regionSlots.get(regionId).queue;
         }
+        // 性能优化：添加到索引
+        regionSlotIndex.add(newSlot);
         LOGGER.debug("[WorkStealingCoordinator] Registered region #{} (gen {})", regionId, gen);
         return newQueue;
     }
@@ -171,6 +184,8 @@ public final class WorkStealingCoordinator {
 
         // 步骤 4：从 map 中移除并 drain
         regionSlots.remove(regionId);
+        // 性能优化：从索引中移除
+        regionSlotIndex.remove(slot);
         List<RegionTask> remaining = queue.drain();
 
         LOGGER.debug("[WorkStealingCoordinator] Unregistered region #{} (gen {}, remaining: {})",
@@ -222,6 +237,8 @@ public final class WorkStealingCoordinator {
 
         // 4. 最后从 map 中移除（后续 submit 会重新注册，获得新 generation 的 slot）
         regionSlots.remove(regionId);
+        // 性能优化：从索引中移除
+        regionSlotIndex.remove(slot);
     }
 
     public boolean isRegionRegistered(final long regionId) {
@@ -325,28 +342,31 @@ public final class WorkStealingCoordinator {
 
     @Nullable
     private PollResult stealWork(int localWorkerId) {
-        int size = regionSlots.size();
+        // 性能优化：使用索引获取 size，避免遍历 ConcurrentHashMap
+        int size = regionSlotIndex.size();
         if (size == 0) return null;
 
         totalStealAttempts.increment();
         int maxAttempts = Math.min(size, Math.max(3, workerCount));
         int skip = size > maxAttempts ? ThreadLocalRandom.current().nextInt(size) : 0;
 
-        int idx = 0, attempts = 0;
-        for (var entry : regionSlots.entrySet()) {
-            if (idx < skip) { idx++; continue; }
-            if (attempts >= maxAttempts) break;
-            PollResult result = tryStealFromSlot(entry.getValue(), localWorkerId);
-            if (result != null) return result;
-            idx++; attempts++;
+        // 性能优化：直接通过索引随机访问 RegionSlot
+        int attempts = 0;
+        for (int i = skip; i < size && attempts < maxAttempts; i++) {
+            RegionSlot slot = regionSlotIndex.get(i);
+            if (slot != null) {
+                PollResult result = tryStealFromSlot(slot, localWorkerId);
+                if (result != null) return result;
+                attempts++;
+            }
         }
-        idx = 0;
-        for (var entry : regionSlots.entrySet()) {
-            if (idx >= skip) break;
-            if (attempts >= maxAttempts) break;
-            PollResult result = tryStealFromSlot(entry.getValue(), localWorkerId);
-            if (result != null) return result;
-            idx++; attempts++;
+        for (int i = 0; i < skip && attempts < maxAttempts; i++) {
+            RegionSlot slot = regionSlotIndex.get(i);
+            if (slot != null) {
+                PollResult result = tryStealFromSlot(slot, localWorkerId);
+                if (result != null) return result;
+                attempts++;
+            }
         }
 
         failedSteals.increment();
@@ -509,13 +529,14 @@ public final class WorkStealingCoordinator {
     public List<RegionTask> shutdown() {
         running.set(false);
         List<RegionTask> remaining = new ArrayList<>();
-        for (var entry : regionSlots.entrySet()) {
-            RegionQueue queue = entry.getValue().queue;
+        for (RegionSlot slot : regionSlotIndex) {
+            RegionQueue queue = slot.queue;
             queue.deactivate();
             queue.forceClose();
             remaining.addAll(queue.drain());
         }
         regionSlots.clear();
+        regionSlotIndex.clear();
 
         LOGGER.info("[WorkStealingCoordinator] Shutdown (steals: {}, success rate: {}%)",
                 totalSteals.sum(), String.format("%.1f", stealSuccessRate() * 100));

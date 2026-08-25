@@ -2438,7 +2438,7 @@ diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity
          }
 +        //Luminol start - Fix high position moving
 +        // Filter the threads as it may be called by the chunk system worker thread
-+        if (fun.bm.mili.config.modules.fixes.FoliaEntityMovingFixConfig.enabled && ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()){
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()){
 +            var finalPosition = delta.add(this.position);
 +            // not NaN (Prevent incorrect checks under NaN minecarts)
 +            if (!Double.isNaN(finalPosition.x) && !Double.isNaN(finalPosition.y) && !Double.isNaN(finalPosition.z)) {
@@ -3588,9 +3588,7 @@ diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Le
 +            var currPosition = ent.position();
 +            var toPosition = moveOutOfRegionException.getMovement().add(currPosition);
 +
-+            if (fun.bm.mili.config.modules.fixes.FoliaEntityMovingFixConfig.warnOnDetected) {
-+                MinecraftServer.LOGGER.warn("Entity {} with entityId {} has tried moving to another region!",ent, ent.getId());
-+            }
++            MinecraftServer.LOGGER.warn("Entity {} with entityId {} has tried moving to another region!",ent, ent.getId());
 +
 +            ent.getBukkitEntity().taskScheduler.schedule(entityFresh -> entityFresh.teleportAsync(
 +                    (ServerLevel) entityFresh.level(),

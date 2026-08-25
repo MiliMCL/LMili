@@ -1,0 +1,23 @@
+name: LMiliTestPlugin
+version: 1.0.0
+main: fun.bm.mili.testplugin.LMiliTestPlugin
+api-version: '1.21'
+description: Test plugin for LMili API - demonstrates unified scheduler usage
+mili-supported: true
+authors:
+  - LMiliDev
+
+commands:
+  lmtask:
+    description: Test LMili scheduler tasks
+    usage: /lmtask <async|sync|location|entity|metrics>
+    permission: lmilitest.command
+  lmtps:
+    description: Show TPS and scheduler status
+    usage: /lmtps
+    permission: lmilitest.command
+
+permissions:
+  lmilitest.command:
+    description: Allows using LMili test commands
+    default: op

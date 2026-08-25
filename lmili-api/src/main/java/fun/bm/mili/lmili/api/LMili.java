@@ -1,6 +1,7 @@
 package fun.bm.mili.lmili.api;
 
 import fun.bm.mili.lmili.api.identity.DefaultPluginIdentityManager;
+import fun.bm.mili.lmili.api.identity.PluginLifecycleBus;
 import fun.bm.mili.lmili.api.identity.PluginIdentityManager;
 import fun.bm.mili.lmili.api.identity.PluginIdentity;
 import fun.bm.mili.lmili.api.identity.PluginId;
@@ -54,8 +55,17 @@ public final class LMili {
     /** §12 LongTailEvent 公开访问（server-side install；plugin 端只读） */
     private static final AtomicReference<LongTailEvent> LONGT_REF = new AtomicReference<>();
 
+    /** Plugin 生命周期总线（plugin register/unregister/statusChange/conflict 通知） */
+    private static final PluginLifecycleBus LIFECYCLE_BUS = new PluginLifecycleBus();
+
+    /** plugin 间事件总线（plugin-to-plugin 解耦通信） */
+    private static final fun.bm.mili.lmili.api.event.PluginEventBus EVENT_BUS = new fun.bm.mili.lmili.api.event.PluginEventBus();
+
     /** PluginSchedulerCapture 公开访问（server-side install；plugin 端写入） */
     private static final AtomicReference<PluginSchedulerCapture> CAPTURE_REF = new AtomicReference<>();
+
+    /** §11 P2-3 Plugin 自定义 metrics 注册表 */
+    private static final AtomicReference<fun.bm.mili.lmili.api.observability.MetricsRegistry> METRICS_REG = new AtomicReference<>();
 
     private LMili() {}
 
@@ -115,6 +125,7 @@ public final class LMili {
         LONGT_REF.set(null);
         CAPTURE_REF.set(null);
         I18N_REF.set(null);
+        METRICS_REG.set(null);
     }
 
     /**
@@ -209,6 +220,45 @@ public final class LMili {
         return CAPTURE_REF.get() != null;
     }
 
+    // ================== §11 P2-3 Plugin 生命周期总线 ==================
+
+    /**
+     * 拿到全局生命周期总线。plugin 可订阅其他 plugin 的 register / unregister /
+     * 状态变更 / 冲突。监听失败由 LMili 静默处理（§6.2），但<b>不能阻塞</b>（§18.4）。
+     */
+    @NotNull
+    public static PluginLifecycleBus pluginLifecycleBus() {
+        return LIFECYCLE_BUS;
+    }
+
+    // ================== §11 P2-3 Plugin 自定义 metrics ==================
+
+    /**
+     * plugin 端：拿到 plugin 自定义指标注册表。返回 null 时表示 LMili 未装配
+     * （plugin 应跳过注册并继续工作）。
+     */
+    @Nullable
+    public static fun.bm.mili.lmili.api.observability.MetricsRegistry metricsRegistry() {
+        return METRICS_REG.get();
+    }
+
+    /** server-side：装配 MetricsRegistry（幂等）。 */
+    public static void installMetricsRegistry(
+            @NotNull fun.bm.mili.lmili.api.observability.MetricsRegistry registry) {
+        METRICS_REG.set(registry);
+    }
+
+    // ================== §11 P2-3 Plugin 间事件总线 ==================
+
+    /**
+     * 拿到全局 plugin 间事件总线。plugin 通过 topic + 强类型 payload 解耦通信。
+     * 卸载时 lifecycle bus 会自动 unsubscribe 该 plugin 的所有 subscription。
+     */
+    @NotNull
+    public static fun.bm.mili.lmili.api.event.PluginEventBus eventBus() {
+        return EVENT_BUS;
+    }
+
     // ================== §11 P2-3 Plugin i18n 适配 API ==================
 
     /**
@@ -269,6 +319,28 @@ public final class LMili {
     }
 
     /**
+     * player locale 感知的翻译 —— plugin 想"给某玩家按其客户端语言返回文案"时调用。
+     *
+     * <p>查找顺序：playerLocale + 命名空间 → playerLocale + 全局 → currentLocale + 命名空间
+     *   → currentLocale + 全局 → 命名空间 + 默认 → 全局 + 默认 → key 本身。
+     *
+     * <p>典型场景：
+     * <pre>{@code
+     * String msg = LMili.tForPlayer(myId, player, "shop.welcome", playerName);
+     * // zh_cn 玩家 → "欢迎光临"
+     * // en_us 玩家 → "Welcome"
+     * }</pre>
+     *
+     * <p>注意：避免在每次事件触发时频繁解析 locale —— plugin 可缓存 {@code player.locale()}
+     *   或调用本方法在 playerLocale 变化时刷新。
+     */
+    @NotNull
+    public static String tForPlayer(@NotNull PluginId id, @NotNull String playerLocale,
+                                    @NotNull String key, Object... args) {
+        return trForPlayer(id, playerLocale, key, args);
+    }
+
+    /**
      * 列出当前 server 上所有已加载 locale（如 {@code ["zh_cn","en_us","ja_jp"]}）。
      * plugin 可用于 i18n 自检。
      */
@@ -286,6 +358,7 @@ public final class LMili {
         String getCurrentLocale();
         String tr(String key, Object[] args);
         String trNs(PluginId id, String key, Object[] args);
+        String trForPlayer(PluginId id, String playerLocale, String key, Object[] args);
         void registerProps(PluginId id, String locale, Properties props);
         void registerClasspath(PluginId id, String locale, ClassLoader loader);
         java.util.Set<String> availableLocales();
@@ -313,6 +386,12 @@ public final class LMili {
         final I18nFunctions f = I18N_REF.get();
         if (f == null) return applyArgs(key, args);
         return f.trNs(id, key, args); // f.trNs 内部已处理 args
+    }
+
+    private static String trForPlayer(PluginId id, String playerLocale, String key, Object[] args) {
+        final I18nFunctions f = I18N_REF.get();
+        if (f == null) return applyArgs(key, args);
+        return f.trForPlayer(id, playerLocale, key, args);
     }
 
     private static void registerTranslationsImpl(PluginId id, String locale, Properties props) {

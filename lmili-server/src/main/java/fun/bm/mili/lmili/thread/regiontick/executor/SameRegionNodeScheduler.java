@@ -12,14 +12,13 @@ import java.util.Objects;
  * 同 region 快路径 DAG 节点路由器。
  *
  * <p>当 DAG 节点所属 region 与当前 region tick 上下文一致时（或者节点是 global），
- * 直接在当前线程同步执行 —— Folia 的 {@code tickingRegion} 字段保持设置，
- * {@code TickThread.isTickThreadFor(...)} 校验自然通过。</p>
+ * 直接在当前线程同步执行。</p>
  *
  * <p>这是高效的快路径：避免跨 region 调度开销，前提是"节点属于当前 region"。</p>
  *
  * <h3>不变量</h3>
  * <ul>
- *   <li>当前线程是当前 region 的 tick 线程（Folia 已 setTickingRegion）</li>
+ *   <li>当前线程是当前 region 的 tick 线程</li>
  *   <li>节点 regionId == 当前 regionId 或节点为 global</li>
  * </ul>
  */
@@ -45,13 +44,13 @@ public final class SameRegionNodeScheduler implements NodeScheduler {
                     "DAG node " + nodeId + " belongs to region #" + nodeRegionId
                             + " but is being dispatched from region #" + currentRegionId
                             + " via SameRegionNodeScheduler. Cross-region execution must go through "
-                            + "FoliaRegionNodeScheduler to acquire the target region's tickingRegion context.");
+                            + "CompositeNodeScheduler to route to the target region.");
         }
 
         if (LOGGER.isTraceEnabled()) {
             LOGGER.trace("[DAG] Executing node {} in-region {} (fast path)", nodeId, currentRegionId);
         }
-        // 直接在当前线程同步执行 —— Folia 的 tickingRegion 仍指向 currentContext.region
+        // 直接在当前线程同步执行
         body.run();
     }
 

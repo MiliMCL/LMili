@@ -5,6 +5,9 @@ import fun.bm.mili.lmili.runtime.policy.PressureState;
 import fun.bm.mili.utils.performance.TPSTracker;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongFunction;
 
 /**
@@ -34,6 +37,15 @@ public final class BudgetAllocator {
     /** 压力态 reserve 开关（CPU_PRESSURE 时关闭） */
     private volatile boolean reserveClosedByPolicy = false;
 
+    // ---- 性能优化：缓存 rarely-changing 值 ----
+    /** CPU 核数缓存（启动后不变；避免每次 allocate 调用 availableProcessors 原生调用） */
+    private final int cachedProcessors;
+    private final double cachedCoreFactor;
+    /** TPS 缓存（定期刷新；避免每次 allocate 调用 TPSTracker.getTPS） */
+    private final AtomicReference<TpsSnapshot> tpsCache = new AtomicReference<>(new TpsSnapshot(20.0, 0L));
+    /** TPS 刷新间隔（ns）：100ms */
+    private static final long TPS_REFRESH_INTERVAL_NS = 100_000_000L;
+
     /**
      * 按 region 分配预算（每 tick 新建账本实例；推导结果 EMA 平滑 + 钳制）。
      */
@@ -61,19 +73,35 @@ public final class BudgetAllocator {
 
     private RegionTickBudget computeBudget(long regionId, PressureState state) {
         final TickBudgetConfig cfg = config;
-        final double cores = Runtime.getRuntime().availableProcessors();
-        final double coreFactor = clamp(cores / 8.0, 0.6, 1.6);
-        final double tps;
-        try {
-            tps = Math.max(1.0, TPSTracker.getTPS());
-        } catch (Throwable t) {
-            // TPSTracker 未初始化（非服务器环境）：按 20 TPS 中性值推导
-            // fall-through 用 20.0
-            final double tps2 = 20.0;
-            return computeBudget0(regionId, state, cfg, coreFactor, tps2, regionFactor(regionId));
+        final double cachedTps = getCachedTps();
+        final double tpsFactor = clamp(cachedTps / 20.0, 0.5, 1.2);
+        return computeBudget0(regionId, state, cfg, cachedCoreFactor, tpsFactor, regionFactor(regionId));
+    }
+
+    /** 获取缓存的 TPS（定期刷新，避免频繁调用 TPSTracker） */
+    private double getCachedTps() {
+        final TpsSnapshot snap = tpsCache.get();
+        final long now = System.nanoTime();
+        if (now - snap.timestampNs > TPS_REFRESH_INTERVAL_NS) {
+            try {
+                final double fresh = Math.max(1.0, TPSTracker.getTPS());
+                tpsCache.compareAndSet(snap, new TpsSnapshot(fresh, now));
+                return fresh;
+            } catch (Throwable t) {
+                return snap.value;
+            }
         }
-        final double tpsFactor = clamp(tps / 20.0, 0.5, 1.2);
-        return computeBudget0(regionId, state, cfg, coreFactor, tpsFactor, regionFactor(regionId));
+        return snap.value;
+    }
+
+    /** TPS 缓存快照（不可变；CAS 原子交换） */
+    private static final class TpsSnapshot {
+        final double value;
+        final long timestampNs;
+        TpsSnapshot(double value, long timestampNs) {
+            this.value = value;
+            this.timestampNs = timestampNs;
+        }
     }
 
     private RegionTickBudget computeBudget0(long regionId, PressureState state, TickBudgetConfig cfg,
@@ -147,5 +175,11 @@ public final class BudgetAllocator {
         static double ema(double prev, double sample, double alpha) {
             return alpha * sample + (1.0 - alpha) * prev;
         }
+    }
+
+    // ---- 构造器 ----
+    {
+        cachedProcessors = Runtime.getRuntime().availableProcessors();
+        cachedCoreFactor = clamp(cachedProcessors / 8.0, 0.6, 1.6);
     }
 }

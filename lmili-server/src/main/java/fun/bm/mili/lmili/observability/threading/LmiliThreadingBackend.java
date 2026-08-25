@@ -12,6 +12,7 @@ import fun.bm.mili.lmili.api.threading.PluginThreadSpec;
 import fun.bm.mili.lmili.api.threading.StructuredConcurrency;
 import fun.bm.mili.lmili.api.threading.Threading;
 import fun.bm.mili.lmili.api.threading.ThreadingBackend;
+import fun.bm.mili.lmili.api.threading.LmiliRunnable;
 import fun.bm.mili.lmili.thread.scheduler.MiliSchedulerHolder;
 import fun.bm.mili.lmili.thread.scheduler.PluginSchedulerBridge;
 import fun.bm.mili.lmili.thread.scheduler.api.MiliScheduler;
@@ -177,18 +178,44 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         public boolean isVirtual() { return spec.virtualThreads(); }
 
         private Runnable wrap(Runnable task) {
+            final Runnable stamped;
+            if (task instanceof LmiliRunnable) {
+                stamped = task;
+            } else if (spec.pluginId() != null) {
+                PluginId owner = (PluginId) spec.pluginId();
+                stamped = LmiliRunnable.wrap(owner, task);
+            } else {
+                stamped = task;
+            }
             return () -> {
-                try { task.run(); }
+                BukkitSchedulerHook.enterLmiliPath();
+                try { stamped.run(); }
                 catch (Throwable t) { handleUncaught(t); }
-                finally { active.decrementAndGet(); }
+                finally {
+                    BukkitSchedulerHook.exitLmiliPath();
+                    active.decrementAndGet();
+                }
             };
         }
 
         private <T> Callable<T> wrapCallable(Callable<T> task) {
+            final Callable<T> stamped;
+            if (task instanceof LmiliRunnable.LmiliCallable) {
+                stamped = task;
+            } else if (spec.pluginId() != null) {
+                final PluginId owner = (PluginId) spec.pluginId();
+                stamped = LmiliRunnable.wrap(owner, task);
+            } else {
+                stamped = task;
+            }
             return () -> {
-                try { return task.call(); }
+                BukkitSchedulerHook.enterLmiliPath();
+                try { return stamped.call(); }
                 catch (Throwable t) { handleUncaught(t); throw t; }
-                finally { active.decrementAndGet(); }
+                finally {
+                    BukkitSchedulerHook.exitLmiliPath();
+                    active.decrementAndGet();
+                }
             };
         }
 
@@ -265,10 +292,25 @@ public final class LmiliThreadingBackend implements ThreadingBackend {
         public int activeTaskCount() { return active.get(); }
 
         private Runnable wrap(Runnable task) {
+            final Runnable stamped;
+            if (task instanceof LmiliRunnable) {
+                stamped = task;
+            } else if (spec.pluginId() != null) {
+                // §C LMili Required：plugin 走 LMili 入口时，自动把 Runnable 包成 LmiliRunnable
+                // —— 这是 hook 区分 LMili task 与 native Bukkit task 的依据。
+                PluginId owner = (PluginId) spec.pluginId();
+                stamped = LmiliRunnable.wrap(owner, task);
+            } else {
+                stamped = task;
+            }
             return () -> {
-                try { task.run(); }
+                BukkitSchedulerHook.enterLmiliPath();
+                try { stamped.run(); }
                 catch (Throwable t) { LOGGER.error("[Threading-sched/{}] uncaught", spec.namePrefix(), t); }
-                finally { active.decrementAndGet(); }
+                finally {
+                    BukkitSchedulerHook.exitLmiliPath();
+                    active.decrementAndGet();
+                }
             };
         }
     }

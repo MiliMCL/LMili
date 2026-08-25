@@ -158,12 +158,15 @@ public final class PluginIdentityAutoDiscovery {
         // PluginIdentity 是 final，只能通过 of() 构造；non-addon 必须 parent 为空。
         // PluginIdentity.of 默认状态 DISCOVERED + TrustLevel UNKNOWN（看代码）。
         // 强制 trust = UNVERIFIED 需要 register 后再 withTrustLevel。
+        // §C 26.2+：外部 plugin（无 lmili.json）也被强制 LMILI_REQUIRED（兼容层被删除）；
+        // PluginIdentityBootstrap 会通过 source=="auto-discovery (Bukkit)" 检测并禁用 plugin。
         PluginIdentity base = PluginIdentity.of(
                 id, name, version, publisher,
                 PluginType.LEGACY, // 外部 plugin 未声明 lmili.json，视为 LEGACY
                 java.util.Optional.empty(),
                 source,
-                plugin.getName()
+                plugin.getName(),
+                fun.bm.mili.lmili.api.identity.SchedulerDelegation.LMILI_REQUIRED
         );
         // 外部 plugin 默认 LOCAL（未签名本地安装）
         return base.withTrustLevel(fun.bm.mili.lmili.api.identity.PluginTrustLevel.LOCAL);

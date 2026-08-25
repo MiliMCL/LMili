@@ -34,6 +34,18 @@ import java.util.concurrent.ConcurrentMap;
  * plugin lifecycle. Implements V2 §12 &quot;Discover → Read → Parse → Validate
  * → Register Identity → Create Context → Create Domain → Activate&quot;.
  *
+ * <p><b>强约束策略（§C LMili Required）</b>：
+ * <ul>
+ *   <li>每个 plugin 必须在 {@code lmili.json} 声明 scheduler delegation。</li>
+ *   <li>{@code "schedulerDelegation": "LMILI"}（默认）→ plugin 被允许加载并注册 runtime context。</li>
+ *   <li>{@code "schedulerDelegation": "BUKKIT"} → plugin 被允许加载但被标记为 LEGACY，
+ *       log 警告（管理员应该让其迁移到 LMILI）。</li>
+ *   <li>没有 {@code lmili.json} → plugin 被<b>强制禁用</b>并报告原因。</li>
+ *   <li>声明了 {@code "schedulerDelegation": "LMILI_REQUIRED"} → plugin 被允许加载，
+ *       同时强制其所有调度走 {@code Threading / LMili.scheduler()}；检测到直接
+ *       {@code BukkitScheduler.runTask} 调用会被报告（但不禁用 plugin —— §18.4 不粗暴全局锁）。</li>
+ * </ul>
+ *
  * <p>Behavior:</p>
  * <ul>
  *   <li>{@link #install()} registers listeners and replays already-enabled plugins.</li>
@@ -43,6 +55,7 @@ import java.util.concurrent.ConcurrentMap;
  *       is recorded. The incoming plugin is marked CONFLICT.</li>
  *   <li>On {@link PluginDisableEvent} the context is removed and the registry
  *       entry is unregistered.</li>
+ *   <li>Plugin 没有声明 → {@link #enforceLmiliRequired(Plugin)} 立即 disable。</li>
  * </ul>
  */
 public final class PluginIdentityBootstrap implements Listener {
@@ -77,6 +90,26 @@ public final class PluginIdentityBootstrap implements Listener {
         return NullPlugin.INSTANCE;
     }
 
+    /**
+     * §C 严格模式：强制禁用 plugin + 取消 seenPluginNames 标记让下次 enable 时
+     *     能被重新识别。后续 plugin 仍可被手动加载（修 lmili.json 后 reload）。
+     */
+    private void enforceDisable(@NotNull final Plugin bukkitPlugin, @NotNull final String reason) {
+        try {
+            Bukkit.getPluginManager().disablePlugin(bukkitPlugin);
+        } catch (final Throwable t) {
+            MiliLogger.LOGGER.warn("{}disablePlugin({}) failed: {}", LOG_PREFIX, bukkitPlugin.getName(), t.toString());
+        }
+        // seenPluginNames 已 add；下次 reload 时才会再次走 handlePluginEnable。
+        // 这里让 disablePlugin 触发 PluginDisableEvent → handlePluginDisable 会被调，
+        // 但我们的 handlePluginDisable 依赖 seenPluginNames.remove 早返回。我们
+        // 直接 remove 让它能正确清理（其实 disabled 的 plugin 不需要清理 runtime ctx，
+        // 因为 buildContext() 没被调过 —— ctx 仍未注册）。
+        seenPluginNames.remove(bukkitPlugin.getName());
+        MiliLogger.LOGGER.warn("{}plugin {} forced disabled: {}", LOG_PREFIX,
+                bukkitPlugin.getName(), reason);
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPluginEnableMonitor(final PluginEnableEvent event) {
         handlePluginEnable(event.getPlugin());
@@ -94,6 +127,30 @@ public final class PluginIdentityBootstrap implements Listener {
         if (!seenPluginNames.add(name)) return;
 
         final PluginIdentity incoming = resolveIdentity(bukkitPlugin, name);
+
+        // §C LMili Required 严格策略（26.2+）：plugin 没有 lmili.json 或 delegation
+        // 不是 LMILI_REQUIRED → 立即禁用 plugin 并拒绝加载。
+        //
+        // 历史上（§18.9）曾放过没有 lmili.json 的 plugin（BUKKIT_ONLY fallback），
+        // 但这导致观测失效 / 线程碎片 / quota 失效。本次收紧。
+        if (!"lmili.json".equals(incoming.source())) {
+            MiliLogger.LOGGER.error("{}plugin {} has NO lmili.json. Per §C LMili Required, "
+                    + "this plugin is being DISABLED. Add lmili.json with schedulerDelegation "
+                    + "field (must equal \"LMILI_REQUIRED\") and reload.",
+                    LOG_PREFIX, name);
+            enforceDisable(bukkitPlugin, "missing lmili.json");
+            return;
+        }
+        if (incoming.delegation() != fun.bm.mili.lmili.api.identity.SchedulerDelegation.LMILI_REQUIRED) {
+            MiliLogger.LOGGER.error("{}plugin {} declared schedulerDelegation={}; "
+                    + "only LMILI_REQUIRED is accepted in LMili 26.2+.",
+                    LOG_PREFIX, name, incoming.delegation());
+            enforceDisable(bukkitPlugin, "non-LMILI_REQUIRED delegation");
+            return;
+        }
+
+        MiliLogger.LOGGER.info("{}plugin {} accepted (delegation={}, source={})",
+                LOG_PREFIX, name, incoming.delegation(), incoming.source());
         final PluginIdentityManager manager = LMili.getPluginIdentityManager();
         final PluginIdentity registered = manager.register(incoming);
 
@@ -124,6 +181,39 @@ public final class PluginIdentityBootstrap implements Listener {
         PluginRuntimeContext.registerForPluginId(registered.id(), ctx);
         bukkitById.put(name, bukkitPlugin);
         logRegistered(name, ctx);
+
+        // Flush pending capture stats (spark 早于 LMili bootstrap 注册 → ctx 之前为 null，
+        // 报告被暂存在 LocalStats；现在 ctx 就绪，把数字写回 quota / observability）
+        try {
+            fun.bm.mili.lmili.api.observability.PluginSchedulerCapture cap =
+                    fun.bm.mili.lmili.api.LMili.schedulerCapture();
+            if (cap != null) {
+                fun.bm.mili.lmili.api.observability.PluginSchedulerCapture.CaptureStats stats =
+                        cap.statsOf(registered.id());
+                if (stats.submitsReported() > 0 || stats.completesReported() > 0
+                        || stats.failuresReported() > 0) {
+                    if (stats.submitsReported() > 0) {
+                        for (long i = 0; i < stats.submitsReported(); i++) {
+                            ctx.resourceQuota().onTaskSubmit();
+                        }
+                    }
+                    if (stats.totalExecutionNanos() > 0) {
+                        ctx.resourceQuota().onTaskFinish(stats.totalExecutionNanos(), true);
+                    }
+                    if (stats.failuresReported() > 0) {
+                        for (long i = 0; i < stats.failuresReported(); i++) {
+                            ctx.observability().recordTaskFailed();
+                        }
+                    }
+                    MiliLogger.LOGGER.info("{}captured pending stats for {}: submits={}, completes={}, failures={}",
+                            LOG_PREFIX, registered.id().value(),
+                            stats.submitsReported(), stats.completesReported(),
+                            stats.failuresReported());
+                }
+            }
+        } catch (Throwable t) {
+            // §6.2 fail-safe
+        }
     }
 
     private void handlePluginDisable(final Plugin bukkitPlugin) {
@@ -233,10 +323,16 @@ public final class PluginIdentityBootstrap implements Listener {
                     loaded.type(),
                     loaded.parentId(),
                     "lmili.json",
-                    name);
+                    name,
+                    loaded.delegation());
         }
-        final PluginIdentity fallback = PluginIdentityFallback.fromBukkitPlugin(bukkitPlugin);
-        if (fallback != null) return fallback;
+        // §C 26.2+: 没有 lmili.json → 不再走 PluginIdentityFallback。
+        // handlePluginEnable 通过 resolveIdentity 返回的 PluginIdentity.source() 判断
+        // 是 "lmili.json" 还是 "auto-discovery (Bukkit)"，分别处理（前者正常，
+        // 后者 enforceDisable）。
+        //
+        // 兜底：返回 source = "auto-discovery (Bukkit)" 的 LEGACY 身份，让
+        // handlePluginEnable 在下一行 enforceDisable。
         return PluginIdentityFallback.forBukkit(name, "0.0.0");
     }
 }

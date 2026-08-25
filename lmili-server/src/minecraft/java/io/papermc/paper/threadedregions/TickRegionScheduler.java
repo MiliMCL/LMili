@@ -33,12 +33,12 @@ public class TickRegionScheduler {
 
     public static final int TICK_RATE = 20;
     public static long TIME_BETWEEN_TICKS = 1_000_000_000L / TICK_RATE; // ns
-    // Folia start - watchdog
-    public static final FoliaWatchdogThread WATCHDOG_THREAD = new FoliaWatchdogThread();
+    // Mili start - watchdog
+    public static final LMiliWatchdogThread WATCHDOG_THREAD = new LMiliWatchdogThread();
     static {
         WATCHDOG_THREAD.start();
     }
-    // Folia end - watchdog
+    // Mili end - watchdog
 
     // Mili start - unified scheduler (Folia scheduler removed)
     // Stub enum kept for backward compatibility with GlobalConfiguration — not used by Mili scheduler
@@ -353,7 +353,7 @@ public class TickRegionScheduler {
                 this.currentTickingThread = Thread.currentThread();
             }
 
-            final FoliaWatchdogThread.RunningTick runningTick = new FoliaWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()); // Folia - watchdog
+            final LMiliWatchdogThread.RunningTick runningTick = new LMiliWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()); // Folia - watchdog
             WATCHDOG_THREAD.addTick(runningTick); // Folia - watchdog
             try {
                 this.runRegionTasks(() -> {
@@ -364,7 +364,7 @@ public class TickRegionScheduler {
                 // don't release region for another tick
                 return false;
             } finally {
-                WATCHDOG_THREAD.removeTick(runningTick); // Folia - watchdog
+                WATCHDOG_THREAD.removeTick(runningTick.thread); // Folia - watchdog
                 final long tickEnd = System.nanoTime();
                 final long cpuEnd = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
 
@@ -438,7 +438,7 @@ public class TickRegionScheduler {
                 this.currentTickingThread = Thread.currentThread();
             }
 
-            final FoliaWatchdogThread.RunningTick runningTick = new FoliaWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()); // Folia - region threading
+            final LMiliWatchdogThread.RunningTick runningTick = new LMiliWatchdogThread.RunningTick(tickStart, this, Thread.currentThread()); // Folia - region threading
             WATCHDOG_THREAD.addTick(runningTick); // Folia - region threading
             try {
                 // next start isn't updated until the end of this tick
@@ -448,7 +448,7 @@ public class TickRegionScheduler {
                 // regionFailed will schedule a shutdown, so we should avoid letting this region tick further
                 return false;
             } finally {
-                WATCHDOG_THREAD.removeTick(runningTick); // Folia - region threading
+                WATCHDOG_THREAD.removeTick(runningTick.thread); // Folia - region threading
                 final long tickEnd = System.nanoTime();
                 final long cpuEnd = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
 

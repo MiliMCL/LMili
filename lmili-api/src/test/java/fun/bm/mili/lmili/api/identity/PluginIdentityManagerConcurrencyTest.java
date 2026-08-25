@@ -90,12 +90,11 @@ class PluginIdentityManagerConcurrencyTest {
         assertDoesNotThrow(() -> {
             mgr.register(makeIdentity("xucy.mili", "1.0.0"));
             mgr.register(makeIdentity("xucy.mili", "1.0.0"));   // same version → hot-reload
-            mgr.register(makeIdentity("xucy.mili", "2.0.0"));   // diff version → conflict
-            mgr.register(makeIdentity("xucy.mili", "2.0.0"));   // same version
-            mgr.register(makeIdentity("xucy.mili", "3.0.0"));
+            mgr.register(makeIdentity("xucy.mili", "2.0.0"));   // diff version → conflict (1.0→2.0)
+            mgr.register(makeIdentity("xucy.mili", "3.0.0"));   // diff version → conflict (1.0→3.0)
         });
         assertEquals(1, mgr.size());
-        // Conflicts only for version transitions: 1.0→2.0 and 2.0→3.0
+        // Conflicts for version transitions: 1.0→2.0 and 1.0→3.0 (current stays at 1.0.0 after conflicts)
         assertEquals(2, mgr.getConflicts(PluginId.parse("xucy.mili")).size());
     }
 

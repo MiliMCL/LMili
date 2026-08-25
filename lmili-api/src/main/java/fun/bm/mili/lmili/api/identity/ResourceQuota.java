@@ -124,6 +124,10 @@ public final class ResourceQuota {
      * Record that a submitted task was cancelled before completion (e.g. the
      * plugin was disabled). Best-effort dequeue: the running/queued split is
      * an estimate, so the queued counter is decremented at most to zero.
+     *
+     * <p>§7.1 不变量：cancelled 任务不计入 in-flight，但<b>仍计入</b> tasksSubmitted
+     * （曾经提交过）。调用方可基于 {@code tasksSubmitted - tasksCompleted - tasksCancelled}
+     * 推算 "leaked / never-completed" 任务数。
      */
     public void onTaskCancelled() {
         tasksCancelled.incrementAndGet();
@@ -132,6 +136,27 @@ public final class ResourceQuota {
             if (cur <= 0) break;
             if (tasksQueued.compareAndSet(cur, cur - 1)) break;
         }
+    }
+
+    /**
+     * §7.1 不变量检查：验证 {@code submitted == running + queued + completed + failed + timedOut + cancelled}。
+     * 用于 plugin runtime 启动时 / 周期性检查 / 单元测试。
+     *
+     * @return true if accounting is consistent
+     */
+    public boolean verifyAccounting() {
+        final long s = tasksSubmitted.get();
+        final long r = tasksRunning.get();
+        final long q = tasksQueued.get();
+        final long c = tasksCompleted.get();
+        final long f = tasksFailed.get();
+        final long t = tasksTimedOut.get();
+        final long cn = tasksCancelled.get();
+        // 注意：timedOut 已包含在 failed 计数里
+        //      → submitted == running + queued + (completed - failed) + failed + cancelled
+        //      = running + queued + completed + cancelled
+        final long expected = r + q + (c - f) + f + cn;
+        return s == expected;
     }
 
     public void onRejected() { rejected.incrementAndGet(); }

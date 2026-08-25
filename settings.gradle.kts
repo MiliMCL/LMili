@@ -22,3 +22,5 @@ rootProject.name = "mili"
 
 include("lmili-api")
 include("lmili-server")
+include(":lmili-api-dev:example:LMiliTestPlugin")
+project(":lmili-api-dev:example:LMiliTestPlugin").projectDir = file("lmili-api-dev/example/LMiliTestPlugin")

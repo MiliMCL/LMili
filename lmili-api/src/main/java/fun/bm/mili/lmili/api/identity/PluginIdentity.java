@@ -38,6 +38,8 @@ public final class PluginIdentity {
     private final Instant registeredAt;
     private final String source;          // "lmili.json" | "plugin.yml"
     private final @Nullable String bukkitPluginName;
+    /** §C LMili Required 调度委托策略（默认 LMILI_REQUIRED） */
+    private final SchedulerDelegation delegation;
 
     private PluginIdentity(@NotNull final PluginId id,
                            @NotNull final String name,
@@ -49,7 +51,8 @@ public final class PluginIdentity {
                            @NotNull final PluginStatus status,
                            @NotNull final Instant registeredAt,
                            @NotNull final String source,
-                           @Nullable final String bukkitPluginName) {
+                           @Nullable final String bukkitPluginName,
+                           @NotNull final SchedulerDelegation delegation) {
         this.id = id;
         this.name = name;
         this.version = version;
@@ -57,6 +60,7 @@ public final class PluginIdentity {
         this.type = type;
         this.parent = parent;
         this.trustLevel = trustLevel;
+        this.delegation = delegation;
         this.status = status;
         this.registeredAt = registeredAt;
         this.source = source;
@@ -122,7 +126,47 @@ public final class PluginIdentity {
 
         return new PluginIdentity(id, name, version, publisher, type, parent,
                 PluginTrustLevel.UNKNOWN, PluginStatus.DISCOVERED,
-                Instant.now(), source, bukkitPluginName);
+                Instant.now(), source, bukkitPluginName, SchedulerDelegation.LMILI_REQUIRED);
+    }
+
+    /** 重载：含 delegation（lmili.json 解析用） */
+    @NotNull
+    public static PluginIdentity of(@NotNull final PluginId id,
+                                    @NotNull final String name,
+                                    @NotNull final String version,
+                                    @NotNull final String publisher,
+                                    @NotNull final PluginType type,
+                                    @NotNull final Optional<PluginId> parent,
+                                    @NotNull final String source,
+                                    @Nullable final String bukkitPluginName,
+                                    @NotNull final SchedulerDelegation delegation) {
+        Objects.requireNonNull(delegation, "delegation");
+        // Validate addon / parent consistency (同 of() 上面）
+        if (type == PluginType.ADDON) {
+            final Optional<PluginId> expectedParent = id.parentId();
+            if (parent.isEmpty()) {
+                throw new InvalidAddonParentException(id,
+                        expectedParent.orElseThrow(() ->
+                                new InvalidPluginMetadataException(source,
+                                        "addon '" + id.value() + "' is a top-level plugin, not an addon")),
+                        "addon must declare a parent");
+            }
+            if (!expectedParent.isPresent()) {
+                throw new InvalidAddonParentException(id, parent.get(),
+                        "id has no parent segment");
+            }
+            if (!expectedParent.get().equals(parent.get())) {
+                throw new InvalidAddonParentException(id, parent.get(),
+                        "expected '" + expectedParent.get().value()
+                                + "', got '" + parent.get().value() + "'");
+            }
+        } else if (parent.isPresent()) {
+            throw new InvalidPluginMetadataException(source,
+                    "non-addon plugin '" + id.value() + "' must not declare a parent");
+        }
+        return new PluginIdentity(id, name, version, publisher, type, parent,
+                PluginTrustLevel.UNKNOWN, PluginStatus.DISCOVERED,
+                Instant.now(), source, bukkitPluginName, delegation);
     }
 
     // ---- accessors (no setters) ------------------------------------------
@@ -138,19 +182,21 @@ public final class PluginIdentity {
     @NotNull public Instant registeredAt() { return registeredAt; }
     @NotNull public String source() { return source; }
     @Nullable public String bukkitPluginName() { return bukkitPluginName; }
+    /** §C LMili Required 调度委托策略 */
+    @NotNull public SchedulerDelegation delegation() { return delegation; }
 
     // ---- immutable transitions ------------------------------------------
 
     @NotNull public PluginIdentity withStatus(@NotNull final PluginStatus next) {
         return new PluginIdentity(id, name, version, publisher, type, parent,
                 trustLevel, Objects.requireNonNull(next, "next"),
-                registeredAt, source, bukkitPluginName);
+                registeredAt, source, bukkitPluginName, delegation);
     }
 
     @NotNull public PluginIdentity withTrustLevel(@NotNull final PluginTrustLevel next) {
         return new PluginIdentity(id, name, version, publisher, type, parent,
                 Objects.requireNonNull(next, "next"), status,
-                registeredAt, source, bukkitPluginName);
+                registeredAt, source, bukkitPluginName, delegation);
     }
 
     // ---- equality / representation --------------------------------------

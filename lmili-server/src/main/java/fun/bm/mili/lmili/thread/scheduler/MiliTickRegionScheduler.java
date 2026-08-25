@@ -97,8 +97,8 @@ public final class MiliTickRegionScheduler {
     /** 连续预算被拒 3 次 → aging 放行（防饥饿，§6.3 R1） */
     private static final int BUDGET_AGING_THRESHOLD = 3;
 
-    // Folia watchdog - 复用 Folia 的 watchdog
-    public static final FoliaWatchdogThread WATCHDOG_THREAD = new FoliaWatchdogThread();
+    // LMili watchdog - 使用 LMili 实现的 watchdog
+    public static final io.papermc.paper.threadedregions.LMiliWatchdogThread WATCHDOG_THREAD = new io.papermc.paper.threadedregions.LMiliWatchdogThread();
     static {
         WATCHDOG_THREAD.start();
     }
@@ -526,13 +526,15 @@ public final class MiliTickRegionScheduler {
             // 状态机：QUEUED → RUNNING，确保后续 tryMarkIdle() 能正确归还到 IDLE
             state.tryMarkRunning();
             try {
+                // 性能优化：单次获取时间戳，避免多次 System.currentTimeMillis() 调用
+                final long nowMillis = System.currentTimeMillis();
+
                 // C-06 修复：next-tick gate —— 检查是否到了该 region 的下次允许 tick 时间
                 if (handle.region != null) {
-                    final long now = System.currentTimeMillis();
-                    if (now < handle.nextAllowedTickTimeMillis) {
+                    if (nowMillis < handle.nextAllowedTickTimeMillis) {
                         // 还没到时间，归还 RUNNING→IDLE 并延迟提交
                         state.tryMarkIdle();
-                        resubmitDelayed(handle.nextAllowedTickTimeMillis - now);
+                        resubmitDelayed(handle.nextAllowedTickTimeMillis - nowMillis);
                         return;
                     }
                 }
@@ -546,13 +548,12 @@ public final class MiliTickRegionScheduler {
 
                 // 执行 tick — runTick() 内部会调用 setTickingRegion() 设置上下文
                 // TPS 修复：记录 tick 开始时间，用于计算自适应延迟
-                final long tickStartMillis;
                 final boolean reschedule;
                 final long tickElapsedMillis;
                 try {
-                    tickStartMillis = System.currentTimeMillis();
                     reschedule = handle.runTick();
-                    tickElapsedMillis = System.currentTimeMillis() - tickStartMillis;
+                    // 性能优化：使用 nowMillis 计算 elapsed，避免第二次 currentTimeMillis 调用
+                    tickElapsedMillis = System.currentTimeMillis() - nowMillis;
                 } catch (IllegalStateException ise) {
                     // R3-FIX: 优雅处理 region-not-acquirable 异常
                     //
@@ -612,18 +613,18 @@ public final class MiliTickRegionScheduler {
 
                 // 如果需要继续调度，延迟提交到统壹队列
                 if (reschedule && !handle.isMarkedAsNonSchedulable() && !halted.get()) {
+                    // 性能优化：单次计算 tick 间隔（避免重复除法）
+                    final long tickIntervalMs = Math.max(1L, (long) (1000.0 / tpsTarget));
                     if (handle.region != null) {
                         // TPS 修复：基于实际 tick 计算执行时间自适应延迟。
-                        // Mili start - AdaptiveRuntime §5.3 (D-14)：目标间隔来自 tpsTarget（默认 20 → 50ms），
-                        // 只读 TIME_BETWEEN_TICKS 静态字段的替代方案 —— 禁止写 TIME_BETWEEN_TICKS。
-                        final long tickIntervalMs = Math.max(1L, (long) (1000.0 / tpsTarget));
+                        // 性能优化：使用 nowMillis 计算下次 tick 时间，避免额外 currentTimeMillis 调用
                         long delay = tickIntervalMs - tickElapsedMillis;
                         if (delay < 0) delay = 0;
-                        handle.nextAllowedTickTimeMillis = System.currentTimeMillis() + delay;
+                        handle.nextAllowedTickTimeMillis = nowMillis + tickElapsedMillis + delay;
                         resubmitDelayed(delay);
                     } else {
                         // global region 仍使用固定延迟（tpsTarget 一致口径）
-                        resubmitDelayed(Math.max(1L, (long) (1000.0 / tpsTarget)));
+                        resubmitDelayed(tickIntervalMs);
                     }
                 }
             } catch (Throwable thr) {

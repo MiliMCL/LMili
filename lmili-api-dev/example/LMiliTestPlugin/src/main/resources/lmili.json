@@ -1,0 +1,9 @@
+{
+  "id": "xucy.mili.test",
+  "name": "LMili Test Plugin",
+  "version": "1.0.0",
+  "publisher": "xucy",
+  "type": "plugin",
+  "dependencies": [],
+  "schedulerDelegation": "lmili_required"
+}

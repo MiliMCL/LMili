@@ -136,8 +136,12 @@ public final class LmiliJsonLoader {
             } catch (final IllegalArgumentException ignored) { }
         }
 
+        // §C LMili Required: 解析 schedulerDelegation（未声明 = LMILI_REQUIRED）
+        final String delegStr = obj.string("schedulerDelegation");
+        final SchedulerDelegation delegation = SchedulerDelegation.parse(delegStr);
+
         return new Loaded(id, name, version, publisher, type, parent,
-                deps == null ? List.of() : List.copyOf(deps), trust);
+                deps == null ? List.of() : List.copyOf(deps), trust, delegation);
     }
 
     /** Lenient variant: returns {@code null} instead of throwing. */
@@ -160,6 +164,7 @@ public final class LmiliJsonLoader {
         private final Optional<PluginId> parent;
         private final List<String> dependencies;
         private final PluginTrustLevel trust;
+        private final SchedulerDelegation delegation;
 
         Loaded(@NotNull final PluginId id,
                @NotNull final String name,
@@ -168,7 +173,8 @@ public final class LmiliJsonLoader {
                @NotNull final PluginType type,
                @NotNull final Optional<PluginId> parent,
                @NotNull final List<String> dependencies,
-               @NotNull final PluginTrustLevel trust) {
+               @NotNull final PluginTrustLevel trust,
+               @NotNull final SchedulerDelegation delegation) {
             this.id = id;
             this.name = name;
             this.version = version;
@@ -177,6 +183,7 @@ public final class LmiliJsonLoader {
             this.parent = parent;
             this.dependencies = dependencies;
             this.trust = trust;
+            this.delegation = delegation;
         }
 
         @NotNull public PluginId id() { return id; }
@@ -187,6 +194,8 @@ public final class LmiliJsonLoader {
         @NotNull public Optional<PluginId> parentId() { return parent; }
         @NotNull public List<String> dependencies() { return dependencies; }
         @NotNull public PluginTrustLevel trust() { return trust; }
+        /** §C LMili Required: 调度委托策略（默认 LMILI_REQUIRED） */
+        @NotNull public SchedulerDelegation delegation() { return delegation; }
 
         public boolean hasParent() { return parent.isPresent(); }
     }

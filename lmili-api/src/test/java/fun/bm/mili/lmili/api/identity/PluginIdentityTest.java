@@ -65,7 +65,8 @@ class PluginIdentityTest {
 
     @Test
     void addonRejectsEmptyParent() {
-        assertThrows(InvalidPluginMetadataException.class,
+        // Addon with valid id parent but empty declared parent → InvalidAddonParentException
+        assertThrows(InvalidAddonParentException.class,
                 () -> PluginIdentity.of(
                         PluginId.parse("xucy.mili.market"),
                         "Market", "1.0.0", "xucy",

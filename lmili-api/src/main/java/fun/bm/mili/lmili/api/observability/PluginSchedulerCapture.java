@@ -59,6 +59,28 @@ public interface PluginSchedulerCapture {
     void recordComplete(@NotNull PluginId pluginId, long executionNanos, boolean success);
 
     /**
+     * 手动记录一次 submit，返回 token 用于 {@link #recordCompleteToken} 配对。
+     *
+     * <p>这是更安全的 API：避免 plugin 误调 {@code recordSubmit} 但忘记
+     * 调 {@code recordComplete}（造成 submitted 计数漂移）。token 是简单
+     * long 自增，plugin 在 try-finally 里配对 recordCompleteToken 即可。
+     */
+    default long recordSubmitToken(@NotNull PluginId pluginId) {
+        recordSubmit(pluginId);
+        return System.nanoTime(); // token 是 submit 时间戳
+    }
+
+    /**
+     * 配对 {@link #recordSubmitToken} 的 complete。token 必须等于 plugin 上一次
+     * recordSubmitToken 的返回值。
+     */
+    default void recordCompleteToken(@NotNull PluginId pluginId, long token, boolean success) {
+        long executionNanos = System.nanoTime() - token;
+        if (executionNanos < 0) executionNanos = 0;
+        recordComplete(pluginId, executionNanos, success);
+    }
+
+    /**
      * 单个 plugin 当前的 capture 统计（用于调试 / 自查）。
      */
     @NotNull CaptureStats statsOf(@NotNull PluginId pluginId);

@@ -4,14 +4,11 @@ import com.mojang.logging.LogUtils;
 import fun.bm.mili.config.modules.experiment.RegionTickPoolConfig;
 import fun.bm.mili.lmili.thread.regiontick.dag.Scope;
 import fun.bm.mili.lmili.thread.regiontick.dag.SystemProfile;
-import fun.bm.mili.lmili.thread.regiontick.executor.CompositeNodeScheduler;
-import fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler;
 import fun.bm.mili.lmili.thread.regiontick.executor.ModernDagTickExecutor;
 import fun.bm.mili.lmili.thread.regiontick.executor.NodeScheduler;
 import fun.bm.mili.lmili.thread.regiontick.executor.SameRegionNodeScheduler;
 import fun.bm.mili.lmili.thread.scheduler.api.MiliScheduler;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
-import io.papermc.paper.threadedregions.TickRegions;
 import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -34,10 +31,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>DAG 系统通过 {@link #attachScheduler(MiliScheduler)} 接入共享 MiliScheduler</li>
  * </ul>
  *
- * <p><b>单 runtime + DAG-region 协调修复</b>：DAG 节点执行（{@link ModernDagTickExecutor}）的
- * {@link NodeScheduler} 默认使用 {@link SameRegionNodeScheduler}（保留 Folia tickingRegion
- * 上下文）。通过 {@link #attachScheduler(MiliScheduler)} 切换为 {@link CompositeNodeScheduler}，
- * 按节点 regionId 路由 —— 跨 region 节点重新入 Folia 调度，由目标 region 的 acquire 路径执行。</p>
+ * <p><b>DAG-region 协调</b>：DAG 节点执行（{@link ModernDagTickExecutor}）的
+ * {@link NodeScheduler} 使用 {@link SameRegionNodeScheduler} 在合法的
+ * region tick 上下文中执行节点。</p>
  */
 public final class RegionTickDispatcher {
 
@@ -53,14 +49,11 @@ public final class RegionTickDispatcher {
     private final ConcurrentHashMap<Long, RegionTickContext> activeContexts = new ConcurrentHashMap<>();
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
-    /** DAG 节点路由器（按 regionId 路由节点 —— Mili 修复）。 */
+    /** DAG 节点路由器（按 regionId 路由节点）。 */
     private volatile NodeScheduler dagNodeScheduler;
 
-    /** 同 region 快路径调度器（Mili 修复）。 */
+    /** 同 region 快路径调度器。 */
     private final SameRegionNodeScheduler sameRegionScheduler;
-
-    /** 跨 region 调度器（Mili 修复）。 */
-    private final FoliaRegionNodeScheduler foliaRegionScheduler;
 
     /** 已接入的共享 scheduler（用于诊断 / 关闭时确认）。 */
     private volatile MiliScheduler attachedScheduler;
@@ -78,18 +71,11 @@ public final class RegionTickDispatcher {
                 asyncCatcherManager, diagnostics);
         this.entityDispatcher = new EntityTickDispatcher();
 
-        // Mili 修复：默认路由器走"同 region 快路径"（兼容老行为），attachScheduler
-        // 切换为 CompositeNodeScheduler（按 regionId 路由）。
-        // 这确保：DAG 节点派发严格遵守 region 约束 —— 跨 region 节点必须重新
-        // 走 Folia 的 region acquire 路径，禁止在同一线程直接执行。
+        // 默认路由器走"同 region 快路径"
         this.sameRegionScheduler = new SameRegionNodeScheduler();
-        this.foliaRegionScheduler = new FoliaRegionNodeScheduler();
-        this.dagNodeScheduler = this.sameRegionScheduler; // 默认：同 region 快路径
+        this.dagNodeScheduler = this.sameRegionScheduler;
         this.dagExecutor = new ModernDagTickExecutor(this.dagNodeScheduler);
 
-        // 选择 executor
-        RegionTickExecutor foliaExec = new fun.bm.mili.lmili.thread.regiontick.executor.FoliaTickExecutor();
-        RegionTickExecutor.register(foliaExec);
         LOGGER.info("[RegionTickPool] Dispatcher initialized (virtualThreads={}, workers={})",
                 useVirtualThreads, useVirtualThreads ? "unlimited" : workerCount);
     }
@@ -125,27 +111,9 @@ public final class RegionTickDispatcher {
 
     public RegionTickContext registerRegion(final long regionId,
                                              final io.papermc.paper.threadedregions.ThreadedRegionizer
-                                                     .ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
+                                                     .ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData> region) {
         RegionTickContext context = new RegionTickContext(regionId, region);
         this.activeContexts.put(regionId, context);
-        // Mili 修复：注册 (regionId, generation) → handle 映射，使跨 region DAG 节点能被正确路由
-        // RISK-18 修复：使用 (regionId, generation) 作为逻辑身份，
-        // 旧 generation 的 handle 不会与新 generation 的 handle 混淆。
-        // TickRegionData.tickHandle 是 private，必须通过公开 API getRegionSchedulingHandle() 访问
-        if (region != null && region.getData() != null) {
-            io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle handle =
-                    region.getData().getRegionSchedulingHandle();
-            if (handle != null) {
-                // RISK-18 修复：使用 currentTick 作为 generation proxy。
-                // Folia RegionScheduleHandle 没有独立的 generation 字段，
-                // 但 region 在被 unregister/重建后 tick 会从 0 重新计数，
-                // 这足够区分新旧 handle。
-                long generation = region.getData().getCurrentTick();
-                fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
-                        .FoliaRegionNodeSchedulerHandleRegistry
-                        .register(regionId, generation, handle);
-            }
-        }
         return context;
     }
 
@@ -156,16 +124,7 @@ public final class RegionTickDispatcher {
             ctx.close();
         }
         this.chunkDispatcher.unregister(regionId);
-        // RISK-18 修复：注销 region 的所有 generation handle
-        // （region 销毁时无法精确知道最后一个 generation 是什么，全部清理即可）
-        fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
-                .FoliaRegionNodeSchedulerHandleRegistry
-                .unregisterRegion(regionId);
-        // 清理该 region 在 FoliaRegionNodeScheduler 中的 pending 跨 region DAG 任务
-        // 区域已销毁，这些任务不需要再执行
-        this.foliaRegionScheduler.drainPending(regionId);
-        // Mili: 通知 EntityTickDispatcher 清理该 region 的 per-region 缓存
-        // （EntityPriorityScheduler / 指标 / 清理时间戳 等）—— 防止 region 销毁后 map 无限增长
+        // 通知 EntityTickDispatcher 清理该 region 的 per-region 缓存
         this.entityDispatcher.onRegionDestroyed(regionId);
     }
 
@@ -188,11 +147,6 @@ public final class RegionTickDispatcher {
      */
     public void dispatchTick(@NotNull final RegionTickContext context) {
         if (this.shutdown.get()) return;
-        // Mili 修复：region tick 进入时先 drain 跨 region DAG pending 任务，
-        // 确保跨 region 节点在目标 region 的合法 acquire/tickingRegion 上下文中执行
-        if (this.dagExecutor != null) {
-            this.dagExecutor.drainCrossRegionPending(context);
-        }
         chunkDispatcher.dispatch(context);
     }
 
@@ -217,20 +171,13 @@ public final class RegionTickDispatcher {
     }
 
     /**
-     * 把 DAG 节点执行接入共享 MiliScheduler（单 runtime 修复 + DAG-region 协调修复）。
+     * 把 DAG 节点执行接入共享 MiliScheduler（单 runtime 修复）。
      *
-     * <p>通常在 {@code RegionTickBootstrap.init()} 中调用。本 dispatcher 创建时 DAG 节点
-     * 默认走 {@link SameRegionNodeScheduler}（同 region 快路径）；调用本方法后切换为
-     * {@link CompositeNodeScheduler} —— 同 region 节点保留 tickingRegion 上下文直接执行，
-     * 跨 region 节点重新入 Folia 调度（由目标 region 的 acquire 路径执行）。</p>
-     *
-     * <p><b>DAG-region 协调修复</b>：之前节点通过裸 {@code Executor} 执行，会绕过
-     * Folia 的 region acquire 机制，破坏 tickingRegion 不变量。本方法保证节点
-     * 派发严格遵守 region 约束（按 regionId 路由）。</p>
+     * <p>通常在 {@code RegionTickBootstrap.init()} 中调用。</p>
      *
      * <p>此操作幂等；多次调用会覆盖之前的绑定（仅最后一次生效）。</p>
      *
-     * @param sharedScheduler 全 Mili 共享的 scheduler（必须非 null）
+     * @param sharedScheduler 全 Mili共享的 scheduler（必须非 null）
      */
     public synchronized void attachScheduler(@NotNull final MiliScheduler sharedScheduler) {
         if (this.shutdown.get()) {
@@ -241,24 +188,11 @@ public final class RegionTickDispatcher {
             return; // 幂等
         }
         final NodeScheduler previous = this.dagNodeScheduler;
-        // 同 region 快路径 + 跨 region Folia 调度 组合
-        final CompositeNodeScheduler composite = new CompositeNodeScheduler(
-                this.sameRegionScheduler, this.foliaRegionScheduler);
-        this.dagNodeScheduler = composite;
-        this.dagExecutor.setNodeScheduler(composite);
+        this.dagExecutor.setNodeScheduler(this.sameRegionScheduler);
         this.attachedScheduler = sharedScheduler;
         LOGGER.info("[RegionTickPool] DAG node scheduler attached to shared MiliScheduler "
-                + "(previous={}, new=CompositeNodeScheduler[same={}, folia={}])",
-                previous.getClass().getSimpleName(),
-                this.sameRegionScheduler.getClass().getSimpleName(),
-                this.foliaRegionScheduler.getClass().getSimpleName());
-    }
-
-    /**
-     * 获取跨 region DAG 调度器（用于注册/取消 region handle 映射）。
-     */
-    public FoliaRegionNodeScheduler getFoliaRegionNodeScheduler() {
-        return foliaRegionScheduler;
+                + "(previous={}, new=SameRegionNodeScheduler)",
+                previous.getClass().getSimpleName());
     }
 
     /**
@@ -293,9 +227,6 @@ public final class RegionTickDispatcher {
     public void shutdown() {
         if (this.shutdown.getAndSet(true)) return;
         LOGGER.info("[RegionTickPool] Shutting down...");
-        // Mili 修复：清空跨 region DAG 节点 handle 注册表，避免泄漏
-        fun.bm.mili.lmili.thread.regiontick.executor.FoliaRegionNodeScheduler
-                .FoliaRegionNodeSchedulerHandleRegistry.clear();
         poolManager.shutdown();
         this.activeContexts.clear();
         instance = null;

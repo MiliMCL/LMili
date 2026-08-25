@@ -136,9 +136,9 @@ public final class DagExecutionEngine {
     /**
      * 提交单个节点执行（通过 NodeScheduler 路由）。
      *
-     * <p><b>Mili 关键修复</b>：节点派发改为通过 {@link NodeScheduler}，按 regionId
-     * 路由 —— 同 region 节点在当前线程同步执行（保留 tickingRegion 上下文），
-     * 跨 region 节点重新入 Folia 调度（由目标 region 的 acquire 路径执行）。</p>
+     * <p><b>路由策略</b>：节点派发改为通过 {@link NodeScheduler}，按 regionId
+     * 路由 —— 同 region 节点在当前线程同步执行，
+     * 跨 region 节点通过 Bukkit 主线程调度器路由到目标 region。</p>
      *
      * <p>节点执行完成后，会自动：
      * <ol>
@@ -163,11 +163,11 @@ public final class DagExecutionEngine {
 
         final long nodeRegionId = dag.regionId(nodeId);
 
-        // RISK-19 修复：构造节点 body 之前，校验"节点 regionId 与当前 region 上下文"
+        // 构造节点 body 之前，校验"节点 regionId 与当前 region 上下文"
         // 的一致性约束。这是一个轻量级检查（只读 currentRegionContext.regionId），
         // 真正的路由由 NodeScheduler 强制：
         //   - SameRegionNodeScheduler 只接受同 region + global
-        //   - FoliaRegionNodeScheduler 只接受跨 region（且走 Folia acquire 路径）
+        //   - CompositeNodeScheduler 按 regionId 路由跨 region 节点
         // 这里再加一层防御：若节点 regionId 不合法（< 0 且 != GLOBAL），直接拒绝。
         if (nodeRegionId < 0 && nodeRegionId != CompiledDag.GLOBAL_REGION_ID) {
             LOGGER.error("[DAG] Illegal regionId {} for node {} — refusing to dispatch",

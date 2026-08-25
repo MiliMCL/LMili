@@ -369,7 +369,9 @@ fun TaskContainer.registerRunTask(
         // vendor.set(JvmVendorSpec.JETBRAINS)
     })
     jvmArgs(
-        "-XX:+AllowEnhancedClassRedefinition",
+        "-Xms512M",
+        "-Xmx2G",
+        "-XX:+UseSerialGC",
         // Allow plugins (e.g. spark) and our own backend to reflect into JDK internals
         "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
         "--add-opens=java.base/java.lang=ALL-UNNAMED",

@@ -7,25 +7,25 @@ import java.util.Optional;
 
 /**
  * Builds a {@link PluginIdentity} from a Bukkit plugin when no {@code lmili.json}
- * is present. Produces a {@link PluginType#LEGACY} identity in the {@code legacy.*}
- * namespace so legacy jars cannot impersonate formal plugins.
+ * is present.
  *
- * <h2>Normalization rules</h2>
+ * <h2>§C 26.2+ 收紧</h2>
+ * <p>本类不再被 {@code PluginIdentityBootstrap} 调用 —— 26.2 起没有
+ * {@code lmili.json} 的 plugin 直接被禁用，不再走 fallback 路径。
+ * 类本身保留仅为：</p>
  * <ol>
- *   <li>ASCII lower-case the plugin name.</li>
- *   <li>Replace any character outside {@code [a-z0-9._-]} with {@code -}.</li>
- *   <li>Collapse multiple {@code -} into a single one.</li>
- *   <li>Strip leading/trailing {@code -} and {@code .}.</li>
- *   <li>Prepend {@code legacy.}.</li>
+ *   <li>{@link #synthesizeLegacyId(String)} —— id 合成工具（其他路径可能用到）</li>
+ *   <li>{@link #fromBukkitPlugin(Object)} —— 反射探测，仍给命令路径作查询用</li>
  * </ol>
  *
- * <p>Example: {@code My_Plugin} becomes {@code legacy.my-plugin}.</p>
+ * <p>{@link #forBukkit(String, String)} 被 deprecated（标 LMILI_REQUIRED 仅为占位；
+ *   实际不会触发 plugin 加载）。
  *
- * <p>If normalization still yields an invalid id (e.g. an empty plugin name),
- * the fallback synthesizes {@code legacy.unknown-plugin}. The runtime never
- * refuses to register a plugin on identity grounds alone &mdash; that's the
- * whole point of the legacy namespace.</p>
+ * <h2>历史</h2>
+ * <p>本类曾是"兼容层"的核心：当 plugin 没声明 lmili.json 时自动合成 LEGACY 身份，
+ * 避免 §18.9 "不破坏现有架构"。但导致观测失效、quota 失效、线程碎片——本次重构删除。
  */
+@Deprecated
 public final class PluginIdentityFallback {
 
     /** Synthetic namespace marker for legacy plugins. */
@@ -34,13 +34,11 @@ public final class PluginIdentityFallback {
     private PluginIdentityFallback() {}
 
     /**
-     * Build a legacy identity from raw Bukkit plugin fields.
-     *
-     * @param bukkitPluginName the Bukkit plugin name (may contain uppercase, underscores, etc.)
-     * @param pluginVersion    declared version, may be null
-     * @return a non-null identity of type {@link PluginType#LEGACY}
+     * @deprecated LMili 26.2+ 不再调用本方法；plugin 没有 lmili.json 即被禁用。
+     * @return 不会被 PluginIdentityBootstrap 消费的占位身份
      */
     @NotNull
+    @Deprecated
     public static PluginIdentity forBukkit(@NotNull final String bukkitPluginName,
                                            @Nullable final String pluginVersion) {
         final PluginId id = synthesizeLegacyId(bukkitPluginName);
@@ -48,7 +46,7 @@ public final class PluginIdentityFallback {
                 ? "0.0.0" : pluginVersion;
         return PluginIdentity.of(id, bukkitPluginName, version, LEGACY_NAMESPACE,
                 PluginType.LEGACY, Optional.empty(),
-                "plugin.yml", bukkitPluginName);
+                "plugin.yml", bukkitPluginName, SchedulerDelegation.LMILI_REQUIRED);
     }
 
     /**
@@ -85,12 +83,12 @@ public final class PluginIdentityFallback {
     @NotNull
     public static PluginId synthesizeLegacyId(@NotNull final String bukkitPluginName) {
         String normalized = bukkitPluginName.trim().toLowerCase();
-        // Replace illegal characters with '-'.
+        // Replace illegal characters (including dots) with '-'.
         final StringBuilder sb = new StringBuilder(normalized.length());
         boolean lastWasDash = false;
         for (int i = 0; i < normalized.length(); i++) {
             final char c = normalized.charAt(i);
-            final boolean ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.';
+            final boolean ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
             if (ok) {
                 sb.append(c);
                 lastWasDash = false;
@@ -99,8 +97,8 @@ public final class PluginIdentityFallback {
                 lastWasDash = true;
             }
         }
-        // Strip leading/trailing '.' and '-'.
-        normalized = stripEnds(sb.toString(), "-.");
+        // Strip leading/trailing '-'.
+        normalized = stripEnds(sb.toString(), "-");
         if (normalized.isEmpty()) {
             normalized = "unknown-plugin";
         }

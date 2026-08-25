@@ -66,6 +66,11 @@ public interface PluginRegionTask {
                 @Override public @NotNull Runnable runnable() { return r; }
                 @Override public long timeoutMillis() { return tm; }
                 @Override public boolean isBlocking() { return b; }
+
+                @Override
+                public @NotNull String toString() {
+                    return "PluginRegionTask{regionId=" + id + ", name=" + n + "}";
+                }
             };
         }
     }

@@ -24,7 +24,7 @@ class LmiliJsonLoaderTest {
         assertEquals("xucy.mili", loaded.id().value());
         assertEquals("Mili", loaded.name());
         assertEquals("1.0.0", loaded.version());
-        assertEquals("xucy.mili", loaded.publisher()); // publisher segment
+        assertEquals("xucy", loaded.publisher()); // publisher segment
         assertEquals(PluginType.PLUGIN, loaded.type());
         assertFalse(loaded.hasParent());
     }

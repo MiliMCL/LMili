@@ -7,17 +7,16 @@ import org.jetbrains.annotations.NotNull;
 /**
  * DAG 节点执行路由器 —— 把 DAG "ready" 信号翻译成正确的执行路径。
  *
- * <p><b>核心约束（Mili 新约束）</b>：DAG 只能决定调度顺序（A 完成 → B 才 ready），
- * 但 DAG <b>不能</b>因为 B ready 了就绕过 Folia 的 region acquire / tickingRegion
- * 机制在同一线程直接执行 B。这会破坏 region 不变量（{@code TickThread.isTickThreadFor}
- * 校验失败、跨 region 的 entity 数据竞争等）。</p>
+ * <p><b>核心约束</b>：DAG 只能决定调度顺序（A 完成 → B 才 ready），
+ * 但 DAG <b>不能</b>绕过线程安全机制在同一线程直接执行跨 region 节点。
+ * 这会破坏 region 不变量，导致 entity 数据竞争。</p>
  *
  * <h3>三种合法路径</h3>
  * <ol>
  *   <li><b>同 region 快路径</b>：节点 regionId == 当前线程 regionId →
- *       直接在当前线程同步执行（tickingRegion 上下文保留，无需重新 acquire）</li>
+ *       直接在当前线程同步执行</li>
  *   <li><b>跨 region 调度</b>：节点 regionId != 当前线程 regionId →
- *       重新入 Folia 的 region scheduler，由目标 region 的 acquire 路径执行</li>
+ *       通过 Bukkit 主线程调度器路由到目标 region</li>
  *   <li><b>global 节点</b>：节点 regionId == {@link CompiledDag#GLOBAL_REGION_ID} →
  *       视为无 region 约束，在当前线程直接执行</li>
  * </ol>
@@ -25,8 +24,7 @@ import org.jetbrains.annotations.NotNull;
  * <h3>实现策略</h3>
  * <ul>
  *   <li>{@link SameRegionNodeScheduler} —— 同 region 快路径 + global 路径</li>
- *   <li>{@link FoliaRegionNodeScheduler} —— 跨 region 路径（委托给 Folia scheduler）</li>
- *   <li>{@link CompositeNodeScheduler} —— 上述两者的组合，按 regionId 自动路由</li>
+ *   <li>{@link CompositeNodeScheduler} —— 按 regionId 自动路由</li>
  * </ul>
  *
  * @author Mili scheduler team
@@ -42,8 +40,8 @@ public interface NodeScheduler {
      * <p>本方法会：
      * <ol>
      *   <li>检查节点 regionId 与当前线程 regionId 的关系</li>
-     *   <li>同 region → 在当前线程同步执行 body（保留 tickingRegion 上下文）</li>
-     *   <li>跨 region → 拒绝直接执行，把 body 重新入目标 region 的 Folia 调度</li>
+     *   <li>同 region → 在当前线程同步执行 body</li>
+     *   <li>跨 region → 通过 Bukkit 主线程调度器路由到目标 region</li>
      *   <li>global → 在当前线程直接执行</li>
      * </ol>
      * </p>
