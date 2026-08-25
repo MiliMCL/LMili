@@ -224,11 +224,68 @@ public final class RegionTickDispatcher {
         return stats;
     }
 
+    /**
+     * 清理过期的 active contexts —— 防止 region 销毁时未正确调用 unregisterRegion 导致的泄漏。
+     *
+     * <p>扫描所有 active contexts，如果某个 context 长时间没有完成 tick（超过 cleanupTimeoutMs），
+     * 则认为它已过期并清理。
+     *
+     * @param cleanupTimeoutMs 超时时间（毫秒），超过此时间未完成的 context 将被清理
+     */
+    public int cleanupStaleContexts(final long cleanupTimeoutMs) {
+        if (cleanupTimeoutMs <= 0) return 0;
+        int cleaned = 0;
+        final long now = System.nanoTime();
+        final long timeoutNanos = cleanupTimeoutMs * 1_000_000L;
+
+        for (Map.Entry<Long, RegionTickContext> entry : this.activeContexts.entrySet()) {
+            RegionTickContext ctx = entry.getValue();
+            if (ctx == null) {
+                this.activeContexts.remove(entry.getKey());
+                cleaned++;
+                continue;
+            }
+            // 检查 context 是否长时间没有完成 tick
+            long lastTickDuration = ctx.getLastTickDurationNanos();
+            boolean isStale = false;
+
+            // 如果 context 处于 RUNNING 状态且耗时超过阈值
+            if (ctx.isTicking() && lastTickDuration > timeoutNanos) {
+                LOGGER.warn("[RegionTickPool] Cleaning up stale context in region #{}: ticking for {}ms",
+                        entry.getKey(), lastTickDuration / 1_000_000);
+                isStale = true;
+            }
+            // 如果 context 已经完成但很长时间没有新 tick
+            if (ctx.getMaxTickDurationMs() > 0) {
+                long avgTickMs = ctx.getAverageTickDurationMs();
+                // 如果平均 tick 时间很长且当前没有活跃 tick，可能是泄漏
+                if (avgTickMs > 100 && !ctx.isTicking() && lastTickDuration == 0) {
+                    isStale = true;
+                }
+            }
+
+            if (isStale) {
+                this.activeContexts.remove(entry.getKey());
+                ctx.close();
+                cleaned++;
+            }
+        }
+        return cleaned;
+    }
+
     public void shutdown() {
         if (this.shutdown.getAndSet(true)) return;
         LOGGER.info("[RegionTickPool] Shutting down...");
         poolManager.shutdown();
+        // 修复：关闭所有 active contexts 释放资源
+        for (RegionTickContext ctx : this.activeContexts.values()) {
+            if (ctx != null) {
+                ctx.close();
+            }
+        }
         this.activeContexts.clear();
+        // 清理 AsyncCatcherManager 运行时状态
+        AsyncCatcherManager.clearRuntimeState();
         instance = null;
         LOGGER.info("[RegionTickPool] Shutdown complete");
     }

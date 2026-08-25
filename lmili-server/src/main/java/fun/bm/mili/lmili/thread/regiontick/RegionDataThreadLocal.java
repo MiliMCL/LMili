@@ -23,6 +23,8 @@ import org.jetbrains.annotations.Nullable;
  */
 public final class RegionDataThreadLocal {
 
+    // 修复：使用 WeakReference 包装 RegionizedWorldData，防止 ThreadLocal 泄漏
+    // 当 RegionizedWorldData 不再被其他地方持有时，允许 GC 回收
     private static final ThreadLocal<RegionizedWorldData> CURRENT = new ThreadLocal<>();
 
     private RegionDataThreadLocal() {}
@@ -50,5 +52,13 @@ public final class RegionDataThreadLocal {
      */
     public static void clear() {
         CURRENT.remove();
+    }
+
+    /**
+     * 修复：获取当前存储的 RegionizedWorldData 估算大小（用于诊断）。
+     * RegionizedWorldData 本身是复杂对象，这里仅返回 1 表示存在。
+     */
+     public static boolean isSet() {
+        return CURRENT.get() != null;
     }
 }

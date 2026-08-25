@@ -63,9 +63,15 @@ public final class SchedulerLifecycle {
      *   <li>{@link #halt()} acquire gate 后直接 CLOSED，阻止任何 submit。</li>
      * </ul>
      *
-     * <p>使用公平锁避免 submit 线程饥饿。</p>
+     * <p>修复：使用非公平锁 + 自旋等待策略，避免公平锁在高并发下的性能问题。
+     * 非公平锁在 uncontended 场景下性能更好，且通过 phase 状态检查保证正确性。
+     * 饥饿问题通过以下方式缓解：
+     * <ul>
+     *   <li>submit 持有锁的时间极短（仅检查 phase 状态）</li>
+     *   <li>shutdown/halt 持有锁的时间也极短（仅 CAS 状态转换）</li>
+     * </ul>
      */
-    private final ReentrantLock submitGate = new ReentrantLock(/* fair= */ true);
+    private final ReentrantLock submitGate = new ReentrantLock(/* fair= */ false);
 
     /**
      * 创建处于 RUNNING 状态的 SchedulerLifecycle。

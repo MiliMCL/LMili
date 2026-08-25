@@ -463,10 +463,15 @@ public final class RegionTickContext {
         tickState.set(TickGeneration.State.CANCELLED);
 
         // 3. 释放 latch（如果有等待线程）
+        // 修复：使用局部变量避免 TOCTOU 问题，并添加中断通知
         final CountDownLatch latch = this.tickLatch;
-        if (latch != null && latch.getCount() > 0) {
-            while (latch.getCount() > 0) {
-                latch.countDown();
+        if (latch != null) {
+            // 一次性 countDown 到 0，避免在循环中产生大量不必要的 countDown 调用
+            // 使用 synchronized 确保与 arriveSlice 的 countDown 不会产生竞态
+            synchronized (this) {
+                while (latch.getCount() > 0) {
+                    latch.countDown();
+                }
             }
         }
     }

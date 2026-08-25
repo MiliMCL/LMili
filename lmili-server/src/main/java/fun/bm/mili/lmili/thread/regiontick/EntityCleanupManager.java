@@ -33,6 +33,31 @@ public final class EntityCleanupManager {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    /**
+     * 修复：使用 ThreadLocal 缓存数组，避免每次调用都创建新数组，减少 GC 压力。
+     * 每个线程维护自己的缓冲区，当需要更大容量时自动扩容。
+     */
+    private static final ThreadLocal<CleanupBuffer> BUFFER_CACHE = ThreadLocal.withInitial(CleanupBuffer::new);
+
+    /**
+     * 清理缓冲区 —— 用于复用数组，减少 GC 压力。
+     */
+    private static final class CleanupBuffer {
+        it.unimi.dsi.fastutil.objects.ReferenceArrayList<Entity> candidates =
+            new it.unimi.dsi.fastutil.objects.ReferenceArrayList<>();
+        double[] distSqs = new double[256];
+        int[] order = new int[256];
+
+        void ensureCapacity(int size) {
+            if (distSqs.length < size) {
+                // 扩容到所需大小的 1.5 倍，避免频繁扩容
+                int newSize = Math.max(size, distSqs.length * 3 / 2);
+                distSqs = new double[newSize];
+                order = new int[newSize];
+            }
+        }
+    }
+
     private EntityCleanupManager() {}
 
     /**
@@ -57,9 +82,13 @@ public final class EntityCleanupManager {
         }
         final double minDistSq = minPlayerDistance * minPlayerDistance;
         final java.util.List<ServerPlayer> players = data.getLocalPlayers();
+
+        // 修复：使用 ThreadLocal 缓冲区复用数组
+        final CleanupBuffer buffer = BUFFER_CACHE.get();
+        final it.unimi.dsi.fastutil.objects.ReferenceArrayList<Entity> candidates = buffer.candidates;
+        candidates.clear(); // 清空但保留底层数组
+
         // 两阶段：先按 Mob + 非持久 + 非命名 + 存活筛选；只对候选计算距离（避免 80w 实体的 N×P 距离计算）
-        final it.unimi.dsi.fastutil.objects.ReferenceArrayList<Entity> candidates =
-            new it.unimi.dsi.fastutil.objects.ReferenceArrayList<>();
         for (final Entity e : data.getLocalEntities()) {
             if (!(e instanceof Mob mob)) continue;
             if (!mob.isAlive()) continue;
@@ -70,15 +99,20 @@ public final class EntityCleanupManager {
         if (candidates.isEmpty()) {
             return 0;
         }
+
+        final int candidateCount = candidates.size();
+        buffer.ensureCapacity(candidateCount);
+        final double[] distSqs = buffer.distSqs;
+        final int[] order = buffer.order;
+
         // 计算每个候选离最近玩家距离平方（O(candidates × players)）
-        final double[] distSqs = new double[candidates.size()];
         if (players.isEmpty()) {
             // 无玩家时全部候选都视为"远"
-            for (int i = 0; i < distSqs.length; i++) {
+            for (int i = 0; i < candidateCount; i++) {
                 distSqs[i] = Double.MAX_VALUE;
             }
         } else {
-            for (int i = 0; i < candidates.size(); i++) {
+            for (int i = 0; i < candidateCount; i++) {
                 final Entity e = candidates.get(i);
                 double min = Double.MAX_VALUE;
                 for (final ServerPlayer p : players) {
@@ -89,14 +123,14 @@ public final class EntityCleanupManager {
             }
         }
         // 按距离降序索引排序（远的优先 remove）
-        final int[] order = new int[candidates.size()];
-        for (int i = 0; i < order.length; i++) order[i] = i;
+        for (int i = 0; i < candidateCount; i++) order[i] = i;
         it.unimi.dsi.fastutil.ints.IntArrays.quickSort(order,
             (a, b) -> Double.compare(distSqs[b], distSqs[a]));
         // 移除直到 ≤ 90% cap；同时尊重 minPlayerDistance（近的保留）
         final int target = Math.max(0, (int) (cap * 0.9));
         int removed = 0;
-        for (final int idx : order) {
+        for (int oi = 0; oi < candidateCount; oi++) {
+            final int idx = order[oi];
             if (total - removed <= target) break;
             // 二次过滤：最终确认离玩家 > minPlayerDistance（候选阶段未过滤距离，仅过滤了 Mob 标志）
             if (distSqs[idx] < minDistSq) {
@@ -113,7 +147,7 @@ public final class EntityCleanupManager {
         }
         if (removed > 0) {
             LOGGER.info("[EntityCleanup] world='{}' removed={} (cap={}, was={}, candidates={})",
-                level.dimension().identifier(), removed, cap, total, candidates.size());
+                level.dimension().identifier(), removed, cap, total, candidateCount);
         }
         return removed;
     }

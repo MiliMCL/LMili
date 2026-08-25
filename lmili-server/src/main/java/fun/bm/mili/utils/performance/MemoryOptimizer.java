@@ -120,6 +120,7 @@ public final class MemoryOptimizer {
     // Mili start - fix: removed System.gc() calls that cause Stop-The-World pauses (50-500ms).
     // JVM's own GC handles memory management better than explicit System.gc() calls.
     // Instead, just log warnings and let the JVM's GC handle it naturally.
+    // 修复：实现真正的释放字节追踪，通过比较清理前后的内存使用量
     private static void performMemoryCleanup(long currentUsed, boolean aggressive) {
         long usedMB = currentUsed / (1024 * 1024);
         long maxMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
@@ -137,6 +138,12 @@ public final class MemoryOptimizer {
             );
         }
         gcCount.increment();
+
+        // 修复：通过比较清理前后的内存使用量来估算释放的字节数
+        long afterUsed = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+        if (currentUsed > afterUsed) {
+            totalFreedBytes.add(currentUsed - afterUsed);
+        }
     }
     // Mili end
 

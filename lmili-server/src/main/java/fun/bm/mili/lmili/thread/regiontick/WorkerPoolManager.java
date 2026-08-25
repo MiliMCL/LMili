@@ -81,19 +81,25 @@ public final class WorkerPoolManager {
      * 关闭线程池。
      */
     public void shutdown() {
+        // 修复：添加空值检查，避免 NPE
         if (workers != null) {
             for (RegionTickWorker worker : workers) {
-                worker.shutdown();
+                if (worker != null) {
+                    worker.shutdown();
+                }
             }
         }
-        workerPool.shutdown();
-        try {
-            if (!workerPool.awaitTermination(5, TimeUnit.SECONDS)) {
+        // 修复：添加空值检查
+        if (workerPool != null) {
+            workerPool.shutdown();
+            try {
+                if (!workerPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    workerPool.shutdownNow();
+                }
+            } catch (InterruptedException e) {
                 workerPool.shutdownNow();
+                Thread.currentThread().interrupt();
             }
-        } catch (InterruptedException e) {
-            workerPool.shutdownNow();
-            Thread.currentThread().interrupt();
         }
     }
 }

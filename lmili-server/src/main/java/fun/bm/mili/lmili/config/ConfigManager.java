@@ -24,6 +24,9 @@ public class ConfigManager {
     // 2 -> origin full path
     // 3 -> target full path
 
+    // 修复：配置加载超时时间，防止无限阻塞启动
+    private static final long CONFIG_LOAD_TIMEOUT_SECONDS = 30;
+
     public static void initConfigs() {
         configfiles.put("lmili", ConfigsInstance.of(
                 new java.io.File("lmili_config"),
@@ -45,7 +48,14 @@ public class ConfigManager {
                     }
                 }))
                 .toArray(CompletableFuture[]::new);
-        CompletableFuture.allOf(futures).join();
+        // 修复：使用带超时的 join，防止无限阻塞启动
+        try {
+            CompletableFuture.allOf(futures).get(CONFIG_LOAD_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new RuntimeException("Config preLoad timed out after " + CONFIG_LOAD_TIMEOUT_SECONDS + "s", e);
+        } catch (Exception e) {
+            throw new RuntimeException("Config preLoad failed", e);
+        }
         acceptTransformedConfigs();
     }
 
@@ -54,7 +64,14 @@ public class ConfigManager {
         CompletableFuture<?>[] futures = configfiles.values().stream()
                 .map(config -> CompletableFuture.runAsync(config::finalizeLoadConfig))
                 .toArray(CompletableFuture[]::new);
-        CompletableFuture.allOf(futures).join();
+        // 修复：使用带超时的 join，防止无限阻塞启动
+        try {
+            CompletableFuture.allOf(futures).get(CONFIG_LOAD_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new RuntimeException("Config load timed out after " + CONFIG_LOAD_TIMEOUT_SECONDS + "s", e);
+        } catch (Exception e) {
+            throw new RuntimeException("Config load failed", e);
+        }
         CommandRegister.register(); // register command after config loaded to enable some command didn't depend on config files
         initialized = true;
     }

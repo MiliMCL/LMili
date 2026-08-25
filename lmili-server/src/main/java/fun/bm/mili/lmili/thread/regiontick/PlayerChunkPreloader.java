@@ -11,7 +11,9 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import org.slf4j.Logger;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -39,10 +41,28 @@ public final class PlayerChunkPreloader {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    /** 上次预加载的玩家 chunk 位置（避免每 tick 重复提交同一 chunks） */
-    private static final java.util.concurrent.ConcurrentHashMap<Long, Long> lastPreloadedChunkKey = new java.util.concurrent.ConcurrentHashMap<>();
-    /** 上次预加载的半径（避免玩家扩大半径后仍用旧半径） */
-    private static final java.util.concurrent.ConcurrentHashMap<Long, Integer> lastPreloadedRadius = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * LRU 缓存最大条目数。
+     * 修复：使用 LRU 缓存限制大小，避免无界增长导致内存泄漏。
+     * 默认 256 个玩家条目，足以覆盖大多数场景。
+     */
+    private static final int MAX_CACHE_SIZE = 256;
+
+    /** 上次预加载的玩家 chunk 位置（LRU 缓存，避免无界增长） */
+    private static final Map<Long, Long> lastPreloadedChunkKey = new LinkedHashMap<Long, Long>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, Long> eldest) {
+            return size() > MAX_CACHE_SIZE;
+        }
+    };
+
+    /** 上次预加载的半径（LRU 缓存，避免无界增长） */
+    private static final Map<Long, Integer> lastPreloadedRadius = new LinkedHashMap<Long, Integer>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, Integer> eldest) {
+            return size() > MAX_CACHE_SIZE;
+        }
+    };
 
     private PlayerChunkPreloader() {}
 
@@ -109,9 +129,36 @@ public final class PlayerChunkPreloader {
      * 清理玩家缓存（玩家下线时调用，避免内存泄漏）。
      * 可以从 Bukkit 的 {@code PlayerQuitEvent} listener 调用。
      */
-    public static void clearCacheForPlayer(final int playerEntityId) {
-        lastPreloadedChunkKey.remove((long) playerEntityId);
-        lastPreloadedRadius.remove((long) playerEntityId);
+    public static synchronized void clearCacheForPlayer(final int playerEntityId) {
+        final long key = (long) playerEntityId;
+        synchronized (lastPreloadedChunkKey) {
+            lastPreloadedChunkKey.remove(key);
+        }
+        synchronized (lastPreloadedRadius) {
+            lastPreloadedRadius.remove(key);
+        }
         CrossRegionChunkPreloader.clearCacheForPlayer(playerEntityId);
+    }
+
+    /**
+     * 清理所有缓存（服务器关闭时调用）。
+     */
+    public static synchronized void clearAllCache() {
+        synchronized (lastPreloadedChunkKey) {
+            lastPreloadedChunkKey.clear();
+        }
+        synchronized (lastPreloadedRadius) {
+            lastPreloadedRadius.clear();
+        }
+        CrossRegionChunkPreloader.clearAllCache();
+    }
+
+    /**
+     * 获取缓存大小（用于监控）。
+     */
+    public static synchronized int getCacheSize() {
+        synchronized (lastPreloadedChunkKey) {
+            return lastPreloadedChunkKey.size();
+        }
     }
 }

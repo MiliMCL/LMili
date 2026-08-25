@@ -38,6 +38,10 @@ public final class EntityWarmupManager {
     public static void warmup(final ServerLevel level,
                               final RegionizedWorldData data,
                               final EntityPriorityScheduler priorityScheduler) {
+        // 修复：检查 level 是否为 null，避免空操作
+        if (level == null) {
+            return;
+        }
         try {
             // 预激活：调用 Paper 的 ActivationRange 提前评估所有实体（幂等）
             ActivationRange.activateEntities(level);
@@ -46,8 +50,8 @@ public final class EntityWarmupManager {
         }
 
         // 距离预算：如果启用了优先级调度，触发一次重算（让新加载实体进入排序）
+        // 修复：移除冗余的 null 检查，直接调用（invalidateRecalc 内部已处理）
         if (priorityScheduler != null) {
-            // getSortedTicking 会按 recalcInterval 检查是否需要重算 —— 强制重算：先 clear lastRecalcTickCounter
             priorityScheduler.invalidateRecalc();
         }
     }

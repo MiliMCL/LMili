@@ -66,12 +66,32 @@ public final class EntityPriorityScheduler {
     /** 最远距离 chunk 数（超此距离 skip） */
     private final int maxDistanceChunks;
 
+    // ---- 修复：缓存数组，避免每次重算都创建新数组，减少 GC 压力 ----
+    /** 缓存的 ticking entities 缓冲区（按需扩容） */
+    private Entity[] tickingBuffer = new Entity[256];
+    /** 缓存的桶索引缓冲区 */
+    private int[] bucketsIdxBuffer = new int[256];
+    /** 缓存的排序索引缓冲区 */
+    private int[] permBuffer = new int[256];
+
     public EntityPriorityScheduler(final long regionId, final RegionizedWorldData regionizedWorldData,
                                    final int buckets, final int maxDistanceChunks) {
         this.regionId = regionId;
         this.regionizedWorldData = regionizedWorldData;
         this.buckets = buckets;
         this.maxDistanceChunks = maxDistanceChunks;
+    }
+
+    /**
+     * 确保缓冲区容量足够，避免频繁扩容。
+     */
+    private void ensureBufferCapacity(int requiredSize) {
+        if (tickingBuffer.length < requiredSize) {
+            int newSize = Math.max(requiredSize, tickingBuffer.length * 3 / 2);
+            tickingBuffer = new Entity[newSize];
+            bucketsIdxBuffer = new int[newSize];
+            permBuffer = new int[newSize];
+        }
     }
 
     /**
@@ -123,8 +143,10 @@ public final class EntityPriorityScheduler {
 
     private void recompute(final long tickCounter) {
         // 用 forEachTickingEntity 收集 ticking 实体子集（避免 inactive 实体浪费距离计算）
-        // 预分配 getEntityCount() 大小（可能偏大，无所谓，最后截断）
-        final Entity[] allTicking = new Entity[this.regionizedWorldData.getEntityCount()];
+        // 修复：使用缓存的缓冲区，避免每次重算都创建新数组
+        final int entityCount = this.regionizedWorldData.getEntityCount();
+        ensureBufferCapacity(entityCount);
+        final Entity[] allTicking = this.tickingBuffer;
         final int[] counter = {0};
         this.regionizedWorldData.forEachTickingEntity(entity -> {
             if (counter[0] < allTicking.length) {
@@ -150,7 +172,7 @@ public final class EntityPriorityScheduler {
         }
 
         // 计算每个 entity 到最近玩家的距离平方
-        final int[] bucketsIdx = new int[n];
+        final int[] bucketsIdx = this.bucketsIdxBuffer;
         if (players.isEmpty()) {
             // 无玩家：所有实体都视为"超远"（直接 skip）—— 安全策略
             for (int i = 0; i < n; i++) {
@@ -176,8 +198,8 @@ public final class EntityPriorityScheduler {
         }
 
         // 按桶索引 stable sort（保持 entityTickList 原顺序）
-        // IntArrays.stableSort 以 bucketsIdx[perm[i]] 升序排序 perm 数组
-        final int[] perm = new int[n];
+        // 修复：使用缓存的 perm 缓冲区
+        final int[] perm = this.permBuffer;
         for (int i = 0; i < n; i++) perm[i] = i;
         IntArrays.stableSort(perm, (a, b) -> Integer.compare(bucketsIdx[a], bucketsIdx[b]));
 

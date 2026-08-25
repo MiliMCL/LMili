@@ -148,10 +148,28 @@ public final class CrossRegionChunkPreloader {
                 lastCrossPreloadChunkKey.put(playerKey, predictedChunkKey);
                 lastCrossPreloadRadius.put(playerKey, effectiveRadius);
             } else {
+                // 修复：安全获取插件引用，避免服务器关闭时 getPlugins()[0] 抛出 ArrayIndexOutOfBoundsException
+                org.bukkit.plugin.Plugin[] plugins = org.bukkit.Bukkit.getPluginManager().getPlugins();
+                if (plugins.length == 0 || !plugins[0].isEnabled()) {
+                    LOGGER.debug("[CrossRegionChunkPreload] No available plugin for dispatch, skipping");
+                    return;
+                }
+                org.bukkit.plugin.Plugin plugin = plugins[0];
+                
+                // 修复：检查服务器是否正在关闭
+                if (Bukkit.getServer().isStopping()) {
+                    LOGGER.debug("[CrossRegionChunkPreload] Server is stopping, skipping cross-region preload");
+                    return;
+                }
+                
                 // 异步调度到主线程
                 Bukkit.getScheduler().runTask(
-                    org.bukkit.Bukkit.getPluginManager().getPlugins()[0],
+                    plugin,
                     () -> {
+                        // 再次检查服务器状态和插件状态
+                        if (Bukkit.getServer().isStopping() || !plugin.isEnabled()) {
+                            return;
+                        }
                         body.run();
                         lastCrossPreloadChunkKey.put(playerKey, predictedChunkKey);
                         lastCrossPreloadRadius.put(playerKey, effectiveRadius);
@@ -171,5 +189,20 @@ public final class CrossRegionChunkPreloader {
         final long key = (long) playerEntityId;
         lastCrossPreloadChunkKey.remove(key);
         lastCrossPreloadRadius.remove(key);
+    }
+
+    /**
+     * 清理所有缓存（服务器关闭时调用）。
+     */
+    public static void clearAllCache() {
+        lastCrossPreloadChunkKey.clear();
+        lastCrossPreloadRadius.clear();
+    }
+
+    /**
+     * 获取缓存大小（用于监控）。
+     */
+    public static int getCacheSize() {
+        return lastCrossPreloadChunkKey.size();
     }
 }

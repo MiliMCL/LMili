@@ -64,6 +64,10 @@ public final class ChunkTickDispatcher {
     private final AtomicInteger totalTimeouts = new AtomicInteger(0);
     private final AtomicInteger totalErrors = new AtomicInteger(0);
 
+    // ---- 修复：定期清理 stale pendingChunkFutures 的计数器 ----
+    private volatile long lastCleanupTime = 0;
+    private static final long CLEANUP_INTERVAL_MS = 30_000; // 30 秒清理一次
+
     public ChunkTickDispatcher(WorkerPoolManager poolManager,
                                 int parallelismThreshold,
                                 int sliceSize,
@@ -78,12 +82,32 @@ public final class ChunkTickDispatcher {
     }
 
     /**
+     * 清理已完成的 pendingChunkFutures 条目，防止内存泄漏。
+     * 在 dispatch 方法中定期调用。
+     */
+    private void cleanupStaleFutures() {
+        long now = System.currentTimeMillis();
+        if (now - lastCleanupTime < CLEANUP_INTERVAL_MS) {
+            return;
+        }
+        lastCleanupTime = now;
+        // 移除已完成的 futures
+        pendingChunkFutures.entrySet().removeIf(entry -> {
+            CompletableFuture<Void> future = entry.getValue();
+            return future == null || future.isDone();
+        });
+    }
+
+    /**
      * 分派 region chunk tick 任务 —— 主入口。
      *
      * <p>此方法在 region tick 线程上调用，会阻塞直到所有 chunk tick 完成或超时。</p>
      */
     public void dispatch(@NotNull final RegionTickContext context) {
         if (context.regionId == 0L) return;
+
+        // 修复：定期清理 stale pendingChunkFutures
+        cleanupStaleFutures();
 
         var chunks = context.getOwnedChunks();
         int chunkCount = chunks.size();

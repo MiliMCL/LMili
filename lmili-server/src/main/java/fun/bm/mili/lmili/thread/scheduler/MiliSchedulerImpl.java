@@ -228,6 +228,11 @@ public final class MiliSchedulerImpl implements MiliScheduler {
             ScheduledExecutorService scheduler = getDelayedScheduler();
             final ScheduledFuture<?>[] futureRef = new ScheduledFuture<?>[1];
             try {
+                // 修复：在调用 schedule 前再次检查 scheduler 是否仍然有效
+                // 防止在 getDelayedScheduler 返回后、schedule 调用前 scheduler 被关闭
+                if (scheduler.isShutdown()) {
+                    throw new RejectedExecutionException("Delayed scheduler is already shutdown");
+                }
                 ScheduledFuture<?> future = scheduler.schedule(() -> {
                     if (!handle.isCancelled()) {
                         if (task.isBlocking()) {
@@ -242,6 +247,7 @@ public final class MiliSchedulerImpl implements MiliScheduler {
                 // RISK-05 兜底：scheduler 在 schedule() 边界被 force shutdown
                 // 立即标记 handle 为失败，绝不留 PENDING
                 handle.completeExceptionally(ree);
+                LOGGER.warn("[MiliScheduler] Delayed task rejected: {}", ree.getMessage());
                 // RISK-13 修复：必须 release submit slot，不能跳过 finally
             }
 
@@ -571,21 +577,46 @@ public final class MiliSchedulerImpl implements MiliScheduler {
 
         @Override
         public boolean isOnOwningThread() {
-            // 简化实现：检查当前线程是否为 tick 线程
-            return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
-                    (net.minecraft.server.level.ServerLevel) entityRef.level(),
-                    0, 0); // 简化：实际需要根据 entity 位置计算 chunk
+            // 修复：根据实体实际位置计算 chunk 坐标，而不是硬编码 (0, 0)
+            try {
+                if (entityRef.level() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                    net.minecraft.world.entity.Entity entity = serverLevel.getEntity(entityRef.entityId());
+                    if (entity != null) {
+                        net.minecraft.core.BlockPos pos = entity.blockPosition();
+                        int chunkX = pos.getX() >> 4;
+                        int chunkZ = pos.getZ() >> 4;
+                        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
+                                serverLevel, chunkX, chunkZ);
+                    }
+                }
+            } catch (Exception e) {
+                // 如果无法获取位置信息，返回 false 以确保安全
+            }
+            return false;
         }
 
         @Override
         public void ensureOnOwningThread() throws EntityOrphanedException {
-            // 简化实现
+            // 修复：实现真正的线程所有权检查
+            if (!isOnOwningThread()) {
+                throw new EntityOrphanedException(
+                        entityRef.entityId(), null,
+                        EntityOrphanedException.Reason.TELEPORTED_REGION);
+            }
         }
 
         @Override
         public boolean isEntityAlive() {
-            // 简化实现：实际需要检查 entity 是否仍然存活
-            return true;
+            // 修复：实现真正的存活检查
+            try {
+                if (entityRef.level() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                    net.minecraft.world.entity.Entity entity = serverLevel.getEntity(entityRef.entityId());
+                    return entity != null && entity.isAlive();
+                }
+            } catch (Exception e) {
+                // 如果无法获取实体，假设已死亡
+            }
+            return false;
         }
 
         @Override

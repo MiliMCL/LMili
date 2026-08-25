@@ -355,22 +355,39 @@ public final class WorkStealingCoordinator {
         for (int i = skip; i < size && attempts < maxAttempts; i++) {
             RegionSlot slot = regionSlotIndex.get(i);
             if (slot != null) {
-                PollResult result = tryStealFromSlot(slot, localWorkerId);
-                if (result != null) return result;
+                // 修复：验证 slot 仍然存在于 regionSlots 中且是同一个 generation
+                if (isSlotValid(slot)) {
+                    PollResult result = tryStealFromSlot(slot, localWorkerId);
+                    if (result != null) return result;
+                }
                 attempts++;
             }
         }
         for (int i = 0; i < skip && attempts < maxAttempts; i++) {
             RegionSlot slot = regionSlotIndex.get(i);
             if (slot != null) {
-                PollResult result = tryStealFromSlot(slot, localWorkerId);
-                if (result != null) return result;
+                // 修复：验证 slot 仍然存在于 regionSlots 中且是同一个 generation
+                if (isSlotValid(slot)) {
+                    PollResult result = tryStealFromSlot(slot, localWorkerId);
+                    if (result != null) return result;
+                }
                 attempts++;
             }
         }
 
         failedSteals.increment();
         return null;
+    }
+
+    /**
+     * 修复：验证 slot 是否仍然有效（存在于 regionSlots 中且 generation 匹配）。
+     * 防止 regionSlotIndex 与 regionSlots 不一致导致的问题。
+     */
+    private boolean isSlotValid(RegionSlot slot) {
+        if (slot == null) return false;
+        RegionSlot currentSlot = regionSlots.get(slot.queue.regionId());
+        // 检查：slot 必须存在于 map 中，且 generation 必须匹配
+        return currentSlot == slot;
     }
 
     @Nullable

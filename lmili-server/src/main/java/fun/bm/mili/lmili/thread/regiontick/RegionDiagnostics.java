@@ -7,6 +7,8 @@ import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Region Tick 诊断统计 —— 收集性能指标和诊断信息。
+ *
+ * <p>修复：添加清空方法，允许运行时重置统计，避免长期运行后统计值过大。
  */
 public final class RegionDiagnostics {
 
@@ -27,6 +29,16 @@ public final class RegionDiagnostics {
      */
     public void recordError() {
         totalTickErrors.increment();
+    }
+
+    /**
+     * 修复：重置所有统计计数器。
+     * 用于周期性清空统计，避免 LongAdder 长期累加导致数值过大。
+     */
+    public void reset() {
+        totalTicksDispatched.reset();
+        totalTickErrors.reset();
+        maxTickDurationNanos.set(0);
     }
 
     /**

@@ -23,6 +23,16 @@ public class OptimizedConcurrentTable<X, Y, Z> extends ConcurrentTable<X, Y, Z> 
 
     @Override
     public void put(X x, Y y, Z z) {
+        // 修复：先检查是否已存在，避免重复操作
+        Set<Z> existing = null;
+        ConcurrentHashMap<Y, Set<Z>> inner = xyIndex.get(x);
+        if (inner != null) {
+            existing = inner.get(y);
+        }
+        if (existing != null && existing.contains(z)) {
+            return; // 已存在，无需重复添加
+        }
+
         if (flagX) {
             List<X> datas = getX(y, z);
             for (X x1 : datas) {
@@ -53,13 +63,14 @@ public class OptimizedConcurrentTable<X, Y, Z> extends ConcurrentTable<X, Y, Z> 
                 }
             }
         }
-        super.put(x, y, z, true);
+        // 修复：先更新索引，再调用 super.put()，确保索引与数据一致性
         xyIndex.computeIfAbsent(x, k -> new ConcurrentHashMap<>())
                 .computeIfAbsent(y, k -> ConcurrentHashMap.newKeySet()).add(z);
         yzIndex.computeIfAbsent(y, k -> new ConcurrentHashMap<>())
                 .computeIfAbsent(z, k -> ConcurrentHashMap.newKeySet()).add(x);
         zxIndex.computeIfAbsent(z, k -> new ConcurrentHashMap<>())
                 .computeIfAbsent(x, k -> ConcurrentHashMap.newKeySet()).add(y);
+        super.put(x, y, z, true);
     }
 
     @Override

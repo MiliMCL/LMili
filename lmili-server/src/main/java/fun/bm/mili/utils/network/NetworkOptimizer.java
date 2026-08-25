@@ -28,6 +28,12 @@ public class NetworkOptimizer {
     private static final LongAdder joinPacketsSent = new LongAdder();
     private static final LongAdder packetsRateLimited = new LongAdder();
 
+    /**
+     * 硬编码的最大缓存大小 — 即使配置为 0（无限制）也强制限制，防止 OOM。
+     * 修复：防止无界 map 增长导致内存泄漏。默认 10000 个实体条目。
+     */
+    private static final int HARD_MAX_CACHE_SIZE = 10000;
+
     private static final ConcurrentHashMap<java.util.UUID, Long> lastEntityTrackSend = new ConcurrentHashMap<>();
 
     // Per-player packet counter for the current tick, reset every tick via swap
@@ -40,7 +46,7 @@ public class NetworkOptimizer {
 
     // Periodic cleanup state
     private static volatile long lastCleanupTime = 0;
-    private static final long CLEANUP_INTERVAL_MS = 60_000; // 60 seconds
+    private static final long CLEANUP_INTERVAL_MS = 30_000; // 修复：从 60 秒缩短到 30 秒，更频繁清理
 
     // Adaptive compression state
     private static volatile int adaptiveCompressionLevel = -1;
@@ -201,15 +207,19 @@ public class NetworkOptimizer {
         }
         lastCleanupTime = now;
 
-        // Remove entries older than 60 seconds
-        long cutoff = now - 60_000;
+        // Remove entries older than 30 seconds (修复：从 60 秒缩短到 30 秒)
+        long cutoff = now - 30_000;
         lastEntityTrackSend.entrySet().removeIf(e -> e.getValue() < cutoff);
 
-        // Hard cap: if cache exceeds max size, remove oldest entries
-        int maxSize = NetworkOptimizerConfig.entityTrackCacheMaxSize;
-        if (maxSize > 0 && lastEntityTrackSend.size() > maxSize) {
+        // Hard cap: 使用配置值和硬编码最小值中的较小者
+        int configuredMaxSize = NetworkOptimizerConfig.entityTrackCacheMaxSize;
+        int effectiveMaxSize = configuredMaxSize > 0
+                ? Math.min(configuredMaxSize, HARD_MAX_CACHE_SIZE)
+                : HARD_MAX_CACHE_SIZE;
+
+        if (lastEntityTrackSend.size() > effectiveMaxSize) {
             // Remove oldest 25% of entries to avoid frequent cleanups
-            int toRemove = lastEntityTrackSend.size() - maxSize + (maxSize / 4);
+            int toRemove = lastEntityTrackSend.size() - effectiveMaxSize + (effectiveMaxSize / 4);
             lastEntityTrackSend.entrySet().stream()
                     .sorted(Map.Entry.comparingByValue())
                     .limit(toRemove)
@@ -221,8 +231,17 @@ public class NetworkOptimizer {
      * Force cleanup of stale entries (called externally every 60 seconds).
      */
     public static void cleanupStaleEntries() {
-        long cutoff = System.currentTimeMillis() - 60_000;
+        long cutoff = System.currentTimeMillis() - 30_000;
         lastEntityTrackSend.entrySet().removeIf(e -> e.getValue() < cutoff);
+
+        // 强制大小限制
+        if (lastEntityTrackSend.size() > HARD_MAX_CACHE_SIZE) {
+            int toRemove = lastEntityTrackSend.size() - HARD_MAX_CACHE_SIZE + (HARD_MAX_CACHE_SIZE / 4);
+            lastEntityTrackSend.entrySet().stream()
+                    .sorted(Map.Entry.comparingByValue())
+                    .limit(toRemove)
+                    .forEach(e -> lastEntityTrackSend.remove(e.getKey()));
+        }
     }
 
     public static Map<String, Object> getStats() {

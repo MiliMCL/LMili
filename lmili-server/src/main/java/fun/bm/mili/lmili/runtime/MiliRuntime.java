@@ -107,22 +107,28 @@ public final class MiliRuntime {
         }
         try {
             AdaptiveTPSManager.disable();
-        } catch (Throwable t) {
-            LOGGER.warn("[MiliRuntime] AdaptiveTPSManager.disable failed (ignored)", t);
+        // 修复：缩小异常捕获范围，只捕获 RuntimeException，让 Error 正常传播
+        } catch (RuntimeException e) {
+            LOGGER.warn("[MiliRuntime] AdaptiveTPSManager.disable failed (ignored)", e);
         }
         try {
             policy.initialize();
             for (RuntimeModule module : modules.values()) {
                 try {
                     module.onRuntimeStart(this);
-                } catch (Throwable t) {
-                    LOGGER.error("[MiliRuntime] module {} onRuntimeStart failed", module.name(), t);
+                } catch (RuntimeException e) {
+                    LOGGER.error("[MiliRuntime] module {} onRuntimeStart failed", module.name(), e);
+                // 修复：缩小异常捕获范围，只捕获 RuntimeException
                 }
             }
             policy.startControlCycle(global, metrics);
             LOGGER.info("[MiliRuntime] started (control cycle 10Hz, modules={})", modules.size());
-        } catch (Throwable t) {
-            LOGGER.error("[MiliRuntime] start failed", t);
+        // 修复：缩小异常捕获范围，让 Error（如 OOM）能够正常传播
+        } catch (RuntimeException e) {
+            LOGGER.error("[MiliRuntime] start failed", e);
+            // 尝试恢复到 NEW 状态，允许重新启动
+            lifecycle.compareAndSet(LifecycleState.STARTED, LifecycleState.NEW);
+            throw e;
         }
     }
 

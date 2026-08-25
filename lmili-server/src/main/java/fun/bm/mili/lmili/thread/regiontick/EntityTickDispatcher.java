@@ -27,8 +27,10 @@ public final class EntityTickDispatcher {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_SLOW_ENTITY_LOG = 20;
 
-    // 实体 tick 诊断队列 —— 记录最近 N 个慢实体信息（用于运维排查）
-    private final ConcurrentLinkedQueue<String> slowEntities = new ConcurrentLinkedQueue<>();
+    // 修复：使用有界队列替代 ConcurrentLinkedQueue，避免 size() 操作 O(n) 性能问题
+    // ConcurrentLinkedQueue.size() 需要遍历整个链表，在高频调用时成为瓶颈
+    private final java.util.concurrent.ArrayBlockingQueue<String> slowEntities =
+            new java.util.concurrent.ArrayBlockingQueue<>(MAX_SLOW_ENTITY_LOG);
 
     // Mili: 每 region 的实体 tick 指标（LongAdder 高并发累加器），用于现代运维诊断与自适应调优
     private final ConcurrentHashMap<Long, EntityTickMetrics> regionMetrics = new ConcurrentHashMap<>();
@@ -249,16 +251,21 @@ public final class EntityTickDispatcher {
                 entity.getType().toString(), entity.getId(),
                 entity.getX(), entity.getY(), entity.getZ(),
                 elapsedMs, regionId);
-        slowEntities.offer(entityInfo);
+        // 修复：使用有界队列，队列满时自动丢弃最旧条目
+        if (!slowEntities.offer(entityInfo)) {
+            // 队列已满，移除最旧条目后重新尝试
+            slowEntities.poll();
+            slowEntities.offer(entityInfo);
+        }
     }
 
     /**
      * 限制慢实体诊断队列大小（保留最近 N 条）。
+     * 修复：ArrayBlockingQueue 本身有界，无需手动 trim。
+     * 保留此方法用于兼容性。
      */
     private void trimSlowEntityLog() {
-        while (slowEntities.size() > MAX_SLOW_ENTITY_LOG) {
-            slowEntities.poll();
-        }
+        // ArrayBlockingQueue 自动维护大小限制，无需手动清理
     }
 
     /**
