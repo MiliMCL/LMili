@@ -199,9 +199,43 @@ public final class ModernDagTickExecutor implements RegionTickExecutor {
             final @NotNull RegionTickSlice slice,
             final @NotNull RegionTickContext context
     ) {
-        CompletionStage<Void> stage = executeSliceAsync(worker, slice, context, null);
-        // 等待 DAG 完成，确保不会 fire-and-forget
-        stage.toCompletableFuture().join();
+        // P0-2：保留 SAM 兼容路径 —— 通过 executeSliceStage 复用同一套非阻塞提交逻辑，
+        // 并把 join() 推迟到调用方需要同步等待的场景（默认实现已经做了）。
+        // 这是 legacy 兼容层；新的 ChunkTickDispatcher 路径应直接调用 executeSliceStage。
+        executeSliceStage(worker, slice, context).toCompletableFuture().join();
+    }
+
+    /**
+     * P0-2 新增：非阻塞的 slice 执行入口。
+     *
+     * <p>返回 {@link CompletionStage} 后立即返回，不阻塞调用线程（无论是 region tick
+     * 线程还是 slice worker 线程）。调用方负责把完成阶段连接到 slice barrier
+     * （{@code context.arriveSlice / failSlice + context.endTick()}），从而把"提交"
+     * 与"完成"分离。</p>
+     *
+     * <p>与 {@link #executeSlice}（legacy SAM）的区别：
+     * <ul>
+     *   <li>{@link #executeSlice}：提交后立即 {@code join()}，调用线程被阻塞直至 DAG 完成
+     *       —— 这正是计划 §2.1 要消除的"Region Tick 上的无意义 join 阻塞"。</li>
+     *   <li>{@link #executeSliceStage}：提交后立即返回；完成发生在节点实际完成时刻，
+     *       由调用方的 {@code whenComplete} 回调驱动 slice barrier。</li>
+     * </ul>
+     *
+     * <p><b>完成语义</b>（计划 §2.3）：
+     * <ul>
+     *   <li><b>Submit</b> —— 此方法返回时已成功（如适用）提交；不保证节点已执行完。</li>
+     *   <li><b>Complete</b> —— 所有 DAG 节点已执行完，对应 stage 正常完成。</li>
+     *   <li><b>Commit</b> —— 调用方在 whenComplete 回调内驱动 {@code arriveSlice / endTick}
+     *       才允许下一阶段 / 下一 tick 看到本次结果。</li>
+     * </ul>
+     */
+    @Override
+    public @NotNull CompletionStage<Void> executeSliceStage(
+            final @NotNull RegionTickWorker worker,
+            final @NotNull RegionTickSlice slice,
+            final @NotNull RegionTickContext context
+    ) {
+        return executeSliceAsync(worker, slice, context, null);
     }
 
     /**

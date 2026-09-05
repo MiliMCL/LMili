@@ -29,7 +29,7 @@ diff --git a/src/main/java/org/bukkit/World.java b/src/main/java/org/bukkit/Worl
      }
 +
 +    // Mili start - Tick regions api
-+    fun.bm.mili.lmili.api.ThreadedRegionizer getThreadedRegionizer();
++    @NotNull fun.bm.mili.lmili.api.ThreadedRegionizer getThreadedRegionizer();
 +    // Mili end - Tick regions api
  }
 

@@ -1,5 +1,6 @@
 package fun.bm.mili.lmili.thread.runtime.generation;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -73,6 +74,15 @@ public final class TickGeneration {
 
     /** 失败原因（如果有） */
     private volatile Throwable failure;
+
+    /**
+     * P0-5 §5.2：cancelToken —— 取消请求标记。
+     *
+     * <p>对应计划原则 "Future.cancel(true) 不等于任务已经停止"：本字段只表达
+     * *取消请求已发出*，不保证任务体立即停止。任何在完成/提交路径上的代码必须
+     * 检查 {@link #isCancelRequested()}，已被请求取消的 generation 不允许再 commit。</p>
+     */
+    private final AtomicBoolean cancelRequested = new AtomicBoolean(false);
 
     /**
      * 创建 TickGeneration。
@@ -211,14 +221,28 @@ public final class TickGeneration {
     /**
      * 取消 Generation —— 从 DRAINING 或 DEADLINE_EXCEEDED 转换到 CANCELLED。
      *
-     * @return true 如果转换成功
+     * <p>P0-5 §5.2：无论状态转换是否成功，cancelToken 都会被置位
+     * （{@link #isCancelRequested()} 变为 true）——取消请求本身是幂等的记录语义。</p>
+     *
+     * @return true 如果状态转换成功
      */
     public boolean cancel() {
+        this.cancelRequested.set(true);
         State current = state.get();
         if (current == State.COMPLETED || current == State.CANCELLED) {
             return false;
         }
         return state.compareAndSet(current, State.CANCELLED);
+    }
+
+    /**
+     * P0-5 §5.2：获取 cancelToken 状态 —— 取消请求是否已经发出。
+     *
+     * <p>true 表示 {@link #cancel()} 至少被调用过一次；不代表任务体已停止。
+     * 提交路径（endTick commit）必须拒绝已请求取消的 generation（cancel does not commit）。
+     */
+    public boolean isCancelRequested() {
+        return this.cancelRequested.get();
     }
 
     /**

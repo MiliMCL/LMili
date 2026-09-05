@@ -4,6 +4,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,11 +20,15 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>旧 Generation 的迟到完成不会影响新 Generation</li>
  * </ul>
  *
+ * <p><b>P0-2</b>：worker 线程使用 {@link RegionTickExecutor#executeSliceStage} 非阻塞提交，
+ * 把 slice barrier 完成通知交由 DAG 完成回调驱动；worker 线程不再因内部 join 而阻塞。</p>
+ *
  * <h3>线程模型</h3>
  * <ul>
  *   <li>每个 Worker 运行在独立线程上</li>
  *   <li>submit 可以从任意线程调用</li>
  *   <li>executeSlice 在 Worker 线程上执行</li>
+ *   <li>DAG 节点执行在 MiliScheduler worker 线程上（由 NodeScheduler 路由）</li>
  * </ul>
  */
 public final class RegionTickWorker implements Runnable {
@@ -79,6 +84,10 @@ public final class RegionTickWorker implements Runnable {
 
     /**
      * 执行 slice —— 使用 slice 携带的 generationId 进行完成通知。
+     *
+     * <p>P0-2 重构：使用 {@link RegionTickExecutor#executeSliceStage} 非阻塞提交，
+     * 把 slice barrier 完成通知交由 DAG 完成回调驱动；worker 线程自身不再同步阻塞。
+     * </p>
      */
     private void executeSlice(final RegionTickSlice slice) {
         RegionTickContext context = slice.context;
@@ -88,31 +97,62 @@ public final class RegionTickWorker implements Runnable {
         final long generationId = slice.getGenerationId();
 
         RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
-        if (executor == null) { context.arriveSlice(generationId); return; }
+        if (executor == null) {
+            // 没有执行器可用 → 同步登记到达（与未注册 executor 兼容）
+            context.arriveSlice(generationId);
+            return;
+        }
 
         int count = slice.size();
-        if (count == 0) { context.arriveSlice(generationId); return; }
+        if (count == 0) {
+            context.arriveSlice(generationId);
+            return;
+        }
 
+        CompletionStage<Void> sliceStage = null;
         try {
             // 更新 slice 状态
             slice.state = RegionTickSlice.SliceState.RUNNING;
 
-            executor.executeSlice(this, slice, context);
+            // P0-2：非阻塞提交。完成阶段在 DAG 真正完成时（在 scheduler worker 上）触发，
+            // 由 wireSliceCompletion 驱动 arriveSlice/failSlice —— 不再依赖 executor 内部 join。
+            sliceStage = executor.executeSliceStage(this, slice, context);
             // 修复：使用 LongAdder 保证原子递增
             this.chunksTicked.add(count);
             this.slicesExecuted.increment();
 
-            // 标记完成
+            // 标记完成（slice 提交完成，节点执行由 DAG 引擎 + scheduler 驱动）
             slice.state = RegionTickSlice.SliceState.COMPLETED;
         } catch (Throwable throwable) {
             com.mojang.logging.LogUtils.getClassLogger().error(
-                    "[RegionTickWorker] slice {} failed in region #{}", slice.sliceIndex, context.regionId, throwable);
+                    "[RegionTickWorker] slice {} failed for region #{}", slice.sliceIndex, context.regionId, throwable);
             context.failSlice(generationId, throwable);
             slice.state = RegionTickSlice.SliceState.CANCELLED;
         } finally {
-            // 使用 slice 携带的 generationId —— 不依赖"当前" Context generation
-            context.arriveSlice(generationId);
+            // P0-2：arriveSlice 不再由 worker 线程同步调用 —— 改为 DAG 完成回调驱动。
+            // 但如果 executor 抛出同步异常 / stage 为 null，则仍需同步登记到达以避免 slice 永久挂起。
+            if (sliceStage != null) {
+                wireSliceCompletion(context, generationId, sliceStage);
+            } else {
+                context.arriveSlice(generationId);
+            }
         }
+    }
+
+    /**
+     * P0-2 辅助：把 DAG 完成阶段连接到 slice barrier。{@code arriveSlice} 内部
+     * 校验 generationId，旧 generation 的迟到完成自动作为 late completion 丢弃。
+     */
+    private static void wireSliceCompletion(final RegionTickContext context,
+                                            final long generationId,
+                                            final CompletionStage<Void> stage) {
+        stage.whenComplete((result, error) -> {
+            if (error != null) {
+                context.failSlice(generationId, error);
+            } else {
+                context.arriveSlice(generationId);
+            }
+        });
     }
 
     public @Nullable RegionTickContext getCurrentContext() { return this.currentContext.get(); }

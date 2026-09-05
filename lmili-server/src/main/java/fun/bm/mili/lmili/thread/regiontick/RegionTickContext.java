@@ -78,12 +78,30 @@ public final class RegionTickContext {
     /** 当前活跃的 Generation */
     private final AtomicReference<TickGeneration> currentGeneration = new AtomicReference<>();
 
+    /**
+     * P0-4 §4.3：跨 owner 跨 tick 的 deferred chunk ops queue（属于本 region）。
+     *
+     * <p>由 region 内 slice 调用 {@link #scheduleCrossChunkForward} 入队；由调用方
+     * （典型为 region tick 主线程）通过 {@link DeferredChunkOps#drainAll} 或
+     * {@link DeferredChunkOps#moveToAndClear} 把 ops 路由到对应 owner region。</p>
+     */
+    private final DeferredChunkOps deferredChunkOps = new DeferredChunkOps();
+
     /** 上一个 Generation（用于诊断和 late completion 检测） */
     private volatile TickGeneration previousGeneration;
 
     private volatile CountDownLatch tickLatch;
     private volatile long tickStartNanos;
     private volatile long lastTickDurationNanos;
+
+    // ---- P1-2（§7）：cleanupStaleContexts 多因子判定所需的生命周期时间戳与关闭标记 ----
+    /** context 创建时间戳（纳秒，System.nanoTime 基准）。 */
+    private final long createdAtNanos = System.nanoTime();
+    /** 最近一次活动（tryBeginTick / endTick / close 成功路径）时间戳。 */
+    private volatile long lastActivityNanos = this.createdAtNanos;
+    /** 关闭标记 —— close() 置位；已关闭的 context 可被安全回收。 */
+    private final java.util.concurrent.atomic.AtomicBoolean closed =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
 
     /**
      * Region tick 状态 —— 使用 CAS 防止 tick 重叠。
@@ -116,6 +134,41 @@ public final class RegionTickContext {
         this.ownedChunks.set(LongLists.unmodifiable(new LongArrayList(chunks)));
     }
     public LongList getOwnedChunks() { return this.ownedChunks.get(); }
+
+    /**
+     * P0-4 §4.3：跨 owner 转发 —— 把一个修改 chunkPos 的 op 投递到该 chunkPos 真正归属
+     * regionId（caller 须事先解析 owner regionId）的 deferred queue。
+     *
+     * <p>本方法把 op 放入本 region context 持有的 {@link DeferredChunkOps} —— caller 在后续
+     * tick 或调度流程中调用 {@link DeferredChunkOps#moveToAndClear} 把 ops 按 ownerRegionId
+     * 路由到目标 owner 的 tick 上下文（典型实现：
+     * <pre>{@code
+     *   Deque<DeferredChunkOps.DeferredChunkOp> buf = new ArrayDeque<>();
+     *   context.getDeferredChunkOps().moveToAndClear(buf);
+     *   // 按 ownerRegionId 分组：
+     *   Map<Long, List<DeferredChunkOps.DeferredChunkOp>> byOwner =
+     *       buf.stream().collect(Collectors.groupingBy(o -> o.ownerRegionId));
+     *   // 路由到对应 owner：
+     *   byOwner.forEach((ownerId, ops) -> scheduler.submit(RegionTask.withRegionId(ownerId)));
+     * }</pre>
+     *
+     * @param chunkPos       目标 chunkPos
+     * @param ownerRegionId  chunkPos 真实归属 regionId
+     * @param category       修改类别（用于路由策略）
+     * @param op             待执行修改（必须能安全在 owner region tick thread 上运行）
+     */
+    public void scheduleCrossChunkForward(long chunkPos,
+                                          long ownerRegionId,
+                                          SliceOwnershipContract.MutableExternalCategory category,
+                                          Runnable op) {
+        this.deferredChunkOps.enqueue(new DeferredChunkOps.DeferredChunkOp(
+                chunkPos, ownerRegionId, category, op));
+    }
+
+    /**
+     * P0-4 §4.3：获取本 context 的 deferred queue（用于跨 owner 路由流程）。
+     */
+    public DeferredChunkOps getDeferredChunkOps() { return this.deferredChunkOps; }
 
     /**
      * 获取当前 Generation ID。
@@ -171,6 +224,8 @@ public final class RegionTickContext {
         // 初始化 tick 状态
         this.tickLatch = new CountDownLatch(sliceCount);
         this.tickStartNanos = System.nanoTime();
+        // P1-2：tick 启动即视为活动
+        this.lastActivityNanos = this.tickStartNanos;
 
         // 尝试从 CREATED 转换到 RUNNING
         newGen.tryBegin();
@@ -343,43 +398,72 @@ public final class RegionTickContext {
     /**
      * 结束 tick —— 记录耗时统计并根据 slice 完成情况决定状态。
      *
-     * <p>只有当所有 slice 都完成时才进入 COMPLETED，否则进入 DEADLINE_EXCEEDED → DRAINING → CANCELLED。
+     * <p>只有当所有 slice 都完成时才进入 COMPLETED，否则进入 DEADLINE_EXCEEDED → DRAINING → CANCELLED。</p>
+     *
+     * <h3>P0-5 §5.4：exactly-once 端到端保证</h3>
+     * <p>fallbackSingleSlice / dispatchParallelVirtual / dispatchParallelPlatform / timeout /
+     * exception 多条路径都可能调用 endTick —— 本方法通过
+     * {@code currentGeneration.getAndSet(null)} 原子声明本 generation 的结束权，
+     * 保证每个 generation 恰好 commit（COMPLETED）或 cancel（CANCELLED）一次：
+     * <ul>
+     *   <li>第二次及以后的 endTick 调用是无操作（仅记录诊断日志）</li>
+     *   <li>cancelToken 已置位（{@code isCancelRequested()}）的 generation 不允许 commit，
+     *       统计计数不会递增（cancel does not commit）</li>
+     * </ul>
      */
     public void endTick() {
-        long elapsed = System.nanoTime() - this.tickStartNanos;
-        this.lastTickDurationNanos = elapsed;
-
-        TickGeneration current = currentGeneration.get();
-        if (current == null) {
-            LOGGER.error("[RegionTickContext] endTick called with no active generation for region #{}", regionId);
+        // P0-5 §5.4：原子声明结束权 —— 谁拿到谁负责终结；拿不到说明已被其它路径结束。
+        final TickGeneration gen = currentGeneration.getAndSet(null);
+        if (gen == null) {
+            LOGGER.error("[RegionTickContext] endTick called with no active generation for region #{}"
+                    + " (double endTick attempt from: {})", regionId,
+                    Thread.currentThread().getName());
             return;
         }
+        this.previousGeneration = gen;
 
-        // 检查是否所有 slice 都已完成
-        if (current.allTasksCompleted()) {
+        long elapsed = System.nanoTime() - this.tickStartNanos;
+        this.lastTickDurationNanos = elapsed;
+        // P1-2：endTick 也是活动信号（commit 与 cancel 路径均算）
+        this.lastActivityNanos = System.nanoTime();
+
+        if (gen.isCancelRequested()) {
+            // P0-5 §5.4：cancel does not commit —— 取消请求已发出，绝不允许再计入完成统计。
+            gen.cancel();
+            tickState.set(TickGeneration.State.CANCELLED);
+            LOGGER.warn("[RegionTickContext] Tick already cancelled in region #{} gen={}: {}ms (slices={}/{})",
+                    regionId, gen.generationId(), elapsed / 1_000_000, gen.completedTasks(), gen.expectedTasks());
+        } else if (gen.allTasksCompleted()) {
             // 所有任务完成 —— 进入 DRAINING → COMPLETED
-            current.trySealFromRunning();
-            current.complete();
-            tickState.set(TickGeneration.State.COMPLETED);
+            gen.trySealFromRunning();
+            boolean committed = gen.complete();
+            if (committed) {
+                tickState.set(TickGeneration.State.COMPLETED);
 
-            this.totalTicksCompleted.increment();
-            this.totalTickTimeNanos.add(elapsed);
-            this.maxTickDurationNanos.accumulateAndGet(elapsed, Math::max);
+                this.totalTicksCompleted.increment();
+                this.totalTickTimeNanos.add(elapsed);
+                this.maxTickDurationNanos.accumulateAndGet(elapsed, Math::max);
 
-            if (elapsed / 1_000_000 > SLOW_TICK_WARNING_MS) {
-                LOGGER.warn("[RegionTickContext] Slow tick in region #{}: {}ms (chunks={}, slices={}/{})",
-                        regionId, elapsed / 1_000_000, ownedChunks.get().size(),
-                        current.completedTasks(), current.expectedTasks());
+                if (elapsed / 1_000_000 > SLOW_TICK_WARNING_MS) {
+                    LOGGER.warn("[RegionTickContext] Slow tick in region #{}: {}ms (chunks={}, slices={}/{})",
+                            regionId, elapsed / 1_000_000, ownedChunks.get().size(),
+                            gen.completedTasks(), gen.expectedTasks());
+                }
+            } else {
+                // CAS 失败：并发取消/超时路径已终结本 generation —— 不允许 commit。
+                tickState.set(gen.state());
+                LOGGER.warn("[RegionTickContext] endTick lost commit race for region #{} gen={} state={}",
+                        regionId, gen.generationId(), gen.state());
             }
         } else {
             // 有 slice 未完成 —— 进入 DEADLINE_EXCEEDED → DRAINING → CANCELLED
-            current.checkTimeout(System.nanoTime());
-            current.tryBeginDraining();
-            current.cancel();
+            gen.checkTimeout(System.nanoTime());
+            gen.tryBeginDraining();
+            gen.cancel();
             tickState.set(TickGeneration.State.CANCELLED);
 
             LOGGER.warn("[RegionTickContext] Tick cancelled in region #{}: {}ms (slices={}/{})",
-                    regionId, elapsed / 1_000_000, current.completedTasks(), current.expectedTasks());
+                    regionId, elapsed / 1_000_000, gen.completedTasks(), gen.expectedTasks());
         }
     }
 
@@ -453,6 +537,10 @@ public final class RegionTickContext {
      * <p>此方法幂等，多次调用安全。</p>
      */
     public void close() {
+        // P1-2：关闭标记 + 活动时间戳（供 stale 审计判定）
+        this.closed.set(true);
+        this.lastActivityNanos = System.nanoTime();
+
         // 1. 取消当前 Generation
         final TickGeneration gen = currentGeneration.getAndSet(null);
         if (gen != null) {
@@ -488,6 +576,14 @@ public final class RegionTickContext {
     public long getCurrentTick() { return generationCounter.get(); }
     public long getTotalLateCompletions() { return totalLateCompletions.sum(); }
     public long getTotalTimeouts() { return totalTimeouts.sum(); }
+
+    // ---- P1-2（§7）：stale 审计访问器 ----
+    /** context 是否已关闭（close() 已调用）。已关闭的 context 允许被回收。 */
+    public boolean isClosed() { return this.closed.get(); }
+    /** 最近一次活动（begin / end / close）的纳秒时间戳。 */
+    public long getLastActivityNanos() { return this.lastActivityNanos; }
+    /** context 创建时的纳秒时间戳。 */
+    public long getCreatedAtNanos() { return this.createdAtNanos; }
 
     public long getAverageTickDurationNanos() {
         long completed = totalTicksCompleted.sum();

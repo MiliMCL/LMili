@@ -38,7 +38,7 @@ paperweight {
         }
     }
 
-    val mili = forks.register("mili") {
+    val lmili = forks.register("lmili") {
         forks = folia
         upstream.patchRepo("paperServer") {
             upstreamRepo = folia.patchedRepo("paperServer")
@@ -54,7 +54,7 @@ paperweight {
         }
     }
 
-    activeFork = mili
+    activeFork = lmili
 
     updatingMinecraft {
         // oldPaperCommit = "d4fe85375af18bfa88f44d7c1e6a61904ae550cc"
@@ -427,7 +427,7 @@ tasks.registerRunTask("runPaperclip") {
 }
 
 fill {
-    project("mili")
+    project("lmili")
     versionFamily(paperweight.minecraftVersion.map { it.split(".", "-").takeWhile { part -> part.toIntOrNull() != null }.take(2).joinToString(".") })
     version(paperweight.minecraftVersion)
 

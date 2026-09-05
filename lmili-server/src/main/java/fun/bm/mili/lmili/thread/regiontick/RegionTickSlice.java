@@ -33,6 +33,13 @@ public final class RegionTickSlice {
     final long generationId;
 
     /**
+     * P0-4：slice ownership 合同（read-only chunks / forbidden chunks / mutable external）。
+     * 默认为 {@link SliceOwnershipContract#defaults()} —— 任何不可触发的写入路径都需
+     * 显式校验 {@link #canWrite(long)}。
+     */
+    final SliceOwnershipContract ownershipContract;
+
+    /**
      * Slice 状态 —— 追踪本 slice 的执行状态。
      */
     public enum SliceState {
@@ -52,10 +59,22 @@ public final class RegionTickSlice {
                            final long @NotNull [] chunkPositions,
                            final int sliceIndex,
                            final long generationId) {
+        this(context, chunkPositions, sliceIndex, generationId, SliceOwnershipContract.defaults());
+    }
+
+    /**
+     * P0-4：携带 ownership 合同的构造器。
+     */
+    public RegionTickSlice(final RegionTickContext context,
+                           final long @NotNull [] chunkPositions,
+                           final int sliceIndex,
+                           final long generationId,
+                           final SliceOwnershipContract ownershipContract) {
         this.context = Objects.requireNonNull(context, "context");
         this.chunkPositions = Objects.requireNonNull(chunkPositions, "chunkPositions");
         this.sliceIndex = sliceIndex;
         this.generationId = generationId;
+        this.ownershipContract = Objects.requireNonNull(ownershipContract, "ownershipContract");
     }
 
     /**
@@ -115,6 +134,32 @@ public final class RegionTickSlice {
     public int size() { return this.chunkPositions.length; }
     public long getChunkPos(int index) { return this.chunkPositions[index]; }
     public long @NotNull [] getChunkPositions() { return this.chunkPositions; }
+
+    /**
+     * P0-4：获取本 slice 的 ownership 合同（用于运行期校验 / 跨 chunk 转发路径）。
+     */
+    public SliceOwnershipContract getOwnershipContract() { return this.ownershipContract; }
+
+    /**
+     * P0-4 §4.2 验收：是否允许直接写入 chunkPos（own 内 + 不在 forbidden / read-only）。
+     */
+    public boolean canWrite(long chunkPos) {
+        return this.ownershipContract.canWrite(this.chunkPositions, chunkPos);
+    }
+
+    /**
+     * P0-4 §4.2 验收：是否允许读取 chunkPos（own ∪ read-only 范围内；不在 forbidden）。
+     */
+    public boolean canRead(long chunkPos) {
+        return this.ownershipContract.canRead(chunkPos);
+    }
+
+    /**
+     * P0-4：是否允许在外部状态类别下经由跨 owner 转发修改。
+     */
+    public boolean hasMutableExternal(SliceOwnershipContract.MutableExternalCategory category) {
+        return this.ownershipContract.hasMutableExternal(category);
+    }
 
     @Override
     public String toString() {

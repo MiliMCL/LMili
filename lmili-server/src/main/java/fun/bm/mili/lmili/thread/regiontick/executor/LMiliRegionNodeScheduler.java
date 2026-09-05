@@ -49,6 +49,14 @@ public final class LMiliRegionNodeScheduler {
     /** region handle 注册表（用于生命周期管理） */
     private final ConcurrentMap<Long, RegionHandle> regionHandles = new ConcurrentHashMap<>();
 
+    /**
+     * P1-1 / C3：region 销毁时清理 crossRegionPending + regionHandles 中对应条目。
+     */
+    public void onRegionDestroyed(long regionId) {
+        this.regionHandles.remove(regionId);
+        this.crossRegionPending.remove(regionId);
+    }
+
     /** 统计指标 */
     private final AtomicLong totalCrossRegionDispatches = new AtomicLong();
     private final AtomicLong totalCrossRegionExecutions = new AtomicLong();

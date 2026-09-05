@@ -37,6 +37,14 @@ public final class BudgetAllocator {
     /** 压力态 reserve 开关（CPU_PRESSURE 时关闭） */
     private volatile boolean reserveClosedByPolicy = false;
 
+    /**
+     * P1-1 / C3：region 销毁时清理 emaCache entry。
+     * 由 {@link fun.bm.mili.lmili.thread.runtime.lifecycle.RegionLifecycleManager} 调用。
+     */
+    public void onRegionDestroyed(long regionId) {
+        this.emaCache.remove(regionId);
+    }
+
     // ---- 性能优化：缓存 rarely-changing 值 ----
     /** CPU 核数缓存（启动后不变；避免每次 allocate 调用 availableProcessors 原生调用） */
     private final int cachedProcessors;

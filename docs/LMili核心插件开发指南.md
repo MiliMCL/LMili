@@ -203,7 +203,7 @@ LMili 引入了基于 virtual thread 的"挂起式"调度器 API（挂起-yield 
 
 `Mili` 类提供三个静态方法：
 
-- `Mili.scheduler()` —— 获取全局 Scheduler 实例。如果 RegionTickPool 未启用，返回一个 no-op 调度器（所有调用不执行也不抛异常）。
+- `Mili.scheduler()` —— 获取全局 Scheduler 实例；服务端启动完成前会返回 no-op 调度器。
 - `Mili.isSupported()` —— 检查 RegionTickPool 是否已初始化，用于运行时检测。
 - `Mili.version()` —— 返回调度器版本字符串（如 "4.0.0-public"），未初始化返回 "unknown"。
 
@@ -469,11 +469,11 @@ manager.removePhotographer("rec-001");
 
 ### 8.1 RegionTickPool — 独立 tick 调度增强
 
-LMili 允许通过 `lmili_config.toml` 中的 `experiment.region_tick_pool.enabled` 启用 RegionTickPool。该功能将 Folia 的"每区域独占一个 tick 线程"改为"共享 worker 池 + 优先级调度"，显著降低大量空闲 region 时的 CPU 占用。
+LMili 的 RegionTickPool 已永久启用，无需也不支持 `experiment.region_tick_pool.enabled` 开关。它将 Folia 的"每区域独占一个 tick 线程"改为"共享 worker 池 + 优先级调度"，显著降低大量空闲 region 时的 CPU 占用。
 
-启用 RegionTickPool 后，Mili 调度器 API（Scheduler / EntityScheduler）才会生效。如果未启用或使用 no-op 调度器，所有 `Mili.scheduler()` 调用都是空操作。
+RegionTickPool 初始化完成后，Mili 调度器 API（Scheduler / EntityScheduler）即可使用；在服务端启动或关闭阶段，`Mili.scheduler()` 可能暂时返回 no-op 调度器。
 
-RegionTickPool 启用后会禁用 RegionBalancer —— 互不共存。
+RegionBalancer 已废弃并由 RegionTickPool 完全替代。
 
 ### 8.2 异常安全性差异
 
@@ -518,7 +518,6 @@ LMili 使用纯 Java 的 night-config TOML 配置文件系统（文件：`lmili_
 
 | 配置键 | 默认值 | 热重载 | 说明 |
 |--------|--------|--------|------|
-| `experiment.region_tick_pool.enabled` | false | NO | 启用 RegionTickPool 调度器增强 |
 | `experiment.region_tick_pool.use_virtual_threads` | true | YES | 使用 virtual thread 作为 worker |
 | `experiment.region_tick_pool.worker_count` | CPU-1 | NO | worker 线程总数 |
 | `experiment.cross_region_helper.enabled` | true | YES | 启用跨区事件队列（实体伤害/方块通知等） |

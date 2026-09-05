@@ -32,7 +32,7 @@ diff --git a/src/main/java/org/bukkit/Bukkit.java b/src/main/java/org/bukkit/Buk
      // Leaves end - Photographer API
 +
 +    // Leaves start - Bytebuf API
-+    public static org.leavesmc.leaves.bytebuf.BytebufAllocator getBytebufManager() {
++    public static @NotNull org.leavesmc.leaves.bytebuf.BytebufAllocator getBytebufManager() {
 +        return server.getBytebufAllocator();
 +    }
 +    // Leaves end - Bytebuf API
@@ -56,7 +56,7 @@ diff --git a/src/main/java/org/bukkit/Server.java b/src/main/java/org/bukkit/Ser
      // Leaves end - Photographer API
 +
 +    // Leaves start - Bytebuf API
-+    org.leavesmc.leaves.bytebuf.BytebufAllocator getBytebufAllocator();
++    @NotNull org.leavesmc.leaves.bytebuf.BytebufAllocator getBytebufAllocator();
 +    // Leaves end - Bytebuf API
  }
 

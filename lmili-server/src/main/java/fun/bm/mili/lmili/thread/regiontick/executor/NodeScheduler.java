@@ -23,7 +23,10 @@ import org.jetbrains.annotations.NotNull;
  *
  * <h3>实现策略</h3>
  * <ul>
- *   <li>{@link SameRegionNodeScheduler} —— 同 region 快路径 + global 路径</li>
+ *   <li>{@link MiliSchedulerNodeScheduler} —— 通过共享 {@link MiliScheduler} 提交节点
+ *       （P0-1 生产默认路径：DAG → MiliScheduler → Region Worker / Global Scheduler）</li>
+ *   <li>{@link SameRegionNodeScheduler} —— 同 region 快路径 + global 路径（未接入共享
+ *       scheduler 时的安全 fallback）</li>
  *   <li>{@link CompositeNodeScheduler} —— 按 regionId 自动路由</li>
  * </ul>
  *

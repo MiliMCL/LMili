@@ -33,6 +33,13 @@ public final class SchedulerController {
     private final ConcurrentHashMap<Long, Long> heldRegions = new ConcurrentHashMap<>();
     private final AtomicLong snapshotFailures = new AtomicLong();
 
+    /**
+     * P1-1 / C3：region 销毁时清理 heldRegions entry。
+     */
+    public void onRegionDestroyed(long regionId) {
+        this.heldRegions.remove(regionId);
+    }
+
     /** 装配期绑定共享 scheduler（MiliRuntimeHolder 装配路径调用；晚绑定，null 安全） */
     public void bind(MiliScheduler scheduler) {
         if (scheduler != null) {

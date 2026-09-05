@@ -35,6 +35,17 @@ public final class WorkStealingCoordinator {
 
     private final int workerCount;
     private final ConcurrentHashMap<Long, RegionSlot> regionSlots;
+
+    /**
+     * P1-1 / C3：region 销毁时清理 regionSlots + regionSlotIndex 中对应条目。
+     * 由 {@link fun.bm.mili.lmili.thread.runtime.lifecycle.RegionLifecycleManager} 调用。
+     */
+    public void onRegionDestroyed(long regionId) {
+        RegionSlot slot = this.regionSlots.remove(regionId);
+        if (slot != null) {
+            this.regionSlotIndex.remove(slot);
+        }
+    }
     // 性能优化：维护 region 索引，避免 stealWork 遍历 ConcurrentHashMap.entrySet()
     private final CopyOnWriteArrayList<RegionSlot> regionSlotIndex;
     private final WorkerState[] workers;

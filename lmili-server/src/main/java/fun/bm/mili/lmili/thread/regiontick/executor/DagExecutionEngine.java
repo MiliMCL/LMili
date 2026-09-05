@@ -184,6 +184,30 @@ public final class DagExecutionEngine {
                 return; // 执行前再次检查取消状态
             }
 
+            // C2-3 修复：在 body 真正执行前验证当前 worker 持有目标 region 的 ownership
+            // （或节点本身是 GLOBAL_REGION_ID —— 全局节点不绑定任何 region）。
+            // 防止"未持有 token 的线程误执行 region-owned body"。
+            // SchedulerWorker 在写入 ownedRegionId 后才调用 task.execute()，此校验是
+            // "ownership token 必须真实绑定到当前 region"的硬性兜底；失败时把 DAG fail，
+            // 完成阶段以异常结束，调用方必能观察到失败（不会静默继续）。
+            if (nodeRegionId != CompiledDag.GLOBAL_REGION_ID) {
+                fun.bm.mili.lmili.thread.scheduler.MiliTickThread self =
+                        fun.bm.mili.lmili.thread.scheduler.MiliTickThread.currentOrNull();
+                if (self == null || !self.ownsRegion(nodeRegionId)) {
+                    IllegalStateException ownershipViolation = new IllegalStateException(
+                            "[DAG] Ownership violation: thread " + Thread.currentThread().getName()
+                                    + " does not own region #" + nodeRegionId
+                                    + " required by DAG node " + nodeId);
+                    LOGGER.error("[DAG] Refusing to execute node {} — {}", nodeId, ownershipViolation.getMessage());
+                    state.markFailed();
+                    handle.fail(ownershipViolation);
+                    if (tickCtx != null) {
+                        tickCtx.reportFailure(ownershipViolation);
+                    }
+                    return;
+                }
+            }
+
             try {
                 // 创建执行上下文
                 DagExecutionContextImpl ctx = new DagExecutionContextImpl(nodeId, tick);
@@ -208,14 +232,29 @@ public final class DagExecutionEngine {
 
             // 节点完成，原子递减后继节点入度
             IntList successors = dag.successors(nodeId);
-            for (int i = 0; i < successors.size(); i++) {
-                int succId = successors.getInt(i);
-                // 原子递减入度 —— 多个 predecessor 可能同时完成
-                // 只有最后一个将入度降为 0 的线程才会提交该后继节点
-                if (state.decrementDependency(succId)) {
-                    // 入度降为 0，派发后继节点（通过 NodeScheduler 路由）
-                    submitNode(dag, nodeScheduler, handle, state, succId, tick, currentRegionContext, tickCtx);
+            try {
+                for (int i = 0; i < successors.size(); i++) {
+                    int succId = successors.getInt(i);
+                    // 原子递减入度 —— 多个 predecessor 可能同时完成
+                    // 只有最后一个将入度降为 0 的线程才会提交该后继节点
+                    if (state.decrementDependency(succId)) {
+                        // 入度降为 0，派发后继节点（通过 NodeScheduler 路由）
+                        submitNode(dag, nodeScheduler, handle, state, succId, tick, currentRegionContext, tickCtx);
+                    }
                 }
+            } catch (Throwable dispatchFailure) {
+                // P0-1：后继节点派发失败（例如共享 MiliScheduler 在 DAG 执行中途关闭，
+                // NodeScheduler 抛 DagSchedulerUnavailableException）。
+                // body 在 worker 线程上执行时，此异常绝不能逃逸 —— 否则 DAG 完成阶段
+                // 永远不会触发（节点既未完成也未失败），join() 永久挂起 = 静默吞 tick。
+                // 这里显式 fail 整个 DAG，完成阶段以异常结束，调用方必能观察到失败。
+                LOGGER.error("Failed to dispatch successor nodes of DAG node {} — failing DAG", nodeId, dispatchFailure);
+                state.markFailed();
+                handle.fail(dispatchFailure);
+                if (tickCtx != null) {
+                    tickCtx.reportFailure(dispatchFailure);
+                }
+                return;
             }
 
             // 标记完成

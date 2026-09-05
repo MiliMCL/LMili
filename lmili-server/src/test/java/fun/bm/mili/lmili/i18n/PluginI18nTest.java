@@ -142,7 +142,8 @@ class PluginI18nTest {
         // 现有 I18nManager 的语义：get("missing") → "missing"；get(null) 未定义。
         // PluginI18n 显式保护：null key → null（避免 NPE 给上游）。
         assertEquals(null, PluginI18n.get(PLUGIN_ID, (String) null));
-        assertEquals(null, PluginI18n.get(PLUGIN_ID, "en_us", null));
+        // 显式选 (PluginId, String, String) 重载：否则 null 既匹配 Object... 也匹配 String，引起歧义
+        assertEquals(null, PluginI18n.get(PLUGIN_ID, "en_us", (String) null));
         assertFalse(PluginI18n.has(PLUGIN_ID, null));
     }
 

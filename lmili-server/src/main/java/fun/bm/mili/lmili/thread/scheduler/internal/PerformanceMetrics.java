@@ -42,6 +42,15 @@ public final class PerformanceMetrics {
     private final ConcurrentHashMap<Long, RegionMetrics> regionMetrics = new ConcurrentHashMap<>();
     private final AtomicLong activeRegionCount = new AtomicLong(0);
 
+    /**
+     * P1-1 / C3：region 销毁时清理 regionMetrics entry 并递减 activeRegionCount。
+     */
+    public void onRegionDestroyed(long regionId) {
+        if (this.regionMetrics.remove(regionId) != null) {
+            this.activeRegionCount.decrementAndGet();
+        }
+    }
+
     // ---- 直方图（用于 P99 计算）----
     private final AtomicLongArray histogram = new AtomicLongArray(BUCKET_COUNT);
     private static final int BUCKET_COUNT = 64;

@@ -57,6 +57,13 @@ public final class UnifiedRuntime {
     /** Region 成本预测器 */
     private final ConcurrentHashMap<Long, SliceCostCalculator.RegionCostPredictor> regionPredictors = new ConcurrentHashMap<>();
 
+    /**
+     * P1-1 / C3：region 销毁时清理 regionPredictors entry。
+     */
+    public void onRegionDestroyed(long regionId) {
+        this.regionPredictors.remove(regionId);
+    }
+
     /** 运行状态 */
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicBoolean[] parkedWorkers;

@@ -170,7 +170,7 @@ Carrier 线程数 = `Runtime.getRuntime().availableProcessors()`（虚拟线程�
 | JDK 版本 | 25+（构建与运行均需要） |
 | Folia API 兼容性 | 保留完整 |
 | 单世界 | 支持 |
-| RegionBalancer 共存 | 互斥（启用 RegionTickPool 自动禁用 RegionBalancer） |
+| RegionBalancer 共存 | 不支持（已被 RegionTickPool 替代） |
 
 ### 5.2 兼容性待验证/已知限制
 
@@ -181,11 +181,11 @@ Carrier 线程数 = `Runtime.getRuntime().availableProcessors()`（虚拟线程�
 | Entity tick 并行化 | 未实现 | Entity tick 仍然保持 Folia 原生串行行为 |
 | 插件兼容性 | 大部分兼容 | 依赖 Folia 原生异步行为的插件可能需要适配 |
 | 实体传送 | 保留 Folia 原生修复 | 传送逻辑使用已有补丁，不经过 RegionTickPool |
-| 生产环境稳定性 | 实验阶段 | `enabled = false`（默认禁用），需充分测试 |
+| 生产环境稳定性 | 需验证 | RegionTickPool 已永久启用；生产部署前需充分压测 |
 
 ### 5.3 实验性质声明
 
-RegionTickPool 当前在配置中标记为**实验性功能**（`enabled = false`）。Mili 团队建议：
+RegionTickPool 是当前服务端的固定调度路径，配置中不提供开关。Mili 团队建议：
 - 先在测试环境验证
 - 逐步增加玩家数量观察稳定性
 - 关注 `RegionDiagnostics` 输出的诊断信息
@@ -198,9 +198,6 @@ RegionTickPool 当前在配置中标记为**实验性功能**（`enabled = false
 ```toml
 # region_tick_pool.toml
 [region_tick_pool]
-# 是否启用 RegionTickPool（默认 false）
-enabled = false
-
 # Worker 线程数（默认 CPU 核心数 - 1）
 worker-count = 0
 

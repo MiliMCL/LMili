@@ -38,6 +38,13 @@ public final class TickMonitorHook {
     /** 当前 region tick 开始时间（按 region ID） */
     private final ConcurrentHashMap<Long, Long> regionTickStartTimes = new ConcurrentHashMap<>();
 
+    /**
+     * P1-1 / C3：region 销毁时清理 regionTickStartTimes entry。
+     */
+    public void onRegionDestroyed(long regionId) {
+        this.regionTickStartTimes.remove(regionId);
+    }
+
     /** 上一次 tick 耗时 */
     private volatile long lastTickDurationNanos;
 

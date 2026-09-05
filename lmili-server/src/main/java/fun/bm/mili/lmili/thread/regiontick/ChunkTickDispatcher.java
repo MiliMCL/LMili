@@ -155,6 +155,11 @@ public final class ChunkTickDispatcher {
 
     /**
      * 单 slice 同步 tick —— 小 region 专用。
+     *
+     * <p>P0-2 重构：移除内部 {@code executeSlice().join()} 的 region tick 线程阻塞。
+     * 改为：提交 DAG → 立即返回；调用 {@code awaitTickCompletion()} 在统一的 slice
+     * barrier 上等待 DAG 完成回调驱动 {@code arriveSlice}。这正是计划 §2.2 要求的
+     * "submit DAG → continue → Completion Barrier" 语义。</p>
      */
     private void dispatchSingleSlice(@NotNull final RegionTickContext context, final long[] chunkArray) {
         long deadline = System.nanoTime() + TICK_INTERVAL_NANOS;
@@ -170,14 +175,29 @@ public final class ChunkTickDispatcher {
             RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
             if (executor != null) {
                 RegionTickSlice slice = new RegionTickSlice(context, chunkArray, 0, generationId);
-                executor.executeSlice(null, slice, context);
+                // P0-2：非阻塞提交；返回 CompletionStage 表示 DAG 完成（成功/失败/取消）。
+                CompletionStage<Void> stage = executor.executeSliceStage(null, slice, context);
+                // 连接完成阶段到 slice barrier —— arriveSlice/failSlice 由 DAG 完成回调驱动，
+                // 而不是 region tick 线程同步调用。endTick 由调用方（外层 finally）执行。
+                wireSliceCompletion(context, generationId, stage);
+            } else {
+                // 没有注册 executor（极少见 —— 通常至少有 ModernDagTickExecutor）→
+                // 同步登记到达，避免 awaitTickCompletion 永久等待。
+                context.arriveSlice(generationId);
+            }
+            // P0-2：在统一的 slice barrier 上等待 DAG 完成（替代旧的内部 join()）。
+            // tick 线程被 CountDownLatch.await 阻塞，但不再因 executor 实现细节而被卡死。
+            if (!context.awaitTickCompletion()) {
+                totalTimeouts.incrementAndGet();
+                LOGGER.warn("[RegionTickPool] Single-slice tick timed out for region #{} "
+                                + "(completed={}/{})",
+                        context.regionId, context.getCompletedSlices(), context.getExpectedSlices());
+                context.checkTimeout();
             }
         } catch (Throwable throwable) {
             LOGGER.error("[RegionTickPool] Single-slice tick failed for region #{}", context.regionId, throwable);
             context.failSlice(generationId, throwable);
         } finally {
-            // 确保 slice 完成计数和 tick 状态恢复
-            context.arriveSlice(generationId);
             context.endTick();
         }
     }
@@ -244,10 +264,12 @@ public final class ChunkTickDispatcher {
                     // 在虚拟线程中设置 region data 回退
                     RegionDataThreadLocal.setCurrent(regionData);
                     long sliceStartNanos = System.nanoTime();
+                    CompletionStage<Void> sliceStage = null;
                     try {
                         RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
                         if (executor != null) {
-                            executor.executeSlice(null, slice, context);
+                            // P0-2：非阻塞提交；返回 CompletionStage 表示 DAG 完成（成功/失败/取消）。
+                            sliceStage = executor.executeSliceStage(null, slice, context);
                         }
                     } catch (Throwable throwable) {
                         LOGGER.error("[RegionTickPool] Virtual slice #{} failed for region #{}",
@@ -258,7 +280,16 @@ public final class ChunkTickDispatcher {
                         // P1: 记录 slice 执行时间用于 Adaptive Slicing
                         long sliceElapsedNanos = System.nanoTime() - sliceStartNanos;
                         recordSliceExecution(regionId, chunksInSlice, sliceElapsedNanos);
-                        context.arriveSlice(generationId);
+                        // P0-2：arriveSlice 不再在 slice 虚拟线程同步调用 —— 改为由 DAG
+                        // 完成回调（wireSliceCompletion）在 worker 线程上驱动。这避免了
+                        // "tick thread 被 executor.join() 阻塞" 的旧反模式，并保证
+                        // arriveSlice 在 DAG 真正完成时才发生（generation 隔离）。
+                        if (sliceStage != null) {
+                            wireSliceCompletion(context, generationId, sliceStage);
+                        } else {
+                            // 没有执行器可用 → 同步登记到达（与未注册 executor 兼容）
+                            context.arriveSlice(generationId);
+                        }
                     }
                 }, poolManager.getExecutor());
             }
@@ -380,6 +411,25 @@ public final class ChunkTickDispatcher {
     }
 
     /**
+     * P0-2：把 executor.executeSliceStage 的 CompletionStage 连接到 slice barrier。
+     * arriveSlice/failSlice 由 DAG 完成回调驱动（旧反模式是 region tick 线程同步
+     * 调用），endTick 由外层调用方（dispatchSingleSlice / dispatchParallel* 的 finally）调用。
+     *
+     * <p>Generation 隔离由 {@link RegionTickContext#arriveSlice(long)} 内部校验
+     * （currentGeneration.generationId() != 到达 generationId 时作为 late completion 丢弃）。</p>
+     */
+    private static void wireSliceCompletion(RegionTickContext context, long generationId,
+                                            java.util.concurrent.CompletionStage<Void> stage) {
+        stage.whenComplete((result, error) -> {
+            if (error != null) {
+                context.failSlice(generationId, error);
+            } else {
+                context.arriveSlice(generationId);
+            }
+        });
+    }
+
+    /**
      * 捕获当前 region 的 RegionizedWorldData。
      */
     private RegionizedWorldData captureRegionData(@NotNull final RegionTickContext context) {
@@ -396,19 +446,25 @@ public final class ChunkTickDispatcher {
 
     /**
      * 回退到单线程执行 —— 当无法获取 region data 或无可用 worker 时使用。
+     *
+     * <p>P0-2 重构：与 {@link #dispatchSingleSlice} 一致，使用非阻塞提交 + barrier 等待。</p>
      */
     private void fallbackSingleSlice(@NotNull final RegionTickContext context, final long[] chunkArray, final long generationId) {
         try {
             RegionTickExecutor executor = RegionTickExecutor.getRegisteredExecutor();
             if (executor != null) {
                 RegionTickSlice slice = new RegionTickSlice(context, chunkArray, 0, generationId);
-                executor.executeSlice(null, slice, context);
+                CompletionStage<Void> stage = executor.executeSliceStage(null, slice, context);
+                wireSliceCompletion(context, generationId, stage);
+            }
+            if (!context.awaitTickCompletion()) {
+                totalTimeouts.incrementAndGet();
+                context.checkTimeout();
             }
         } catch (Throwable throwable) {
             LOGGER.error("[RegionTickPool] Fallback single-slice tick failed for region #{}", context.regionId, throwable);
             context.failSlice(generationId, throwable);
         } finally {
-            context.arriveSlice(generationId);
             context.endTick();
         }
     }

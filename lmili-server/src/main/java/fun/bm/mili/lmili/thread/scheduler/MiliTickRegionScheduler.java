@@ -127,6 +127,14 @@ public final class MiliTickRegionScheduler {
     // 无限增长问题。
     private static final ConcurrentHashMap<Long, TickTask> REGISTRY = new ConcurrentHashMap<>();
 
+    /**
+     * P1-1 / C4：region 销毁时清理静态 REGISTRY entry。
+     * 防止静态 map 在长时间运行后无限累积（每个被销毁的 region 都曾留下一个 TickTask）。
+     */
+    public static void onRegionDestroyed(long regionId) {
+        REGISTRY.remove(regionId);
+    }
+
     // ---- R3-FIX: region 暂时不可获取时的重试退避（避免触发服务器关闭） ----
     /** 重试退避的初始延迟（ms） */
     private static final long RETRY_BACKOFF_INITIAL_MS = 5L;

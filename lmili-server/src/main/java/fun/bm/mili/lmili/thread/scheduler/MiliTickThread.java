@@ -196,6 +196,49 @@ public class MiliTickThread extends TickThread {
     }
 
     /**
+     * P0-3 边界校验：同时检查 MiliTickThread 身份 + ownership + 与给定上下文匹配。
+     *
+     * <p>这是 state ownership matrix（{@code docs/Parallel-Tick-State-Ownership.md}）
+     * 的最小硬性入口。适用于 region-owned state 访问之前的同步校验：
+     * <pre>{@code
+     *   MiliTickThread.currentOrNull().verifyOwnershipFor(context);
+     * }</pre>
+     *
+     * <p>校验条件：
+     * <ol>
+     *   <li>当前线程必须是 {@link MiliTickThread}</li>
+     *   <li>{@code ownedRegionId} == {@code context.regionId}</li>
+     *   <li>{@code ownedTokenGeneration != 0}（说明当前已持有有效 ExecutionToken）</li>
+     * </ol>
+     *
+     * <p>注：本方法故意不校验 token generation 与 tick generationId 一致。token 的 generation
+     * 来自 {@code ExecutionToken.generation()}（每次 acquire 自增，与本 tick 是否是新 tick
+     * 无关）。Late completion 的防护由 {@code RegionTickContext.arriveSlice(long)} 内部
+     * generationId 比较提供，不需要在此处冗余校验。</p>
+     *
+     * @throws IllegalStateException 任一条件不满足
+     */
+    public void verifyOwnershipFor(final fun.bm.mili.lmili.thread.regiontick.RegionTickContext context) {
+        if (!(Thread.currentThread() instanceof MiliTickThread self)) {
+            throw new IllegalStateException(
+                    "[MiliTickThread] Ownership violation: current thread is not a MiliTickThread ("
+                            + Thread.currentThread().getName() + ")");
+        }
+        long ownedId = self.ownedRegionId.get();
+        long ownedGen = self.ownedTokenGeneration.get();
+        if (ownedGen == 0L) {
+            throw new IllegalStateException(
+                    "[MiliTickThread] Ownership violation: thread " + self.getName()
+                            + " has never acquired a valid ExecutionToken (generation=0)");
+        }
+        if (ownedId != context.regionId) {
+            throw new IllegalStateException(
+                    "[MiliTickThread] Ownership violation: thread " + self.getName()
+                            + " owns region #" + ownedId + " but context is for region #" + context.regionId);
+        }
+    }
+
+    /**
      * RISK-01 修复：诊断用 —— 获取当前 owned generation（0 表示无）。
      */
     public long getOwnedTokenGeneration() {

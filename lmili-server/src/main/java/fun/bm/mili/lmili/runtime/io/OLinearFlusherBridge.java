@@ -40,6 +40,15 @@ public final class OLinearFlusherBridge implements IOStateProbe, FlusherObserver
     // ---- 优先级映射（regionId → FlushPriority）----
     private final ConcurrentHashMap<Long, FlushPriority> priorities = new ConcurrentHashMap<>();
 
+    /**
+     * P1-1 / C3：region 销毁时清理 priorities + fileRegions 中对应条目。
+     */
+    public void onRegionDestroyed(long regionId) {
+        this.priorities.remove(regionId);
+        // 反向索引清理：移除所有映射到该 regionId 的 file entries
+        this.fileRegions.entrySet().removeIf(e -> e.getValue() != null && e.getValue() == regionId);
+    }
+
     // ---- 文件 ↔ regionId 映射（观察者回调只有 file 句柄）----
     private final ConcurrentHashMap<OptimizedLinearRegionFile, Long> fileRegions = new ConcurrentHashMap<>();
 
